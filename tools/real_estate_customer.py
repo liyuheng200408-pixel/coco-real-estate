@@ -1,0 +1,196 @@
+"""
+Coco 房产工具 - 客户管理
+"""
+import json
+from tools.registry import registry
+
+
+def _get_db():
+    from agent.real_estate_db import get_real_estate_db
+    return get_real_estate_db()
+
+
+def add_customer(
+    name: str,
+    phone: str = None,
+    wechat: str = None,
+    tier: str = 'C',
+    budget_min: int = None,
+    budget_max: int = None,
+    area_pref: str = None,
+    layout_pref: str = None,
+    location: str = None,
+    renovation: str = None,
+    notes: str = None,
+    source: str = None,
+    task_id: str = None,
+) -> str:
+    """添加新客户到系统"""
+    db = _get_db()
+    result = db.add_customer(
+        name=name, phone=phone, wechat=wechat, tier=tier,
+        budget_min=budget_min, budget_max=budget_max,
+        area_pref=area_pref, layout_pref=layout_pref,
+        location=location, renovation=renovation,
+        notes=notes, source=source,
+    )
+    return json.dumps({"success": True, "customer": result}, ensure_ascii=False)
+
+
+def update_customer(
+    customer_id: int,
+    name: str = None,
+    phone: str = None,
+    wechat: str = None,
+    tier: str = None,
+    budget_min: int = None,
+    budget_max: int = None,
+    area_pref: str = None,
+    layout_pref: str = None,
+    location: str = None,
+    renovation: str = None,
+    notes: str = None,
+    status: str = None,
+    task_id: str = None,
+) -> str:
+    """更新客户信息"""
+    db = _get_db()
+    kwargs = {k: v for k, v in {
+        'name': name, 'phone': phone, 'wechat': wechat, 'tier': tier,
+        'budget_min': budget_min, 'budget_max': budget_max,
+        'area_pref': area_pref, 'layout_pref': layout_pref,
+        'location': location, 'renovation': renovation,
+        'notes': notes, 'status': status,
+    }.items() if v is not None}
+    result = db.update_customer(customer_id, **kwargs)
+    if result:
+        return json.dumps({"success": True, "customer": result}, ensure_ascii=False)
+    return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+
+
+def get_customer(customer_id: int, task_id: str = None) -> str:
+    """获取客户详情"""
+    db = _get_db()
+    result = db.get_customer(customer_id)
+    if result:
+        return json.dumps({"success": True, "customer": result}, ensure_ascii=False)
+    return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+
+
+def list_customers(tier: str = None, status: str = None, limit: int = 20, task_id: str = None) -> str:
+    """列出客户列表"""
+    db = _get_db()
+    result = db.list_customers(tier=tier, status=status, limit=limit)
+    return json.dumps({"success": True, "customers": result, "count": len(result)}, ensure_ascii=False)
+
+
+def update_tier(customer_id: int, tier: str, task_id: str = None) -> str:
+    """调整客户等级（S高意向/A有需求/B培养/C初步接触）"""
+    if tier not in ['S', 'A', 'B', 'C']:
+        return json.dumps({"success": False, "error": "等级必须是 S/A/B/C"}, ensure_ascii=False)
+    db = _get_db()
+    result = db.update_customer(customer_id, tier=tier)
+    if result:
+        return json.dumps({"success": True, "customer": result, "message": f"已将客户等级调整为 {tier}"}, ensure_ascii=False)
+    return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+
+
+def customer_stats(task_id: str = None) -> str:
+    """获取客户统计数据"""
+    db = _get_db()
+    stats = db.get_stats()
+    return json.dumps({"success": True, "stats": stats}, ensure_ascii=False)
+
+
+# 注册工具
+TOOLS = [
+    {"name": "add_customer", "description": "添加新客户到系统", "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "客户姓名"},
+            "phone": {"type": "string", "description": "手机号"},
+            "wechat": {"type": "string", "description": "微信号"},
+            "tier": {"type": "string", "enum": ["S", "A", "B", "C"], "description": "客户等级"},
+            "budget_min": {"type": "integer", "description": "预算下限（万元）"},
+            "budget_max": {"type": "integer", "description": "预算上限（万元）"},
+            "area_pref": {"type": "string", "description": "面积偏好，如 80-120"},
+            "layout_pref": {"type": "string", "description": "户型偏好，如 3室2厅"},
+            "location": {"type": "string", "description": "意向区域"},
+            "renovation": {"type": "string", "description": "装修偏好"},
+            "notes": {"type": "string", "description": "备注"},
+            "source": {"type": "string", "description": "客户来源"},
+        },
+        "required": ["name"],
+    }, "handler": lambda args, **kw: add_customer(**args)},
+    {"name": "update_customer", "description": "更新客户信息", "parameters": {
+        "type": "object",
+        "properties": {
+            "customer_id": {"type": "integer", "description": "客户ID"},
+            "name": {"type": "string"}, "phone": {"type": "string"},
+            "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
+            "budget_min": {"type": "integer"}, "budget_max": {"type": "integer"},
+            "area_pref": {"type": "string"}, "layout_pref": {"type": "string"},
+            "location": {"type": "string"}, "renovation": {"type": "string"},
+            "notes": {"type": "string"}, "status": {"type": "string", "enum": ["active", "paused", "closed"]},
+        },
+        "required": ["customer_id"],
+    }, "handler": lambda args, **kw: update_customer(**args)},
+    {"name": "get_customer", "description": "获取客户详情", "parameters": {
+        "type": "object", "properties": {"customer_id": {"type": "integer"}}, "required": ["customer_id"],
+    }, "handler": lambda args, **kw: get_customer(**args)},
+    {"name": "list_customers", "description": "列出客户列表", "parameters": {
+        "type": "object", "properties": {
+            "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
+            "status": {"type": "string", "enum": ["active", "paused", "closed"]},
+            "limit": {"type": "integer"},
+        },
+    }, "handler": lambda args, **kw: list_customers(**args)},
+    {"name": "update_tier", "description": "调整客户等级", "parameters": {
+        "type": "object",
+        "properties": {
+            "customer_id": {"type": "integer"},
+            "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
+        },
+        "required": ["customer_id", "tier"],
+    }, "handler": lambda args, **kw: update_tier(**args)},
+    {"name": "customer_stats", "description": "获取客户统计数据", "parameters": {
+        "type": "object", "properties": {},
+    }, "handler": lambda args, **kw: customer_stats()},
+]
+
+registry.register(
+    name="add_customer",
+    toolset="real_estate",
+    schema={"name": "add_customer", "description": "添加新客户到系统", "parameters": TOOLS[0]["parameters"]},
+    handler=TOOLS[0]["handler"],
+)
+registry.register(
+    name="update_customer",
+    toolset="real_estate",
+    schema={"name": "update_customer", "description": "更新客户信息", "parameters": TOOLS[1]["parameters"]},
+    handler=TOOLS[1]["handler"],
+)
+registry.register(
+    name="get_customer",
+    toolset="real_estate",
+    schema={"name": "get_customer", "description": "获取客户详情", "parameters": TOOLS[2]["parameters"]},
+    handler=TOOLS[2]["handler"],
+)
+registry.register(
+    name="list_customers",
+    toolset="real_estate",
+    schema={"name": "list_customers", "description": "列出客户列表", "parameters": TOOLS[3]["parameters"]},
+    handler=TOOLS[3]["handler"],
+)
+registry.register(
+    name="update_tier",
+    toolset="real_estate",
+    schema={"name": "update_tier", "description": "调整客户等级", "parameters": TOOLS[4]["parameters"]},
+    handler=TOOLS[4]["handler"],
+)
+registry.register(
+    name="customer_stats",
+    toolset="real_estate",
+    schema={"name": "customer_stats", "description": "获取客户统计数据", "parameters": TOOLS[5]["parameters"]},
+    handler=TOOLS[5]["handler"],
+)
