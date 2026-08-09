@@ -36,7 +36,7 @@ Coco（可可）是专为房产中介打造的 AI 第二大脑，内置客户管
 ## 🚀 一键安装
 
 ```bash
-curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh | bash
+curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 ```
 
 安装脚本会自动：
