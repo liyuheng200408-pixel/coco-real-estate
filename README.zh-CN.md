@@ -108,6 +108,41 @@ FEISHU_APP_SECRET=xxx
 DATABASE_URL=postgresql://user:***@localhost:5432/hermes_agent
 ```
 
+## 🔧 常用命令
+
+### 服务管理
+```bash
+sudo systemctl start hermes-agent    # 启动
+sudo systemctl stop hermes-agent     # 停止
+sudo systemctl restart hermes-agent  # 重启
+sudo systemctl status hermes-agent   # 状态
+sudo journalctl -u hermes-agent -n 50 --no-pager  # 日志
+```
+
+### 更换模型
+```bash
+cd ~/hermes-agent
+source venv/bin/activate
+hermes model  # 交互式选择
+```
+
+### 支持的模型厂商
+| 厂商 | 配置 |
+|------|------|
+| 小米 MiMo | `provider: xiaomi` |
+| OpenAI | `provider: openai` |
+| OpenRouter | `provider: openrouter` |
+| DeepSeek | `provider: deepseek` |
+| 阿里通义 | `provider: qwen` |
+| 本地模型 | `provider: ollama` |
+
+### 配置修改
+```bash
+nano ~/.hermes/config.yaml  # 编辑配置
+nano ~/hermes-agent/.env    # 编辑环境变量
+sudo systemctl restart hermes-agent  # 重启生效
+```
+
 ## 📁 项目结构
 
 ```
