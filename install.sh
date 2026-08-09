@@ -152,68 +152,32 @@ EOF
 }
 
 # ==================== 交互式配置 ====================
-interactive_config() {
+setup_config() {
     info "配置 Coco 房产助理..."
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  Coco（可可）房产助理 - 配置向导${NC}"
+    echo -e "${BLUE}  Coco（可可）房产助理 - 配置说明${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
-    
-    # 选择模型厂商
-    echo -e "${YELLOW}请选择模型厂商:${NC}"
-    echo "  1) 小米 MiMo"
-    echo "  2) OpenAI"
-    echo "  3) OpenRouter"
-    echo "  4) 其他（手动配置）"
-    read -r PROVIDER_CHOICE
-    
-    case $PROVIDER_CHOICE in
-        1)
-            PROVIDER="xiaomi"
-            PROVIDER_NAME="小米 MiMo"
-            API_KEY_VAR="XIAOMI_API_KEY"
-            ;;
-        2)
-            PROVIDER="openai"
-            PROVIDER_NAME="OpenAI"
-            API_KEY_VAR="OPENAI_API_KEY"
-            ;;
-        3)
-            PROVIDER="openrouter"
-            PROVIDER_NAME="OpenRouter"
-            API_KEY_VAR="OPENROUTER_API_KEY"
-            ;;
-        *)
-            PROVIDER="custom"
-            PROVIDER_NAME="自定义"
-            API_KEY_VAR="OPENAI_API_KEY"
-            ;;
-    esac
-    
-    echo -e "${YELLOW}请输入 ${PROVIDER_NAME} API Key:${NC}"
-    read -r API_KEY
-    
-    echo -e "${YELLOW}请输入飞书 App ID:${NC}"
-    read -r FEISHU_APP_ID
-    
-    echo -e "${YELLOW}请输入飞书 App Secret:${NC}"
-    read -r FEISHU_APP_SECRET
-    
-    cat > "$INSTALL_DIR/.env" << EOF
-# Coco 房产助理配置
-# 模型厂商: $PROVIDER_NAME
-$API_KEY_VAR=$API_KEY
-FEISHU_APP_ID=$FEISHU_APP_ID
-FEISHU_APP_SECRET=$FEISHU_APP_SECRET
-HERMES_HOME=$INSTALL_DIR
-GATEWAY_ALLOW_ALL_USERS=true
-EOF
-    
-    cat "$INSTALL_DIR/.env.db" >> "$INSTALL_DIR/.env"
-    rm -f "$INSTALL_DIR/.env.db"
-    chmod 600 "$INSTALL_DIR/.env"
-    ok "配置完成"
+    echo -e "${YELLOW}安装完成后的配置步骤：${NC}"
+    echo ""
+    echo "1. 进入项目目录:"
+    echo "   cd $INSTALL_DIR"
+    echo ""
+    echo "2. 激活虚拟环境:"
+    echo "   source venv/bin/activate"
+    echo ""
+    echo "3. 配置模型（选择厂商和输入API Key）:"
+    echo "   hermes model"
+    echo ""
+    echo "4. 配置飞书（输入 App ID 和 App Secret）:"
+    echo "   hermes setup"
+    echo ""
+    echo "5. 启动服务:"
+    echo "   sudo systemctl start hermes-agent"
+    echo ""
+    echo -e "${GREEN}配置完成后，机器人会自动连接飞书。${NC}"
+    echo ""
 }
 
 # ==================== 创建系统服务 ====================
@@ -302,7 +266,7 @@ main() {
     setup_python
     install_packages
     setup_database
-    interactive_config
+    setup_config
     setup_service
     start_service
     print_result
