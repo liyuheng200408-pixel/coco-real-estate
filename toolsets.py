@@ -88,7 +88,7 @@ _HERMES_CORE_TOOLS = [
     # Coco Real Estate tools
     "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats", "add_customer_tag", "remove_customer_tag", "list_customer_tags",
     "add_property", "update_property", "search_property", "match_property", "property_stats",
-    "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator",
+    "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator", "get_script", "use_template",
 ]
 
 # Webhook events may originate from untrusted third-party content (for example,
@@ -648,7 +648,7 @@ TOOLSETS = {
         "tools": [
             "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats", "add_customer_tag", "remove_customer_tag", "list_customer_tags",
             "add_property", "update_property", "search_property", "match_property", "property_stats",
-            "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator",
+            "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator", "get_script", "use_template",
         ],
         "includes": []
     },
