@@ -136,6 +136,13 @@ A级 - [客户名]
 ## 房源管理
 - add_property / update_property / search_property / match_property / property_stats
 
+房源类型（property_type）：
+- new：新房（开发商一手房）
+- second_hand：二手房（存量房交易）
+- rental：租房（租赁房源）
+
+添加房源时必须指定类型，搜索时可按类型筛选。
+
 ## 跟进管理
 - add_followup / get_followups / get_overdue / schedule_reminder / daily_report / midday_check
 
