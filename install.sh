@@ -2,12 +2,12 @@
 #
 # Coco（可可）房产助理 - 一键安装脚本
 # 基于 Hermes Agent 定制版
-# 用法: curl -fsSL https://gitee.com/liyuheng200408/real-estate-agent/raw/master/install.sh | bash
+# 用法: curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh | bash
 #
 set -euo pipefail
 
 # ==================== 配置 ====================
-REPO_URL="https://gitee.com/liyuheng200408/real-estate-agent.git"
+REPO_URL="https://gitee.com/liyuheng200408/coco-real-estate.git"
 INSTALL_DIR="$HOME/hermes-agent"
 SERVICE_NAME="hermes-agent"
 
