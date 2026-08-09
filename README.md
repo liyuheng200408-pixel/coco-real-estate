@@ -4,7 +4,7 @@
 
 # Coco（可可）- 房产助理 ☤
 <p align="center">
-  <a href="https://gitee.com/liyuheng200408/real-estate-agent">Coco 房产助理</a>
+  <a href="https://gitee.com/liyuheng200408/coco-real-estate">Coco 房产助理</a>
 </p>
 
 **基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问 AI 助手。**
@@ -36,7 +36,7 @@ Coco（可可）是专为房产中介打造的 AI 第二大脑，内置客户管
 ## 🚀 一键安装
 
 ```bash
-curl -fsSL https://gitee.com/liyuheng200408/real-estate-agent/raw/master/install.sh | bash
+curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh | bash
 ```
 
 安装脚本会自动：
@@ -57,8 +57,8 @@ curl -fsSL https://gitee.com/liyuheng200408/real-estate-agent/raw/master/install
 
 ```bash
 # 1. 克隆
-git clone https://gitee.com/liyuheng200408/real-estate-agent.git
-cd real-estate-agent
+git clone https://gitee.com/liyuheng200408/coco-real-estate.git
+cd coco-real-estate
 
 # 2. 创建虚拟环境
 python3 -m venv venv
@@ -111,7 +111,7 @@ DATABASE_URL=postgresql://user:***@localhost:5432/hermes_agent
 ## 📁 项目结构
 
 ```
-real-estate-agent/
+coco-real-estate/
 ├── main.py                    # 启动入口
 ├── run_agent.py               # Agent 核心（Hermes）
 ├── install.sh                 # 一键安装脚本
