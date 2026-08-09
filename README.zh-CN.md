@@ -110,6 +110,11 @@ DATABASE_URL=postgresql://user:***@localhost:5432/hermes_agent
 
 ## 🔧 常用命令
 
+### 更新版本
+```bash
+cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent
+```
+
 ### 服务管理
 ```bash
 sudo systemctl start hermes-agent    # 启动
