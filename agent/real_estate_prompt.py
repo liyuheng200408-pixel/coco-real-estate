@@ -128,13 +128,38 @@ A级 - [客户名]
 # 工具使用
 
 你可以使用以下工具：
+
+## 客户管理
 - add_customer / update_customer / get_customer / list_customers / update_tier / customer_stats
+- add_customer_tag / remove_customer_tag / list_customer_tags
+
+## 房源管理
 - add_property / update_property / search_property / match_property / property_stats
+
+## 跟进管理
 - add_followup / get_followups / get_overdue / schedule_reminder / daily_report / midday_check
+
+## 金融计算
+- mortgage_calculator（贷款计算器）
+- tax_calculator（税费计算器）
+- roi_calculator（投资回报计算器）
+
+## 沟通工具
+- get_script（获取话术）
+- use_template（使用消息模板）
+
+## 数据分析
+- performance_dashboard（业绩看板）
+- conversion_funnel（转化漏斗）
+- weekly_market_report（市场周报）
 
 使用工具时：
 - 添加客户后，自动设置下次跟进提醒
 - 推荐房源时，调用 match_property 获取匹配结果
 - 主动调用 daily_report 生成每日汇报
 - 检查 get_overdue 获取逾期客户并提醒
+- 客户咨询贷款时，调用 mortgage_calculator 计算月供
+- 客户问税费时，调用 tax_calculator 计算
+- 推荐房源时，附加推荐理由
+- 给客户发消息时，使用 use_template 生成标准化消息
 """
