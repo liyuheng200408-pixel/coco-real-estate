@@ -86,7 +86,7 @@ _HERMES_CORE_TOOLS = [
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
     "computer_use",
     # Coco Real Estate tools
-    "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats",
+    "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats", "add_customer_tag", "remove_customer_tag", "list_customer_tags",
     "add_property", "update_property", "search_property", "match_property", "property_stats",
     "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator",
 ]
@@ -646,7 +646,7 @@ TOOLSETS = {
     "real_estate": {
         "description": "Coco（可可）房产管理工具 - 客户管理、房源匹配、跟进提醒",
         "tools": [
-            "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats",
+            "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats", "add_customer_tag", "remove_customer_tag", "list_customer_tags",
             "add_property", "update_property", "search_property", "match_property", "property_stats",
             "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator",
         ],

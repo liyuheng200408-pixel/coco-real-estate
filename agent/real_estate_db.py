@@ -33,6 +33,7 @@ class Customer(Base):
     location = Column(String(200))
     renovation = Column(String(50))
     notes = Column(Text)
+    tags = Column(Text)
     source = Column(String(100))
     status = Column(String(20), default='active')
     created_at = Column(DateTime, default=datetime.now)
@@ -53,7 +54,7 @@ class Customer(Base):
             'tier': self.tier, 'budget_min': self.budget_min,
             'budget_max': self.budget_max, 'area_pref': self.area_pref,
             'layout_pref': self.layout_pref, 'location': self.location,
-            'renovation': self.renovation, 'notes': self.notes,
+            'renovation': self.renovation, 'notes': self.notes, 'tags': self.tags,
             'source': self.source, 'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

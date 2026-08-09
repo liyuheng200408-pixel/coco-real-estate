@@ -194,3 +194,107 @@ registry.register(
     schema={"name": "customer_stats", "description": "获取客户统计数据", "parameters": TOOLS[5]["parameters"]},
     handler=TOOLS[5]["handler"],
 )
+
+
+def add_customer_tag(
+    customer_id: int,
+    tag: str,
+    task_id: str = None,
+) -> str:
+    """添加客户标签"""
+    db = _get_db()
+    customer = db.get_customer(customer_id)
+    if not customer:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    
+    tags = customer.get('tags', '')
+    if tags:
+        tag_list = tags.split(',') if tags else []
+    else:
+        tag_list = []
+    
+    if tag not in tag_list:
+        tag_list.append(tag)
+    
+    db.update_customer(customer_id, tags=','.join(tag_list))
+    return json.dumps({"success": True, "message": f"已添加标签: {tag}", "tags": tag_list}, ensure_ascii=False)
+
+
+def remove_customer_tag(
+    customer_id: int,
+    tag: str,
+    task_id: str = None,
+) -> str:
+    """移除客户标签"""
+    db = _get_db()
+    customer = db.get_customer(customer_id)
+    if not customer:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    
+    tags = customer.get('tags', '')
+    tag_list = tags.split(',') if tags else []
+    
+    if tag in tag_list:
+        tag_list.remove(tag)
+        db.update_customer(customer_id, tags=','.join(tag_list))
+        return json.dumps({"success": True, "message": f"已移除标签: {tag}", "tags": tag_list}, ensure_ascii=False)
+    else:
+        return json.dumps({"success": False, "error": f"标签不存在: {tag}"}, ensure_ascii=False)
+
+
+def list_customer_tags(
+    customer_id: int,
+    task_id: str = None,
+) -> str:
+    """查看客户标签"""
+    db = _get_db()
+    customer = db.get_customer(customer_id)
+    if not customer:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    
+    tags = customer.get('tags', '')
+    tag_list = tags.split(',') if tags else []
+    return json.dumps({"success": True, "customer_id": customer_id, "tags": tag_list}, ensure_ascii=False)
+
+
+# 注册新工具
+registry.register(
+    name="add_customer_tag",
+    toolset="real_estate",
+    schema={"name": "add_customer_tag", "description": "添加客户标签", "parameters": {
+        "type": "object",
+        "properties": {
+            "customer_id": {"type": "integer", "description": "客户ID"},
+            "tag": {"type": "string", "description": "标签名称"},
+        },
+        "required": ["customer_id", "tag"],
+    }},
+    handler=lambda args, **kw: add_customer_tag(**args),
+)
+
+registry.register(
+    name="remove_customer_tag",
+    toolset="real_estate",
+    schema={"name": "remove_customer_tag", "description": "移除客户标签", "parameters": {
+        "type": "object",
+        "properties": {
+            "customer_id": {"type": "integer", "description": "客户ID"},
+            "tag": {"type": "string", "description": "标签名称"},
+        },
+        "required": ["customer_id", "tag"],
+    }},
+    handler=lambda args, **kw: remove_customer_tag(**args),
+)
+
+registry.register(
+    name="list_customer_tags",
+    toolset="real_estate",
+    schema={"name": "list_customer_tags", "description": "查看客户标签", "parameters": {
+        "type": "object",
+        "properties": {
+            "customer_id": {"type": "integer", "description": "客户ID"},
+        },
+        "required": ["customer_id"],
+    }},
+    handler=lambda args, **kw: list_customer_tags(**args),
+)
