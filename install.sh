@@ -216,11 +216,16 @@ EOF
 start_service() {
     info "启动 Coco 房产助理..."
     if [[ "$OS" == "linux" ]] && command -v systemctl &> /dev/null; then
+        # 修复权限
+        chmod 666 "$INSTALL_DIR/state.db" 2>/dev/null || true
+        chmod 666 "$INSTALL_DIR/hermes-agent/state.db" 2>/dev/null || true
+        chmod -R 777 "$INSTALL_DIR" 2>/dev/null || true
         sudo systemctl start $SERVICE_NAME
         ok "服务已启动"
     else
         cd "$INSTALL_DIR"
         source "venv/bin/activate"
+        chmod -R 777 "$INSTALL_DIR" 2>/dev/null || true
         nohup python3 -m hermes_cli.main gateway run > /dev/null 2>&1 &
         ok "服务已在后台启动"
     fi
