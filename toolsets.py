@@ -88,7 +88,7 @@ _HERMES_CORE_TOOLS = [
     # Coco Real Estate tools
     "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats",
     "add_property", "update_property", "search_property", "match_property", "property_stats",
-    "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check",
+    "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator",
 ]
 
 # Webhook events may originate from untrusted third-party content (for example,
@@ -648,7 +648,7 @@ TOOLSETS = {
         "tools": [
             "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats",
             "add_property", "update_property", "search_property", "match_property", "property_stats",
-            "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check",
+            "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator",
         ],
         "includes": []
     },
