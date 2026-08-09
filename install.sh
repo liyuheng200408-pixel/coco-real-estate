@@ -95,9 +95,16 @@ clone_project() {
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         warn "目录已存在，拉取最新代码..."
         cd "$INSTALL_DIR"
-        git pull
+        git pull || warn "拉取失败，使用现有代码"
     else
-        git clone "$REPO_URL" "$INSTALL_DIR"
+        git clone "$REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
+            warn "git clone 失败，尝试下载 zip..."
+            ZIP_URL="https://gitee.com/liyuheng200408/coco-real-estate/repository/archive/master.zip"
+            curl -fsSL "$ZIP_URL" -o /tmp/coco.zip
+            unzip -q /tmp/coco.zip -d /tmp/
+            mv /tmp/coco-real-estate-master "$INSTALL_DIR"
+            rm -f /tmp/coco.zip
+        }
         cd "$INSTALL_DIR"
     fi
     ok "代码下载完成"
