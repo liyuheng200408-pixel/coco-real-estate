@@ -229,6 +229,10 @@ start_service() {
         nohup python3 -m hermes_cli.main gateway run > /dev/null 2>&1 &
         ok "服务已在后台启动"
     fi
+    
+    # 创建 hermes 命令软链接
+    ln -sf "$INSTALL_DIR/venv/bin/hermes" /usr/local/bin/hermes 2>/dev/null || true
+    ok "hermes 命令已添加到系统路径"
 }
 
 # ==================== 打印结果 ====================
