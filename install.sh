@@ -2,7 +2,7 @@
 #
 # Coco（可可）房产助理 - 一键安装脚本
 # 基于 Hermes Agent 定制版
-# 用法: curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh | bash
+# 用法: curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 #
 set -euo pipefail
 
