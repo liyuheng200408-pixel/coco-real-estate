@@ -81,6 +81,7 @@ class Property(Base):
     renovation = Column(String(50))
     year_built = Column(Integer)
     has_elevator = Column(Integer, default=1)
+    property_type = Column(String(20), default="second_hand")  # new/second_hand/rental
     parking = Column(Integer, default=0)
     tags = Column(Text)
     images = Column(Text)
@@ -106,7 +107,7 @@ class Property(Base):
             'area': self.area, 'rooms': self.rooms, 'halls': self.halls,
             'bathrooms': self.bathrooms, 'floor': self.floor,
             'orientation': self.orientation, 'renovation': self.renovation,
-            'year_built': self.year_built, 'has_elevator': self.has_elevator,
+            'year_built': self.year_built, 'has_elevator': self.has_elevator, 'property_type': self.property_type,
             'parking': self.parking, 'tags': self.tags, 'images': self.images,
             'status': self.status, 'agent_id': self.agent_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -233,6 +234,7 @@ class RealEstateDB:
             if 'rooms' in filters: q = q.filter(Property.rooms == filters['rooms'])
             if 'district' in filters: q = q.filter(Property.district.contains(filters['district']))
             if 'renovation' in filters: q = q.filter(Property.renovation == filters['renovation'])
+            if 'property_type' in filters: q = q.filter(Property.property_type == filters['property_type'])
             return [p.to_dict() for p in q.limit(50).all()]
     
     def match_property(self, customer_id, top_n=5):

@@ -17,10 +17,14 @@ def add_property(
     floor: str = None, orientation: str = None,
     renovation: str = None, year_built: int = None,
     has_elevator: int = 1, parking: int = 0,
+    property_type: str = "second_hand",
     tags: str = None, images: str = None,
     agent_id: str = None, task_id: str = None,
 ) -> str:
-    """添加新房源"""
+    """添加新房源
+    
+    property_type: new(新房) / second_hand(二手房) / rental(租房)
+    """
     db = _get_db()
     unit_price = int(price * 10000 / area) if area > 0 else None
     result = db.add_property(
@@ -28,8 +32,8 @@ def add_property(
         district=district, address=address, unit_price=unit_price,
         rooms=rooms, halls=halls, bathrooms=bathrooms, floor=floor,
         orientation=orientation, renovation=renovation, year_built=year_built,
-        has_elevator=has_elevator, parking=parking, tags=tags, images=images,
-        agent_id=agent_id,
+        has_elevator=has_elevator, parking=parking, property_type=property_type,
+        tags=tags, images=images, agent_id=agent_id,
     )
     return json.dumps({"success": True, "property": result}, ensure_ascii=False)
 
@@ -56,10 +60,13 @@ def search_property(
     min_price: int = None, max_price: int = None,
     min_area: float = None, max_area: float = None,
     rooms: int = None, district: str = None,
-    renovation: str = None, limit: int = 20,
-    task_id: str = None,
+    renovation: str = None, property_type: str = None,
+    limit: int = 20, task_id: str = None,
 ) -> str:
-    """搜索房源（支持按价格、面积、户型、区域筛选）"""
+    """搜索房源（支持按价格、面积、户型、区域、类型筛选）
+    
+    property_type: new(新房) / second_hand(二手房) / rental(租房)
+    """
     db = _get_db()
     filters = {}
     if min_price: filters['min_price'] = min_price
@@ -69,6 +76,7 @@ def search_property(
     if rooms: filters['rooms'] = rooms
     if district: filters['district'] = district
     if renovation: filters['renovation'] = renovation
+    if property_type: filters['property_type'] = property_type
     result = db.search_properties(**filters)
     return json.dumps({"success": True, "properties": result, "count": len(result)}, ensure_ascii=False)
 
@@ -106,6 +114,7 @@ TOOLS = [
             "rooms": {"type": "integer", "description": "室数"},
             "halls": {"type": "integer", "description": "厅数"},
             "renovation": {"type": "string", "enum": ["毛坯", "简装", "精装"], "description": "装修状态"},
+            "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型：new(新房)/second_hand(二手房)/rental(租房)"},
         }, "required": ["title", "price", "area"],
     }, "handler": lambda args, **kw: add_property(**args)},
     {"name": "update_property", "description": "更新房源信息", "parameters": {
