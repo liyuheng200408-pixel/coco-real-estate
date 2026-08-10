@@ -17673,18 +17673,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # system prompt: present-on-turn-1/absent-on-turn-2 was a guaranteed
         # system-prompt diff and agent rebuild.
         if not history and not await self.async_session_store.has_any_sessions():
-            # Default first-contact note: a brief self-introduction.
+            # Coco first-contact note: self-introduction as Coco（可可）.
             _intro_note = (
                 "[System note: This is the user's very first message ever. "
-                "Briefly introduce yourself and mention that /help shows available commands. "
-                "Keep the introduction concise -- one or two sentences max.]"
+                "Introduce yourself as Coco（可可），资深房产销售助理，"
+                "并简要说明你能帮经纪人做什么（客户管理、房源匹配、跟进提醒、带看与成交管理），"
+                "一句话带过 /help 可查看命令。保持简洁，不要问无关的个人档案问题。]"
             )
-            # Opt-in structured profile-build path. When enabled (default
-            # "ask") and not yet offered on this install, swap the plain intro
-            # for a consent-gated directive that offers to build a user
-            # profile and persists confirmed facts via memory(target="user").
-            # The offer fires at most once (onboarding.seen flag); set
-            # onboarding.profile_build: off in config.yaml to disable.
+            # Coco: 关闭官方 profile-build 引导（经纪人不适用），
+            # 直接使用 Coco 风格的首次问候。
             try:
                 from agent.onboarding import (
                     PROFILE_BUILD_FLAG,
@@ -17698,7 +17695,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     profile_build_mode(_onb_cfg) == "ask"
                     and not is_seen(_onb_cfg, PROFILE_BUILD_FLAG)
                 ):
-                    turn_sidecar_notes.append(profile_build_directive().strip())
+                    # Coco fork: 跳过官方 profile-build 引导，用 Coco 欢迎语
+                    turn_sidecar_notes.append(_intro_note)
                     mark_seen(_hermes_home / "config.yaml", PROFILE_BUILD_FLAG)
                 else:
                     turn_sidecar_notes.append(_intro_note)
