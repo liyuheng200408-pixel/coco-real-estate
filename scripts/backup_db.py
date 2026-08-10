@@ -93,10 +93,17 @@ class DatabaseBackup:
             return False
 
     def _extract_conn(self) -> str:
-        """从 URL 提取连接串（去掉密码，pg_dump 用 PGPASSWORD）"""
+        """从 URL 提取连接串（去掉密码、保留用户名，pg_dump 用 PGPASSWORD 传密码）"""
         url = self.database_url
         if "@" in url:
             prefix, rest = url.split("@", 1)
+            # prefix 形如 postgresql://user:password 或 postgresql://user
+            if "://" in prefix:
+                scheme, cred = prefix.split("://", 1)
+                if ":" in cred:
+                    user = cred.split(":", 1)[0]
+                    return f"{scheme}://{user}@{rest}"
+                return f"{scheme}://{cred}@{rest}"
             if ":" in prefix:
                 scheme = prefix.split(":", 1)[0]
                 return f"{scheme}://{rest}"
