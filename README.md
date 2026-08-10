@@ -120,11 +120,6 @@ cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q
 cd ~/hermes-agent && git checkout . && git clean -fd && git pull && pip install -e . -q && sudo systemctl restart hermes-agent
 ```
 
-### 更新版本
-```bash
-cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent
-```
-
 ### 服务管理
 ```bash
 sudo systemctl start hermes-agent    # 启动
