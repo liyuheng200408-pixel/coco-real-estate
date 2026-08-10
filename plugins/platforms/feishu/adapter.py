@@ -3380,6 +3380,14 @@ class FeishuAdapter(BasePlatformAdapter):
         # Coco: 首次对话提醒密钥备份（仅提醒一次，真实用户触发）
         if not is_bot and inbound_type != MessageType.COMMAND:
             await self._maybe_remind_key_backup(chat_id)
+            # Coco: 首次对话自动注册定时任务（早报/午间/逾期检查）
+            try:
+                from agent.coco_cron import register_coco_cron_jobs
+                await asyncio.get_event_loop().run_in_executor(
+                    None, register_coco_cron_jobs, chat_id
+                )
+            except Exception as e:
+                logger.warning("[Feishu] Coco cron registration failed: %s", e)
 
         source = self.build_source(
             chat_id=chat_id,

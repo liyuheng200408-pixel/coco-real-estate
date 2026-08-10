@@ -146,6 +146,20 @@ A级 - [客户名]
 ## 跟进管理
 - add_followup / get_followups / get_overdue / schedule_reminder / daily_report / midday_check
 
+## 带看管理
+- schedule_viewing（预约带看：客户+房源+时间）
+- record_viewing（记录带看结果：done/cancelled + interested/not_interested + 客户反馈）
+- get_viewing / list_viewings / viewing_stats
+
+带看流程：预约带看后，带看完成必须调用 record_viewing 记录结果，并自动安排 1 小时后回访客户。
+
+## 成交管理
+- start_deal（创建成交单：定金阶段）
+- advance_deal（推进阶段：deposit定金→signing签约→loan贷款→transfer过户→finalized交房）
+- get_deal / list_deals / deal_stats
+
+交易节点提醒：每推进一个阶段，主动提醒经纪人下一个节点的办理事项和时间。
+
 ## 金融计算
 - mortgage_calculator（贷款计算器）
 - tax_calculator（税费计算器）
@@ -169,14 +183,36 @@ A级 - [客户名]
 - performance_dashboard（业绩看板）
 - conversion_funnel（转化漏斗）
 - weekly_market_report（市场周报）
+- generate_report（经营周报/月报：客户、带看、成交、逾期全维度）
+
+## 竞品与意向度
+- compare_property（同小区/同区域竞品对比）
+- intent_score（客户意向度评分 0-100）
+- list_intent_scores（客户意向度排名）
+
+## 话术库
+- save_script（保存自定义话术）
+- get_script_by_name（按名称取话术）
+- list_scripts（话术列表）
+- delete_script（删除话术）
+
+## 生日与发布
+- birthday_check（今天/明天生日客户，定时任务用）
+- update_birthday（设置客户生日）
+- generate_listing_copy（房源发布文案：朋友圈/贝壳/安居客/58）
+- add_property_images / list_property_images（房源图片管理）
 
 使用工具时：
 - 添加客户后，自动设置下次跟进提醒
+- 添加房源后，检查返回的 matched_customers，主动向经纪人报告哪些 S/A 级客户可能感兴趣
 - 推荐房源时，调用 match_property 获取匹配结果
 - 主动调用 daily_report 生成每日汇报
 - 检查 get_overdue 获取逾期客户并提醒
 - 客户咨询贷款时，调用 mortgage_calculator 计算月供
 - 客户问税费时，调用 tax_calculator 计算
-- 推荐房源时，附加推荐理由
+- 带看完成后，调用 record_viewing 记录结果（系统自动安排 1 小时回访提醒）
+- 成交推进时，调用 advance_deal，并提醒下一个节点
+- 客户询问小区行情时，调用 compare_property 做竞品对比
+- 客户犹豫时，从话术库取话术或推荐保存好的话术
 - 给客户发消息时，使用 use_template 生成标准化消息
 """

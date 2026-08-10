@@ -81,11 +81,14 @@ class Customer(Base):
     tags = Column(Text)
     source = Column(String(100))
     customer_type = Column(String(20), default="buy")  # buy_new/buy_second_hand/rent
+    birthday = Column(String(10))  # YYYY-MM-DD
     status = Column(String(20), default='active')
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     followups = relationship("Followup", back_populates="customer")
+    viewings = relationship("Viewing", back_populates="customer")
+    deals = relationship("Deal", back_populates="customer")
     
     __table_args__ = (
         CheckConstraint("tier IN ('S', 'A', 'B', 'C')", name='re_check_tier'),
@@ -102,6 +105,7 @@ class Customer(Base):
             'layout_pref': self.layout_pref, 'location': self.location,
             'renovation': self.renovation, 'notes': self.notes, 'tags': self.tags,
             'source': self.source, 'customer_type': self.customer_type, 'status': self.status,
+            'birthday': self.birthday,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -137,6 +141,8 @@ class Property(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     followups = relationship("Followup", back_populates="property")
+    viewings = relationship("Viewing", back_populates="property")
+    deals = relationship("Deal", back_populates="property")
     
     __table_args__ = (
         CheckConstraint("status IN ('available', 'sold', 'rented')", name='re_check_prop_status'),
@@ -213,6 +219,106 @@ class Reminder(Base):
     )
 
 
+class Viewing(Base):
+    """带看记录表"""
+    __tablename__ = 're_viewings'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey('re_customers.id'), nullable=False)
+    property_id = Column(Integer, ForeignKey('re_properties.id'), nullable=False)
+    viewing_time = Column(DateTime, nullable=False)       # 带看时间
+    status = Column(String(20), default='scheduled')      # scheduled/done/cancelled
+    feedback = Column(Text)                               # 客户反馈
+    result = Column(String(20))                           # interested/not_interested/pending
+    agent_id = Column(String(100))
+    created_at = Column(DateTime, default=datetime.now)
+    
+    customer = relationship("Customer", back_populates="viewings")
+    property = relationship("Property", back_populates="viewings")
+    
+    __table_args__ = (
+        Index('re_idx_viewing_customer', 'customer_id'),
+        Index('re_idx_viewing_property', 'property_id'),
+        Index('re_idx_viewing_time', 'viewing_time'),
+    )
+    
+    def to_dict(self):
+        return {
+            'id': self.id, 'customer_id': self.customer_id,
+            'property_id': self.property_id,
+            'viewing_time': self.viewing_time.isoformat() if self.viewing_time else None,
+            'status': self.status, 'feedback': self.feedback,
+            'result': self.result, 'agent_id': self.agent_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'customer_name': self.customer.name if self.customer else None,
+            'property_title': self.property.title if self.property else None,
+        }
+
+
+class Deal(Base):
+    """成交/交易状态表"""
+    __tablename__ = 're_deals'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey('re_customers.id'), nullable=False)
+    property_id = Column(Integer, ForeignKey('re_properties.id'), nullable=False)
+    stage = Column(String(20), default='deposit')  # deposit/signing/loan/transfer/finalized
+    price = Column(Integer)                         # 成交价（万元）
+    deposit_amount = Column(Integer)                # 定金（万元）
+    deposit_date = Column(DateTime)                 # 定金日期
+    signing_date = Column(DateTime)                 # 签约日期
+    loan_date = Column(DateTime)                    # 贷款审批日期
+    transfer_date = Column(DateTime)                # 过户日期
+    finalize_date = Column(DateTime)                # 交房日期
+    notes = Column(Text)
+    agent_id = Column(String(100))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    customer = relationship("Customer", back_populates="deals")
+    property = relationship("Property", back_populates="deals")
+    
+    __table_args__ = (
+        CheckConstraint("stage IN ('deposit', 'signing', 'loan', 'transfer', 'finalized')", name='re_check_deal_stage'),
+        Index('re_idx_deal_customer', 'customer_id'),
+        Index('re_idx_deal_stage', 'stage'),
+    )
+    
+    def to_dict(self):
+        return {
+            'id': self.id, 'customer_id': self.customer_id,
+            'property_id': self.property_id, 'stage': self.stage,
+            'price': self.price, 'deposit_amount': self.deposit_amount,
+            'deposit_date': self.deposit_date.isoformat() if self.deposit_date else None,
+            'signing_date': self.signing_date.isoformat() if self.signing_date else None,
+            'loan_date': self.loan_date.isoformat() if self.loan_date else None,
+            'transfer_date': self.transfer_date.isoformat() if self.transfer_date else None,
+            'finalize_date': self.finalize_date.isoformat() if self.finalize_date else None,
+            'notes': self.notes, 'agent_id': self.agent_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'customer_name': self.customer.name if self.customer else None,
+            'property_title': self.property.title if self.property else None,
+        }
+
+
+class Script(Base):
+    """自定义话术表"""
+    __tablename__ = 're_scripts'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)       # 话术名称
+    scenario = Column(String(50), default='custom')  # greeting/objection_handling/closing/follow_up/custom
+    content = Column(Text, nullable=False)           # 话术内容
+    agent_id = Column(String(100))
+    created_at = Column(DateTime, default=datetime.now)
+    
+    __table_args__ = (
+        Index('re_idx_script_scenario', 'scenario'),
+        Index('re_idx_script_name', 'name'),
+    )
+
+
 # ==================== 数据库管理 ====================
 
 class RealEstateDB:
@@ -254,6 +360,26 @@ class RealEstateDB:
             if status: q = q.filter(Customer.status == status)
             if customer_type: q = q.filter(Customer.customer_type == customer_type)
             return [c.to_dict() for c in q.limit(limit).all()]
+
+    def get_birthday_customers(self, month=None, day=None):
+        """查询指定月/日过生日的客户（用于生日提醒）"""
+        with self.get_session() as s:
+            q = s.query(Customer).filter(Customer.birthday.isnot(None), Customer.status == 'active')
+            customers = [c.to_dict() for c in q.all()]
+            if month is None and day is None:
+                return customers
+            result = []
+            for c in customers:
+                b = c.get('birthday') or ''
+                parts = b.split('-')
+                if len(parts) == 3:
+                    try:
+                        if month is None or int(parts[1]) == month:
+                            if day is None or int(parts[2]) == day:
+                                result.append(c)
+                    except ValueError:
+                        continue
+            return result
     
     # ---------- 房源 ----------
     def add_property(self, **kwargs):
@@ -261,7 +387,7 @@ class RealEstateDB:
             p = Property(**kwargs)
             s.add(p); s.commit(); s.refresh(p)
             return p.to_dict()
-    
+
     def update_property(self, pid, **kwargs):
         with self.get_session() as s:
             p = s.query(Property).get(pid)
@@ -270,7 +396,84 @@ class RealEstateDB:
                 if hasattr(p, k): setattr(p, k, v)
             s.commit(); s.refresh(p)
             return p.to_dict()
-    
+
+    def match_customers_for_property(self, property_id, top_n=5):
+        """房源反匹配：新房源 → 扫描 S/A 级客户，按需求匹配推荐
+
+        返回命中客户列表（按匹配度排序），用于 add_property 后主动推送。
+        """
+        with self.get_session() as s:
+            prop = s.query(Property).get(property_id)
+            if not prop:
+                return []
+            # 只匹配在售房源
+            if prop.status != 'available':
+                return []
+            candidates = s.query(Customer).filter(
+                Customer.status == 'active',
+                Customer.tier.in_(['S', 'A']),
+            ).all()
+            if not candidates:
+                return []
+
+            results = []
+            for c in candidates:
+                score = 0
+                reasons = []
+
+                # 预算匹配（权重 30）
+                budget_min = c.budget_min or 0
+                budget_max = c.budget_max or 999999
+                if budget_min <= prop.price <= budget_max:
+                    score += 30
+                    reasons.append("预算匹配")
+                elif prop.price < budget_min:
+                    score += 15
+                    reasons.append("略低于预算")
+                elif prop.price > budget_max:
+                    score += 5
+                    reasons.append("略超预算")
+
+                # 户型匹配（权重 25）
+                pref = c.layout_pref or ""
+                import re as _re
+                m_room = _re.search(r'(\d+)室', pref)
+                if m_room and prop.rooms == int(m_room.group(1)):
+                    score += 25
+                    reasons.append("户型匹配")
+
+                # 面积匹配（权重 20）
+                if c.area_pref:
+                    lo, hi = self._parse_area(c.area_pref)
+                    if lo <= prop.area <= hi:
+                        score += 20
+                        reasons.append("面积匹配")
+
+                # 区域匹配（权重 15）
+                if c.location and prop.district and c.location in prop.district:
+                    score += 15
+                    reasons.append("区域匹配")
+                elif c.location and prop.community and c.location in prop.community:
+                    score += 15
+                    reasons.append("小区匹配")
+
+                # 装修匹配（权重 10）
+                if c.renovation and prop.renovation and c.renovation == prop.renovation:
+                    score += 10
+                    reasons.append("装修匹配")
+
+                if score >= 40:
+                    results.append({
+                        'customer_id': c.id, 'customer_name': c.name,
+                        'tier': c.tier, 'score': score, 'match_reasons': reasons,
+                        'budget': [budget_min, budget_max],
+                        'area_pref': c.area_pref, 'layout_pref': c.layout_pref,
+                        'location': c.location,
+                    })
+
+            results.sort(key=lambda x: x['score'], reverse=True)
+            return results[:top_n]
+
     def search_properties(self, **filters):
         with self.get_session() as s:
             q = s.query(Property).filter(Property.status == 'available')
@@ -409,6 +612,215 @@ class RealEstateDB:
             'total_customers': stats.get('total_customers', 0),
             'available_properties': stats.get('available_properties', 0),
         }
+
+    # ---------- 带看 ----------
+    def add_viewing(self, customer_id, property_id, viewing_time, **kwargs):
+        with self.get_session() as s:
+            v = Viewing(customer_id=customer_id, property_id=property_id,
+                        viewing_time=viewing_time, **kwargs)
+            s.add(v); s.commit(); s.refresh(v)
+            return v.to_dict()
+
+    def update_viewing(self, vid, **kwargs):
+        with self.get_session() as s:
+            v = s.query(Viewing).get(vid)
+            if not v: return None
+            for k, val in kwargs.items():
+                if hasattr(v, k): setattr(v, k, val)
+            s.commit(); s.refresh(v)
+            return v.to_dict()
+
+    def get_viewing(self, vid):
+        with self.get_session() as s:
+            v = s.query(Viewing).get(vid)
+            return v.to_dict() if v else None
+
+    def list_viewings(self, customer_id=None, property_id=None, status=None, limit=50):
+        with self.get_session() as s:
+            q = s.query(Viewing)
+            if customer_id: q = q.filter(Viewing.customer_id == customer_id)
+            if property_id: q = q.filter(Viewing.property_id == property_id)
+            if status: q = q.filter(Viewing.status == status)
+            return [v.to_dict() for v in q.order_by(Viewing.viewing_time.desc()).limit(limit).all()]
+
+    def viewing_stats(self, period='month'):
+        """带看统计：总数、已看、取消、感兴趣客户"""
+        with self.get_session() as s:
+            total = s.query(Viewing).count()
+            done = s.query(Viewing).filter(Viewing.status == 'done').count()
+            scheduled = s.query(Viewing).filter(Viewing.status == 'scheduled').count()
+            cancelled = s.query(Viewing).filter(Viewing.status == 'cancelled').count()
+            interested = s.query(Viewing).filter(Viewing.status == 'done', Viewing.result == 'interested').count()
+            return {
+                'total_viewings': total, 'done': done, 'scheduled': scheduled,
+                'cancelled': cancelled, 'interested': interested,
+                'interest_rate': round(interested / done * 100, 1) if done else 0,
+            }
+
+    # ---------- 成交 ----------
+    def add_deal(self, customer_id, property_id, **kwargs):
+        with self.get_session() as s:
+            d = Deal(customer_id=customer_id, property_id=property_id, **kwargs)
+            s.add(d); s.commit(); s.refresh(d)
+            return d.to_dict()
+
+    def update_deal(self, did, **kwargs):
+        with self.get_session() as s:
+            d = s.query(Deal).get(did)
+            if not d: return None
+            for k, val in kwargs.items():
+                if hasattr(d, k): setattr(d, k, val)
+            s.commit(); s.refresh(d)
+            return d.to_dict()
+
+    def get_deal(self, did):
+        with self.get_session() as s:
+            d = s.query(Deal).get(did)
+            return d.to_dict() if d else None
+
+    def list_deals(self, stage=None, customer_id=None, limit=50):
+        with self.get_session() as s:
+            q = s.query(Deal)
+            if stage: q = q.filter(Deal.stage == stage)
+            if customer_id: q = q.filter(Deal.customer_id == customer_id)
+            return [d.to_dict() for d in q.order_by(Deal.created_at.desc()).limit(limit).all()]
+
+    def deal_stats(self):
+        """成交统计：各阶段数量"""
+        with self.get_session() as s:
+            stages = {st: s.query(Deal).filter(Deal.stage == st).count()
+                      for st in ['deposit', 'signing', 'loan', 'transfer', 'finalized']}
+            return {
+                'total_deals': sum(stages.values()),
+                'stages': stages,
+                'finalized': stages.get('finalized', 0),
+            }
+
+    # ---------- 竞品对比 ----------
+    def compare_properties(self, property_id, limit=5):
+        """同小区/同区域竞品对比：返回指定房源及周边在售房源对比"""
+        with self.get_session() as s:
+            target = s.query(Property).get(property_id)
+            if not target:
+                return None
+            target_dict = target.to_dict()
+            q = s.query(Property).filter(Property.status == 'available')
+            if target.community:
+                q = q.filter(Property.community == target.community, Property.id != property_id)
+                same_community = [p.to_dict() for p in q.limit(limit).all()]
+            else:
+                same_community = []
+            # 若同小区不足，补同区域
+            if len(same_community) < 3 and target.district:
+                q2 = s.query(Property).filter(
+                    Property.status == 'available',
+                    Property.district == target.district,
+                    Property.id != property_id,
+                )
+                existing_ids = {p['id'] for p in same_community}
+                for p in q2.limit(limit).all():
+                    if p.id not in existing_ids:
+                        same_community.append(p.to_dict())
+                        existing_ids.add(p.id)
+            # 计算均价
+            all_available = [p.to_dict() for p in s.query(Property).filter(Property.status == 'available').all()]
+            prices = [p['price'] for p in all_available if p.get('price')]
+            avg_price = round(sum(prices) / len(prices)) if prices else None
+            return {
+                'target': target_dict,
+                'competitors': same_community[:limit],
+                'district_avg_price': avg_price,
+                'target_unit_price': target_dict.get('unit_price'),
+            }
+
+    # ---------- 客户意向度评分 ----------
+    def customer_intent_score(self, customer_id):
+        """客户意向度评分（0-100）：
+        - 等级基础分：S=40, A=25, B=15, C=5
+        - 带看次数加分：每次 +15（上限 30）
+        - 跟进活跃度加分：近 7 天有跟进 +15
+        - 预算明确加分：预算上下限都有 +10
+        """
+        with self.get_session() as s:
+            c = s.query(Customer).get(customer_id)
+            if not c:
+                return None
+            score = {'S': 40, 'A': 25, 'B': 15, 'C': 5}.get(c.tier, 5)
+            reasons = [f"等级{c.tier}基础分"]
+
+            # 带看次数
+            viewing_count = s.query(Viewing).filter(
+                Viewing.customer_id == customer_id,
+                Viewing.status == 'done',
+            ).count()
+            viewing_score = min(viewing_count * 15, 30)
+            if viewing_score:
+                score += viewing_score
+                reasons.append(f"带看{viewing_count}次 +{viewing_score}")
+
+            # 近 7 天跟进
+            week_ago = datetime.now() - timedelta(days=7)
+            recent_fu = s.query(Followup).filter(
+                Followup.customer_id == customer_id,
+                Followup.created_at >= week_ago,
+            ).count()
+            if recent_fu > 0:
+                score += 15
+                reasons.append(f"近7天跟进{recent_fu}次 +15")
+
+            # 预算明确
+            if c.budget_min and c.budget_max:
+                score += 10
+                reasons.append("预算明确 +10")
+
+            # 是否有成交
+            deal_count = s.query(Deal).filter(Deal.customer_id == customer_id).count()
+            if deal_count > 0:
+                score = 100
+                reasons = ["已成交 100分"]
+
+            score = min(score, 100)
+            return {
+                'customer_id': c.id, 'customer_name': c.name,
+                'tier': c.tier, 'score': score, 'breakdown': reasons,
+                'viewing_count': viewing_count, 'recent_followups': recent_fu,
+                'budget': [c.budget_min, c.budget_max],
+            }
+
+    # ---------- 话术库 ----------
+    def add_script(self, name, content, scenario='custom'):
+        with self.get_session() as s:
+            sc = Script(name=name, content=content, scenario=scenario)
+            s.add(sc); s.commit(); s.refresh(sc)
+            return {'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
+                    'content': sc.content, 'created_at': sc.created_at.isoformat() if sc.created_at else None}
+
+    def list_scripts(self, scenario=None, limit=100):
+        with self.get_session() as s:
+            q = s.query(Script)
+            if scenario:
+                q = q.filter(Script.scenario == scenario)
+            return [{'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
+                     'content': sc.content,
+                     'created_at': sc.created_at.isoformat() if sc.created_at else None}
+                    for sc in q.order_by(Script.created_at.desc()).limit(limit).all()]
+
+    def get_script_by_name(self, name):
+        with self.get_session() as s:
+            sc = s.query(Script).filter(Script.name == name).first()
+            if sc:
+                return {'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
+                        'content': sc.content,
+                        'created_at': sc.created_at.isoformat() if sc.created_at else None}
+            return None
+
+    def delete_script(self, sid):
+        with self.get_session() as s:
+            sc = s.query(Script).get(sid)
+            if not sc:
+                return False
+            s.delete(sc); s.commit()
+            return True
 
 
 # ==================== 全局实例 ====================

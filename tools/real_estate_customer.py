@@ -24,6 +24,7 @@ def add_customer(
     notes: str = None,
     source: str = None,
     customer_type: str = "buy",
+    birthday: str = None,
     task_id: str = None,
 ) -> str:
     """添加新客户到系统
@@ -37,6 +38,7 @@ def add_customer(
         area_pref=area_pref, layout_pref=layout_pref,
         location=location, renovation=renovation,
         notes=notes, source=source, customer_type=customer_type,
+        birthday=birthday,
     )
     return json.dumps({"success": True, "customer": result}, ensure_ascii=False)
 
@@ -55,6 +57,7 @@ def update_customer(
     renovation: str = None,
     notes: str = None,
     status: str = None,
+    birthday: str = None,
     task_id: str = None,
 ) -> str:
     """更新客户信息"""
@@ -64,7 +67,7 @@ def update_customer(
         'budget_min': budget_min, 'budget_max': budget_max,
         'area_pref': area_pref, 'layout_pref': layout_pref,
         'location': location, 'renovation': renovation,
-        'notes': notes, 'status': status,
+        'notes': notes, 'status': status, 'birthday': birthday,
     }.items() if v is not None}
     result = db.update_customer(customer_id, **kwargs)
     if result:
@@ -127,6 +130,7 @@ TOOLS = [
             "notes": {"type": "string", "description": "备注"},
             "source": {"type": "string", "description": "客户来源"},
             "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型：buy_new(买新房)/buy_second_hand(买二手房)/rent(租房)"},
+            "birthday": {"type": "string", "description": "客户生日 YYYY-MM-DD"},
         },
         "required": ["name"],
     }, "handler": lambda args, **kw: add_customer(**args)},

@@ -35,7 +35,16 @@ def add_property(
         has_elevator=has_elevator, parking=parking, property_type=property_type,
         tags=tags, images=images, agent_id=agent_id,
     )
-    return json.dumps({"success": True, "property": result}, ensure_ascii=False)
+    # 房源反匹配：自动扫描 S/A 级客户
+    try:
+        matched = db.match_customers_for_property(result['id'])
+    except Exception:
+        matched = []
+    response = {"success": True, "property": result}
+    if matched:
+        response["matched_customers"] = matched
+        response["message"] = f"房源已添加，有 {len(matched)} 位 S/A 级客户可能感兴趣"
+    return json.dumps(response, ensure_ascii=False)
 
 
 def update_property(
@@ -115,6 +124,7 @@ TOOLS = [
             "halls": {"type": "integer", "description": "厅数"},
             "renovation": {"type": "string", "enum": ["毛坯", "简装", "精装"], "description": "装修状态"},
             "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型：new(新房)/second_hand(二手房)/rental(租房)"},
+            "images": {"type": "string", "description": "房源图片，多个用逗号分隔（URL或本地路径）"},
         }, "required": ["title", "price", "area"],
     }, "handler": lambda args, **kw: add_property(**args)},
     {"name": "update_property", "description": "更新房源信息", "parameters": {
