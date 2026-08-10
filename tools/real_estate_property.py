@@ -94,6 +94,7 @@ def search_property(
     if district: filters['district'] = district
     if renovation: filters['renovation'] = renovation
     if property_type: filters['property_type'] = property_type
+    if limit: filters['limit'] = limit
     result = db.search_properties(**filters)
     return json.dumps({"success": True, "properties": result, "count": len(result)}, ensure_ascii=False)
 

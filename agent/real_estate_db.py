@@ -477,6 +477,7 @@ class RealEstateDB:
     def search_properties(self, **filters):
         with self.get_session() as s:
             q = s.query(Property).filter(Property.status == 'available')
+            limit = filters.pop('limit', 50)
             if 'min_price' in filters: q = q.filter(Property.price >= filters['min_price'])
             if 'max_price' in filters: q = q.filter(Property.price <= filters['max_price'])
             if 'min_area' in filters: q = q.filter(Property.area >= filters['min_area'])
@@ -485,7 +486,7 @@ class RealEstateDB:
             if 'district' in filters: q = q.filter(Property.district.contains(filters['district']))
             if 'renovation' in filters: q = q.filter(Property.renovation == filters['renovation'])
             if 'property_type' in filters: q = q.filter(Property.property_type == filters['property_type'])
-            return [p.to_dict() for p in q.limit(50).all()]
+            return [p.to_dict() for p in q.limit(limit).all()]
     
     def match_property(self, customer_id, top_n=5):
         customer = self.get_customer(customer_id)
