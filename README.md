@@ -115,6 +115,16 @@ DATABASE_URL=postgresql://user:***@localhost:5432/hermes_agent
 cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent
 ```
 
+**如果提示冲突，运行这条强制更新：**
+```bash
+cd ~/hermes-agent && git checkout . && git clean -fd && git pull && pip install -e . -q && sudo systemctl restart hermes-agent
+```
+
+### 更新版本
+```bash
+cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent
+```
+
 ### 服务管理
 ```bash
 sudo systemctl start hermes-agent    # 启动
