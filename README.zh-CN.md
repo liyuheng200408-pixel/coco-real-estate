@@ -92,6 +92,23 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py li
 cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
 ```
 
+### 服务器迁移
+
+迁移到新服务器时，一条命令完成数据库 + 图片 + 加密密钥恢复：
+
+```bash
+# 旧服务器打包（含数据库备份、图片备份、加密密钥）
+cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
+
+# 拷贝到新服务器后，一条命令恢复
+cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+
+# 重启服务，给机器人发"你好"即完成迁移
+sudo systemctl restart hermes-agent
+```
+
+> 顺序说明：自动恢复数据库 → 图片 → 加密密钥（enc_key.txt 合并进 .env.db），任一步失败即中止并提示。密钥必须先于服务启动恢复，否则旧数据无法解密。
+
 ## 📁 项目结构
 
 ```
