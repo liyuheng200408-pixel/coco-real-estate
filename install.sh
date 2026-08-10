@@ -220,10 +220,11 @@ EOF
 start_service() {
     info "启动 Coco 房产助理..."
     if [[ "$OS" == "linux" ]] && command -v systemctl &> /dev/null; then
-        # 修复权限
-        chmod 666 "$INSTALL_DIR/state.db" 2>/dev/null || true
-        chmod 666 "$INSTALL_DIR/hermes-agent/state.db" 2>/dev/null || true
-        chmod -R 777 "$INSTALL_DIR" 2>/dev/null || true
+        # 修复权限（数据库文件仅所有者可读写）
+        chmod 600 "$INSTALL_DIR/state.db" 2>/dev/null || true
+        chmod 600 "$INSTALL_DIR/hermes-agent/state.db" 2>/dev/null || true
+        chmod 600 "$HOME/hermes-agent/real_estate.db" 2>/dev/null || true
+        chmod 600 "$INSTALL_DIR/.env" 2>/dev/null || true
         sudo systemctl start $SERVICE_NAME
         ok "服务已启动"
     else
@@ -237,6 +238,14 @@ start_service() {
     # 创建 hermes 命令软链接
     ln -sf "$INSTALL_DIR/venv/bin/hermes" /usr/local/bin/hermes 2>/dev/null || true
     ok "hermes 命令已添加到系统路径"
+    
+    # 创建备份目录并设置定时备份
+    mkdir -p ~/backups/real_estate
+    chmod 700 ~/backups/real_estate
+    
+    # 添加定时备份任务（每天凌晨2点）
+    (crontab -l 2>/dev/null; echo "0 2 * * * cd $INSTALL_DIR && source venv/bin/activate && python3 scripts/backup_db.py backup >> ~/backups/real_estate/backup.log 2>&1") | crontab -
+    ok "定时备份已设置（每天凌晨2点）"
 }
 
 # ==================== 打印结果 ====================
