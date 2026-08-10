@@ -127,6 +127,8 @@ install_packages() {
 setup_database() {
     info "配置数据库..."
     DB_PASSWORD=$(openssl rand -hex 16)
+    DB_USER="hermes"
+    DB_NAME="hermes_agent"
     
     if [[ "$OS" == "linux" ]]; then
         sudo systemctl enable postgresql
@@ -135,19 +137,20 @@ setup_database() {
         brew services start postgresql
     fi
     
-    sudo -u postgres psql -c "CREATE USER hermes WITH PASSWORD '$DB_PASSWORD';" 2>/dev/null || true
-    sudo -u postgres psql -c "CREATE DATABASE hermes_agent OWNER hermes;" 2>/dev/null || true
-    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE hermes_agent TO hermes;" 2>/dev/null || true
+    sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';" 2>/dev/null || true
+    sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;" 2>/dev/null || true
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;" 2>/dev/null || true
     
     cat > "$INSTALL_DIR/.env.db" << EOF
 # 数据库配置（自动生成）
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=hermes_agent
-DB_USER=hermes
+DB_NAME=$DB_NAME
+DB_USER=$DB_USER
 DB_PASSWORD=$DB_PASSWORD
-DATABASE_URL=postgresql://hermes:$DB_PASSWORD@localhost:5432/hermes_agent
+DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME
 EOF
+    chmod 600 "$INSTALL_DIR/.env.db"
     ok "数据库配置完成"
 }
 
@@ -198,12 +201,13 @@ Wants=postgresql.service
 Type=simple
 User=$(whoami)
 WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/.env.db
 ExecStart=$INSTALL_DIR/venv/bin/python -m hermes_cli.main gateway run
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
 Environment=HERMES_HOME=$INSTALL_DIR
-GATEWAY_ALLOW_ALL_USERS=true
+Environment=GATEWAY_ALLOW_ALL_USERS=true
 UMask=0077
 
 [Install]
