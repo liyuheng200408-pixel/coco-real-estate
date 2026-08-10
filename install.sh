@@ -189,7 +189,8 @@ setup_config() {
     echo -e "${GREEN}配置完成后，机器人会自动连接飞书。${NC}"
     echo ""
     
-    # 复制 SOUL.md 身份文件
+    # 复制 SOUL.md 身份文件（确保 ~/.hermes 存在）
+    mkdir -p "$HOME/.hermes"
     cp "$INSTALL_DIR/SOUL.md" "$HOME/.hermes/SOUL.md" 2>/dev/null || true
     ok "SOUL.md 身份文件已复制"
 }
@@ -241,6 +242,9 @@ start_service() {
         # 服务启动可能新建数据库文件，再补一次权限（UMask 已兜底 0600）
         sleep 2
         chmod 600 "$INSTALL_DIR"/state.db* "$INSTALL_DIR"/real_estate.db* "$HOME/.hermes"/state.db* "$HOME/.hermes"/real_estate.db* 2>/dev/null || true
+        # 确保 SOUL.md 身份文件不被覆盖（gateway 首次启动可能生成官方 SOUL.md）
+        mkdir -p "$HOME/.hermes"
+        cp "$INSTALL_DIR/SOUL.md" "$HOME/.hermes/SOUL.md" 2>/dev/null || true
         ok "服务已启动"
     else
         cd "$INSTALL_DIR"
