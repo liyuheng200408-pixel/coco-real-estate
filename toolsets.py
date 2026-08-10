@@ -584,7 +584,7 @@ TOOLSETS = {
             "feishu_drive_reply_comment",
             "feishu_drive_add_comment",
         ],
-        "includes": []
+        "includes": ["real_estate"]
     },
 
     "hermes-weixin": {
