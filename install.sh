@@ -221,14 +221,15 @@ EOF
 start_service() {
     info "启动 Coco 房产助理..."
     if [[ "$OS" == "linux" ]] && command -v systemctl &> /dev/null; then
-        # 修复权限（数据库文件仅所有者可读写，含 WAL/SHM 伴随文件）
-        chmod 600 "$INSTALL_DIR/state.db" "$INSTALL_DIR/state.db-wal" "$INSTALL_DIR/state.db-shm" 2>/dev/null || true
-        chmod 600 "$INSTALL_DIR/real_estate.db" "$INSTALL_DIR/real_estate.db-wal" "$INSTALL_DIR/real_estate.db-shm" 2>/dev/null || true
-        chmod 600 "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.db" 2>/dev/null || true
+        # 修复权限（数据库/密钥文件仅所有者可读写，含 WAL/SHM 伴随文件）
+        # 数据库可能落在 HERMES_HOME 或默认 ~/.hermes，两个位置都覆盖
+        chmod 600 "$INSTALL_DIR"/state.db* "$INSTALL_DIR"/real_estate.db* "$INSTALL_DIR"/kanban.db* "$INSTALL_DIR"/cron/*.db 2>/dev/null || true
+        chmod 600 "$HOME/.hermes"/state.db* "$HOME/.hermes"/real_estate.db* "$HOME/.hermes"/kanban.db* "$HOME/.hermes"/cron/*.db 2>/dev/null || true
+        chmod 600 "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.db" "$HOME/.hermes/.env" 2>/dev/null || true
         sudo systemctl start $SERVICE_NAME
         # 服务启动可能新建数据库文件，再补一次权限（UMask 已兜底 0600）
         sleep 2
-        chmod 600 "$INSTALL_DIR/real_estate.db" "$INSTALL_DIR/real_estate.db-wal" "$INSTALL_DIR/real_estate.db-shm" 2>/dev/null || true
+        chmod 600 "$INSTALL_DIR"/state.db* "$INSTALL_DIR"/real_estate.db* "$HOME/.hermes"/state.db* "$HOME/.hermes"/real_estate.db* 2>/dev/null || true
         ok "服务已启动"
     else
         cd "$INSTALL_DIR"
