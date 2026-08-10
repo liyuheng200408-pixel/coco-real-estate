@@ -129,7 +129,13 @@ setup_database() {
     DB_PASSWORD=$(openssl rand -hex 16)
     DB_USER="hermes"
     DB_NAME="hermes_agent"
-    
+    # 生成敏感字段加密密钥（Fernet，cryptography 已在 install_packages 装好）
+    COCO_ENC_KEY=$("$INSTALL_DIR/venv/bin/python" -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null || echo "")
+    if [[ -z "$COCO_ENC_KEY" ]]; then
+        warn "未能生成加密密钥，敏感字段将以明文存储（请确认 cryptography 已安装）"
+    else
+        ok "敏感字段加密密钥已生成"
+    fi
     if [[ "$OS" == "linux" ]]; then
         sudo systemctl enable postgresql
         sudo systemctl start postgresql
@@ -148,6 +154,7 @@ DB_PORT=5432
 DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 DB_PASSWORD=$DB_PASSWORD
+COCO_ENC_KEY=$COCO_ENC_KEY
 DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME
 EOF
     chmod 600 "$INSTALL_DIR/.env.db"

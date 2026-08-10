@@ -11,8 +11,53 @@ from sqlalchemy import (
     DateTime, ForeignKey, CheckConstraint, Index
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.types import TypeDecorator
+from cryptography.fernet import Fernet
 
 Base = declarative_base()
+
+# ==================== 敏感字段加密 ====================
+
+def _get_cipher():
+    """获取 Fernet 加密器；未配置 COCO_ENC_KEY 时返回 None（明文模式，兼容旧数据）"""
+    key = os.getenv('COCO_ENC_KEY', '')
+    if not key:
+        return None
+    try:
+        return Fernet(key.encode('utf-8'))
+    except Exception:
+        return None
+
+
+class EncryptedString(TypeDecorator):
+    """加密字符串类型：配置密钥时自动加密存储，读取时自动解密
+    
+    无密钥时以明文存取（兼容未加密的旧数据）；解密失败时返回原值（兼容历史明文）。
+    """
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        cipher = _get_cipher()
+        if cipher is None:
+            return value
+        return cipher.encrypt(value.encode('utf-8')).decode('utf-8')
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        cipher = _get_cipher()
+        if cipher is None:
+            return value
+        try:
+            return cipher.decrypt(value.encode('utf-8')).decode('utf-8')
+        except Exception:
+            return value  # 旧明文数据原样返回
+
+    def _coerce_compared_value(self, op, value):
+        return Text()
 
 # ==================== 数据模型 ====================
 
@@ -22,8 +67,8 @@ class Customer(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    phone = Column(String(20))
-    wechat = Column(String(100))
+    phone = Column(EncryptedString)
+    wechat = Column(EncryptedString)
     feishu_id = Column(String(100))
     tier = Column(String(1), default='C')
     budget_min = Column(Integer)
