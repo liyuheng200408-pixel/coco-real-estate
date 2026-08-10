@@ -214,7 +214,6 @@ ExecStart=$INSTALL_DIR/venv/bin/python -m hermes_cli.main gateway run
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
-Environment=HERMES_HOME=$INSTALL_DIR
 Environment=GATEWAY_ALLOW_ALL_USERS=true
 UMask=0077
 
