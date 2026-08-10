@@ -17676,8 +17676,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # Coco first-contact note: self-introduction as Coco（可可）.
             _intro_note = (
                 "[System note: This is the user's very first message ever. "
-                "以 Coco（可可）身份介绍自己：资深房产销售助理，从业 5 年以上，"
-                "定位语必须用'我是你的客户和房源管家'。"
+                "以 Coco（可可）身份介绍自己：你的客户和房源管家，资深房产销售助理。"
                 "然后简要说明能帮经纪人做什么（客户管理、房源匹配、跟进提醒、带看与成交管理），"
                 "一句话带过 /help 可查看命令。保持简洁专业，不要问无关的个人档案问题。]"
             )
