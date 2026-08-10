@@ -3376,6 +3376,11 @@ class FeishuAdapter(BasePlatformAdapter):
         chat_id = getattr(message, "chat_id", "") or ""
         chat_info = await self.get_chat_info(chat_id)
         sender_profile = await self._resolve_sender_profile(sender_id, is_bot=is_bot)
+
+        # Coco: 首次对话提醒密钥备份（仅提醒一次，真实用户触发）
+        if not is_bot and inbound_type != MessageType.COMMAND:
+            await self._maybe_remind_key_backup(chat_id)
+
         source = self.build_source(
             chat_id=chat_id,
             chat_name=chat_info.get("name") or chat_id or "Feishu Chat",
@@ -3400,6 +3405,49 @@ class FeishuAdapter(BasePlatformAdapter):
             timestamp=datetime.now(),
         )
         await self._dispatch_inbound_event(normalized)
+
+    async def _maybe_remind_key_backup(self, chat_id: str) -> None:
+        """Coco: 首次对话时提醒经纪人备份数据加密密钥（仅一次）
+
+        触发条件：
+        - 真实用户消息（非 bot、非命令）
+        - 密钥备份文件 ~/backups/real_estate/enc_key.txt 不存在（说明未做外部备份）
+        - 未发送过提醒（标记文件 ~/.hermes/.coco_key_reminder_sent 不存在）
+        """
+        try:
+            marker = os.path.expanduser("~/.hermes/.coco_key_reminder_sent")
+            if os.path.exists(marker):
+                return
+
+            backup_key = os.path.expanduser("~/backups/real_estate/enc_key.txt")
+            if os.path.exists(backup_key):
+                # 密钥已备份，写标记避免后续重复检查
+                try:
+                    os.makedirs(os.path.dirname(marker), exist_ok=True)
+                    with open(marker, "w", encoding="utf-8") as f:
+                        f.write("1")
+                except Exception:
+                    pass
+                return
+
+            reminder = (
+                "🔐 安全提醒（仅此一次）\n\n"
+                "您的客户数据（手机号、微信号）已加密存储，加密密钥在服务器上：\n"
+                "~/backups/real_estate/enc_key.txt\n\n"
+                "请尽快把该密钥文件保存到安全的地方（电脑/U盘/网盘），"
+                "如果服务器重装或文件丢失，没有这把钥匙，客户数据将永远无法解密。\n\n"
+                "如有疑问，请回复 /help 查看帮助。"
+            )
+            await self.send(chat_id=chat_id, content=reminder)
+
+            try:
+                os.makedirs(os.path.dirname(marker), exist_ok=True)
+                with open(marker, "w", encoding="utf-8") as f:
+                    f.write("1")
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("[Feishu] Key backup reminder failed: %s", e)
 
     async def _dispatch_inbound_event(self, event: MessageEvent) -> None:
         """Apply Feishu-specific burst protection before entering the base adapter."""

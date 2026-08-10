@@ -257,6 +257,15 @@ start_service() {
     # 创建备份目录并设置定时备份
     mkdir -p ~/backups/real_estate
     chmod 700 ~/backups/real_estate
+
+    # 自动备份加密密钥（防丢失：密钥在 .env.db，单独备份一份到备份目录）
+    if [[ -f "$INSTALL_DIR/.env.db" ]] && grep -q "COCO_ENC_KEY=" "$INSTALL_DIR/.env.db"; then
+        grep "^COCO_ENC_KEY=" "$INSTALL_DIR/.env.db" > ~/backups/real_estate/enc_key.txt
+        chmod 600 ~/backups/real_estate/enc_key.txt
+        ok "加密密钥已备份到 ~/backups/real_estate/enc_key.txt"
+    else
+        warn "未找到加密密钥，跳过密钥备份"
+    fi
     
     # 添加定时备份任务（每天凌晨2点）
     (crontab -l 2>/dev/null; echo "0 2 * * * cd $INSTALL_DIR && source venv/bin/activate && python3 scripts/backup_db.py backup >> ~/backups/real_estate/backup.log 2>&1") | crontab -
@@ -284,6 +293,23 @@ print_result() {
     echo -e "  1. 在飞书开放平台配置事件订阅 URL"
     echo -e "  2. 测试飞书机器人消息"
     echo -e "  3. 开始使用 Coco 房产助理！"
+    echo ""
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}  🔐 重要！请立即备份数据加密密钥！${NC}"
+    echo -e "${RED}========================================${NC}"
+    echo ""
+    echo -e "客户手机号、微信号等敏感数据已加密存储。"
+    echo ""
+    echo -e "密钥文件已备份到: ${BLUE}~/backups/real_estate/enc_key.txt${NC}"
+    echo ""
+    echo -e "${RED}请务必把这个文件保存到安全的地方：${NC}"
+    echo -e "  1. 下载到自己的电脑 / U盘 / 网盘（推荐）"
+    echo -e "  2. 或打印一份纸质件收好"
+    echo ""
+    echo -e "${RED}警告：如果服务器重装或文件丢失，没有这把钥匙，${NC}"
+    echo -e "${RED}所有客户手机号、微信号将永远无法解密！${NC}"
+    echo ""
+    read -p "按回车键确认已了解密钥备份的重要性，继续... " _confirm
     echo ""
     echo -e "${GREEN}========================================${NC}"
 }

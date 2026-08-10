@@ -71,7 +71,9 @@ sudo journalctl -u hermes-agent -n 50 --no-pager
 
 ### 数据库备份
 
-每日凌晨 2 点自动备份至 `~/backups/real_estate/`，保留 30 天。
+每日凌晨 2 点自动备份至 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。
+
+> 重要：请把 `enc_key.txt` 密钥文件保存到安全的地方（电脑/U盘/网盘）。密钥丢失将导致客户数据永久无法解密。首次使用机器人时 Coco 也会提醒您备份。
 
 ```bash
 cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py backup
