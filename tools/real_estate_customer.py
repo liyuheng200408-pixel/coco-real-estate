@@ -23,16 +23,20 @@ def add_customer(
     renovation: str = None,
     notes: str = None,
     source: str = None,
+    customer_type: str = "buy",
     task_id: str = None,
 ) -> str:
-    """添加新客户到系统"""
+    """添加新客户到系统
+    
+    customer_type: buy_new(买新房) / buy_second_hand(买二手房) / rent(租房)
+    """
     db = _get_db()
     result = db.add_customer(
         name=name, phone=phone, wechat=wechat, tier=tier,
         budget_min=budget_min, budget_max=budget_max,
         area_pref=area_pref, layout_pref=layout_pref,
         location=location, renovation=renovation,
-        notes=notes, source=source,
+        notes=notes, source=source, customer_type=customer_type,
     )
     return json.dumps({"success": True, "customer": result}, ensure_ascii=False)
 
@@ -77,10 +81,13 @@ def get_customer(customer_id: int, task_id: str = None) -> str:
     return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
 
 
-def list_customers(tier: str = None, status: str = None, limit: int = 20, task_id: str = None) -> str:
-    """列出客户列表"""
+def list_customers(tier: str = None, status: str = None, customer_type: str = None, limit: int = 20, task_id: str = None) -> str:
+    """列出客户列表
+    
+    customer_type: buy_new(买新房) / buy_second_hand(买二手房) / rent(租房)
+    """
     db = _get_db()
-    result = db.list_customers(tier=tier, status=status, limit=limit)
+    result = db.list_customers(tier=tier, status=status, customer_type=customer_type, limit=limit)
     return json.dumps({"success": True, "customers": result, "count": len(result)}, ensure_ascii=False)
 
 
@@ -119,6 +126,7 @@ TOOLS = [
             "renovation": {"type": "string", "description": "装修偏好"},
             "notes": {"type": "string", "description": "备注"},
             "source": {"type": "string", "description": "客户来源"},
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型：buy_new(买新房)/buy_second_hand(买二手房)/rent(租房)"},
         },
         "required": ["name"],
     }, "handler": lambda args, **kw: add_customer(**args)},
