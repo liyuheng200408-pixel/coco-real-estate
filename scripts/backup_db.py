@@ -310,6 +310,117 @@ class DatabaseBackup:
             self._log("错误: pg_restore 超时")
             return False
 
+    def _restore_enc_key(self) -> bool:
+        """从备份目录的 enc_key.txt 恢复加密密钥到 .env.db（已有则替换，无则追加）"""
+        enc_key_file = self.backup_dir / "enc_key.txt"
+        if not enc_key_file.exists():
+            self._log("错误: 加密密钥备份不存在: enc_key.txt")
+            return False
+
+        new_key_line = None
+        for line in enc_key_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("COCO_ENC_KEY=") and len(line.split("=", 1)[1].strip()) > 0:
+                new_key_line = line
+                break
+        if not new_key_line:
+            self._log("错误: enc_key.txt 中未找到有效的 COCO_ENC_KEY")
+            return False
+
+        env_db_candidates = [
+            Path.home() / "hermes-agent" / ".env.db",
+            Path.cwd() / ".env.db",
+        ]
+        env_db = None
+        for cand in env_db_candidates:
+            if cand.exists():
+                env_db = cand
+                break
+        if env_db is None:
+            self._log("错误: 未找到 .env.db，无法合并加密密钥")
+            return False
+
+        lines = env_db.read_text(encoding="utf-8").splitlines()
+        replaced = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("COCO_ENC_KEY="):
+                lines[i] = new_key_line
+                replaced = True
+                break
+        if not replaced:
+            lines.append(new_key_line)
+        env_db.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        try:
+            os.chmod(env_db, 0o600)
+        except OSError:
+            pass
+        self._log(f"加密密钥已恢复并写入 {env_db}（{'替换' if replaced else '追加'}）")
+        return True
+
+    def restore_migration(self, backup_filename: str = None, images_filename: str = None,
+                          migration_tar: str = None) -> bool:
+        """迁移恢复：一条命令完成 数据库 + 图片 + 加密密钥 恢复
+
+        Args:
+            backup_filename: 数据库备份文件名（默认取备份目录最新 dump）
+            images_filename: 图片备份文件名（默认取备份目录最新 images tar.gz）
+            migration_tar: 迁移打包文件（coco_migration.tar.gz），若指定先解包到备份目录
+        """
+        if migration_tar:
+            import tarfile
+            tar_path = Path(migration_tar)
+            if not tar_path.exists():
+                self._log(f"错误: 迁移打包文件不存在: {migration_tar}")
+                return False
+            try:
+                with tarfile.open(tar_path, "r:gz") as tar:
+                    try:
+                        tar.extractall(self.backup_dir, filter="data")
+                    except TypeError:
+                        # Python < 3.12 无 filter 参数，回退（迁移包为自产文件，风险可控）
+                        tar.extractall(self.backup_dir)
+                self._log(f"迁移包已解包到 {self.backup_dir}: {migration_tar}")
+            except Exception as e:
+                self._log(f"迁移包解包失败: {e}")
+                return False
+
+        if backup_filename is None:
+            dumps = sorted(self.backup_dir.glob("real_estate_*.dump"))
+            if not dumps:
+                self._log("错误: 备份目录没有数据库备份文件")
+                return False
+            backup_filename = dumps[-1].name
+        if images_filename is None:
+            images = sorted(self.backup_dir.glob("real_estate_images_*.tar.gz"))
+            if images:
+                images_filename = images[-1].name
+
+        self._log(f"迁移恢复开始: 数据库={backup_filename} 图片={images_filename or '无'}")
+
+        # 顺序: 先恢复数据库, 再恢复图片, 最后恢复密钥
+        if not self.restore(backup_filename):
+            self._log("迁移恢复中止: 数据库恢复失败")
+            return False
+
+        if images_filename:
+            if not self.restore_images(images_filename):
+                self._log("迁移恢复中止: 图片恢复失败")
+                return False
+        else:
+            self._log("提示: 未找到图片备份，跳过图片恢复")
+
+        if not self._restore_enc_key():
+            self._log("迁移恢复中止: 加密密钥恢复失败")
+            return False
+
+        self._log("迁移恢复完成: 数据库 + 图片 + 加密密钥 全部成功")
+        print("============================================")
+        print("迁移恢复完成！请执行以下步骤：")
+        print("  1. sudo systemctl restart hermes-agent")
+        print("  2. 给机器人发送\"你好\"，定时任务会自动注册")
+        print("============================================")
+        return True
+
     def list_backups(self) -> list:
         """列出所有备份"""
         backups = []
@@ -339,11 +450,13 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Coco 房产助理 - PostgreSQL 数据库备份工具")
-    parser.add_argument("action", choices=["backup", "restore", "list", "status"], help="操作类型")
+    parser.add_argument("action", choices=["backup", "restore", "restore_migration", "list", "status"], help="操作类型")
     parser.add_argument("--db-url", default=None, help="PostgreSQL 连接串（默认读 .env.db）")
     parser.add_argument("--backup-dir", default=None, help="备份目录")
     parser.add_argument("--force", action="store_true", help="强制备份（忽略数据变化）")
     parser.add_argument("--restore-file", help="恢复指定备份文件")
+    parser.add_argument("--images-file", help="迁移恢复时指定图片备份文件")
+    parser.add_argument("--migration-tar", help="迁移打包文件路径（coco_migration.tar.gz），restore_migration 先解包再恢复")
 
     args = parser.parse_args()
 
@@ -356,6 +469,12 @@ def main():
             print("错误: 请指定 --restore-file 参数")
             exit(1)
         exit(0 if backup_mgr.restore(args.restore_file) else 1)
+    elif args.action == "restore_migration":
+        exit(0 if backup_mgr.restore_migration(
+            backup_filename=args.restore_file,
+            images_filename=args.images_file,
+            migration_tar=args.migration_tar,
+        ) else 1)
     elif args.action == "list":
         backups = backup_mgr.list_backups()
         if not backups:
