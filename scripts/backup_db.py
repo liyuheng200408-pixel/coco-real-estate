@@ -237,6 +237,44 @@ class DatabaseBackup:
             self._log(f"图片备份失败: {e}")
             return ""
 
+    def restore_images(self, image_tar_filename: str) -> bool:
+        """恢复房源图片备份（tar.gz 解包到图片缓存目录）"""
+        import tarfile
+        tar_path = self.backup_dir / image_tar_filename
+        if not tar_path.exists():
+            self._log(f"错误: 图片备份不存在: {image_tar_filename}")
+            return False
+        cache_candidates = [
+            Path.home() / ".hermes" / "cache" / "images",
+            Path.home() / "hermes-agent" / ".hermes" / "cache" / "images",
+        ]
+        target_dir = None
+        for cand in cache_candidates:
+            try:
+                cand.mkdir(parents=True, exist_ok=True)
+                if os.access(cand, os.W_OK):
+                    target_dir = cand
+                    break
+            except Exception:
+                continue
+        if target_dir is None:
+            self._log("错误: 找不到可写的图片缓存目录")
+            return False
+        try:
+            with tarfile.open(tar_path, "r:gz") as tar:
+                for member in tar.getmembers():
+                    if member.isfile():
+                        f = tar.extractfile(member)
+                        if f:
+                            data = f.read()
+                            (target_dir / member.name.split("/")[-1]).write_bytes(data)
+            count = len([p for p in target_dir.iterdir() if p.is_file()])
+            self._log(f"图片恢复成功: {image_tar_filename} -> {target_dir} ({count} 张图片)")
+            return True
+        except Exception as e:
+            self._log(f"图片恢复失败: {e}")
+            return False
+
     def restore(self, backup_filename: str) -> bool:
         """恢复备份"""
         backup_path = self.backup_dir / backup_filename
