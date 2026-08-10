@@ -63,6 +63,8 @@ sudo systemctl start hermes-agent
 cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent
 ```
 
+> 注意：此命令只更新代码与依赖。若更新涉及已有表结构/数据单位变更（如 2026-08 价格单位改元），需先执行 `bash scripts/migrate_price_to_yuan.sh` 迁移旧数据，再重启服务。新增表启动时自动创建，无需处理。
+
 ### 服务管理
 
 ```bash
