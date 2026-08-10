@@ -7,7 +7,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, Float,
+    create_engine, Column, Integer, String, Text, Float, Numeric,
     DateTime, ForeignKey, CheckConstraint, Index
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
@@ -120,7 +120,7 @@ class Property(Base):
     community = Column(String(100))
     district = Column(String(100))
     address = Column(String(300))
-    price = Column(Integer, nullable=False)
+    price = Column(Numeric(12, 2), nullable=False)  # 万元（支持出租房源月租小数，如0.13万）
     unit_price = Column(Integer)
     area = Column(Float, nullable=False)
     rooms = Column(Integer)
