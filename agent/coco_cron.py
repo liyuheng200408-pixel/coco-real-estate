@@ -7,18 +7,30 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# 标记文件：防止重复注册
-_MARKER = "~/.hermes/.coco_cron_registered"
+# 标记文件：防止重复注册（放在 HERMES_HOME 下，与 cron 存储一致）
+_MARKER = ".coco_cron_registered"
 _CRON_JOBS = (
     ("coco_daily_report", "0 9 * * *", "coco_daily_report",
      "你是Coco房产助理。请调用 daily_report 工具生成每日早报，然后用简洁清单体向经纪人汇报：今日待跟进客户、S/A级客户状态、逾期预警。不要添加额外内容。"),
     ("coco_midday_check", "0 13 * * *", "coco_midday_check",
      "你是Coco房产助理。请调用 midday_check 工具做午间检查，汇报：逾期未跟进客户、今日剩余任务。没有异常就简短回复'今日无异常'。"),
     ("coco_overdue_check", "*/30 * * * *", "coco_overdue_check",
-     "你是Coco房产助理。请调用 get_overdue 工具检查逾期客户。如果有逾期客户，列出客户名和逾期天数，提醒经纪人尽快跟进。如果没有逾期客户，回复[NO_ALERT]表示无异常。"),
+     "你是Coco房产助理。请调用 get_overdue 工具检查逾期客户。如果有逾期客户，列出客户名和逾期天数，提醒经纪人尽快跟进。如果没有逾期客户，只回复[SILENT]不要输出任何其他内容。"),
     ("coco_birthday_check", "0 8 * * *", "coco_birthday_check",
-     "你是Coco房产助理。请调用 birthday_check 工具检查今天和明天过生日的客户。如果有，列出客户名和生日，提醒经纪人发送祝福维护关系。如果没有，回复[NO_ALERT]表示无异常。"),
+     "你是Coco房产助理。请调用 birthday_check 工具检查今天和明天过生日的客户。如果有，列出客户名和生日，提醒经纪人发送祝福维护关系。如果没有，只回复[SILENT]不要输出任何其他内容。"),
 )
+
+
+def _marker_path() -> str:
+    """标记文件路径：跟随 HERMES_HOME（与 cron 存储同目录）"""
+    try:
+        from hermes_constants import get_hermes_home
+        home = get_hermes_home()
+        return os.path.join(str(home), _MARKER)
+    except Exception:
+        # 兜底：环境变量
+        home = os.getenv("HERMES_HOME") or os.path.expanduser("~/.hermes")
+        return os.path.join(home, _MARKER)
 
 
 def _cron_store_ready() -> bool:
@@ -32,20 +44,15 @@ def _cron_store_ready() -> bool:
 
 
 def _job_exists(job_name: str) -> bool:
-    """检查同名任务是否已注册"""
+    """通过官方 list_jobs 接口检查同名任务是否已注册（不猜存储路径）"""
     try:
-        from cron.jobs import _current_cron_store
-        store = _current_cron_store()
-        jobs_file = store.jobs_file
-        import json
-        if os.path.exists(jobs_file):
-            with open(jobs_file, encoding="utf-8") as f:
-                data = json.load(f)
-            for job in data:
-                if job.get("name") == job_name:
-                    return True
-    except Exception:
-        pass
+        from cron.jobs import list_jobs
+        jobs = list_jobs(include_disabled=True)
+        for job in jobs:
+            if job.get("name") == job_name:
+                return True
+    except Exception as e:
+        logger.warning("[Coco] list_jobs failed: %s", e)
     return False
 
 
@@ -59,10 +66,15 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
         dict: {"registered": [job names], "skipped": [job names]}
     """
     result = {"registered": [], "skipped": []}
-    marker = os.path.expanduser(_MARKER)
+    marker = _marker_path()
+
+    # 标记存在则跳过（幂等）；缺失任务由 _job_exists 兜底补注册
     if os.path.exists(marker):
-        # 已注册过，检查是否缺失任务（补注册）
-        pass
+        # 检查是否有缺失任务需要补注册
+        missing = [name for _, _, name, _ in _CRON_JOBS if not _job_exists(name)]
+        if not missing:
+            return result
+        logger.info("[Coco] missing jobs to re-register: %s", missing)
 
     if not _cron_store_ready():
         logger.warning("[Coco] cron store not ready, skip cron registration")
@@ -87,7 +99,7 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
             logger.warning("[Coco] cron job %s registration failed: %s", name, e)
             result["skipped"].append(f"{name}(error)")
 
-    # 写标记（即使部分失败也写，避免每次对话重试；缺失任务下次会补注册）
+    # 写标记
     try:
         os.makedirs(os.path.dirname(marker), exist_ok=True)
         with open(marker, "w", encoding="utf-8") as f:
@@ -96,3 +108,26 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
         pass
 
     return result
+
+
+def remove_duplicate_coco_jobs() -> int:
+    """清理重复注册的 Coco 任务，保留每个任务第一个，返回删除数"""
+    removed = 0
+    try:
+        from cron.jobs import list_jobs, remove_job
+        seen = set()
+        for job in list_jobs(include_disabled=True):
+            name = job.get("name") or ""
+            if name.startswith("coco_"):
+                if name in seen:
+                    try:
+                        remove_job(job.get("id"))
+                        removed += 1
+                        logger.info("[Coco] removed duplicate job: %s (%s)", name, job.get("id"))
+                    except Exception as e:
+                        logger.warning("[Coco] failed to remove duplicate %s: %s", name, e)
+                else:
+                    seen.add(name)
+    except Exception as e:
+        logger.warning("[Coco] remove_duplicate_coco_jobs failed: %s", e)
+    return removed
