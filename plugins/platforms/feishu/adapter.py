@@ -3377,8 +3377,10 @@ class FeishuAdapter(BasePlatformAdapter):
         chat_info = await self.get_chat_info(chat_id)
         sender_profile = await self._resolve_sender_profile(sender_id, is_bot=is_bot)
 
-        # Coco: 首次对话提醒密钥备份（仅提醒一次，真实用户触发）
+        # Coco: 首次对话发送固定欢迎语（仅一次，独立于会话历史）
         if not is_bot and inbound_type != MessageType.COMMAND:
+            await self._maybe_send_coco_welcome(chat_id)
+            # Coco: 首次对话提醒密钥备份（仅提醒一次，真实用户触发）
             await self._maybe_remind_key_backup(chat_id)
             # Coco: 首次对话自动注册定时任务（早报/午间/逾期检查）
             try:
@@ -3413,6 +3415,31 @@ class FeishuAdapter(BasePlatformAdapter):
             timestamp=datetime.now(),
         )
         await self._dispatch_inbound_event(normalized)
+
+    async def _maybe_send_coco_welcome(self, chat_id: str) -> None:
+        """Coco: 首次对话发送固定欢迎语（仅一次）
+
+        通过飞书 adapter 直接发送固定文案，不依赖模型生成和会话历史判断。
+        marker 文件（.coco_welcome_sent）确保只发一次。
+        """
+        try:
+            marker = os.path.expanduser("~/.hermes/.coco_welcome_sent")
+            if os.path.exists(marker):
+                return
+            welcome = (
+                "你好，我是 Coco（可可），你的客户和房源管家，资深房产销售助理。"
+                "我能帮你管理客户、匹配房源、安排带看、跟进成交。"
+                "输入 /help 可查看所有命令。"
+            )
+            await self.send(chat_id=chat_id, content=welcome)
+            try:
+                os.makedirs(os.path.dirname(marker), exist_ok=True)
+                with open(marker, "w", encoding="utf-8") as f:
+                    f.write("1")
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("[Feishu] Coco welcome send failed: %s", e)
 
     async def _maybe_remind_key_backup(self, chat_id: str) -> None:
         """Coco: 首次对话时把加密密钥直接发给经纪人（仅一次）
