@@ -153,3 +153,29 @@ registry.register(
     }},
     handler=lambda args, **kw: weekly_market_report(**args),
 )
+
+
+def channel_stats(task_id: str = None) -> str:
+    """渠道线索统计：按客户来源分组统计客户数、S/A/B/C分级、成交数、成交率
+
+    来源为固定选项：安居客/贝壳/抖音/转介绍/门店/58/其他（未填写归入"未填写"）。
+    """
+    db = _get_db()
+    channels = db.get_channel_stats()
+    return json.dumps({
+        "success": True,
+        "channels": channels,
+        "total_channels": len(channels),
+        "message": "各渠道线索量与成交率一览，可据此判断广告投放性价比",
+    }, ensure_ascii=False)
+
+
+registry.register(
+    name="channel_stats",
+    toolset="real_estate",
+    schema={"name": "channel_stats", "description": "渠道线索统计：按客户来源分组统计客户数、分级、成交数、成交率，判断哪个渠道来客多、成交率高", "parameters": {
+        "type": "object",
+        "properties": {},
+    }},
+    handler=lambda args, **kw: channel_stats(**args),
+)

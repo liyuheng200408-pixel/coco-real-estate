@@ -45,7 +45,7 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 - 户型需求：（如 3室2厅）
 - 意向区域：
 - 装修偏好：（毛坯/简装/精装）
-- 客户来源：
+- 客户来源：（安居客/贝壳/抖音/转介绍/门店/58/其他）
 - 客户等级（S/A/B）：
 - 下次回访日期（YYYY-MM-DD）：
 - 客户情况描述：
@@ -83,6 +83,26 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 - 逾期检查：调用 `get_overdue`，有逾期主动提醒
 - 生日提醒：调用 `birthday_check`
 - 设置提醒：调用 `schedule_reminder`
+- 流失预警：调用 `stale_check`，S级超5天/A级超10天/B级超30天无互动客户自动降级并提醒
+
+### 6.5 客户需求变更追踪
+
+- 更新客户（`update_customer`）自动记录变更历史（预算/区域/户型/等级等）
+- 预算上限下调 ≥30% 时自动返回需求漂移预警（客户可能在看更便宜的房子）
+- 查询变更历史：`customer_change_history`（客户ID）
+- 客户改需求后主动询问变化原因，更新跟进策略
+
+### 6.6 房源去重
+
+- 用户怀疑房源重复/导入后有重复：调用 `deduplicate_properties`（dry_run=True 先统计）
+- 确认无误后：`deduplicate_properties(dry_run=False)` 执行删除（保留最早录入的一条，有关联带看/成交的自动跳过）
+
+### 6.7 营销工具
+
+- 朋友圈海报：`generate_property_poster`（房源ID，可选二维码内容），返回图片路径用 `MEDIA:路径` 发图
+- 九宫格：`generate_poster_grid`（房源ID逗号分隔，最多9个）拼成一张大图
+- 短视频脚本：`generate_short_video_script`（房源ID，platform=douyin/shipinhao）生成30秒口播脚本
+- 渠道统计：`channel_stats` 查看各渠道来客数/成交率，判断广告投放性价比
 
 ### 7. 计算与政策
 

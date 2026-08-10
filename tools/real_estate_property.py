@@ -225,3 +225,36 @@ registry.register(
     schema={"name": "property_stats", "description": "获取房源统计数据", "parameters": TOOLS[4]["parameters"]},
     handler=TOOLS[4]["handler"],
 )
+
+
+def deduplicate_properties(dry_run: bool = True, task_id: str = None) -> str:
+    """房源去重：按 标题+面积+价格 找出重复房源，保留最早录入的一条
+
+    dry_run=True（默认）只统计不删除；dry_run=False 执行删除。
+    有关联带看/成交/跟进记录的重复房源自动跳过（保守处理）。
+    """
+    db = _get_db()
+    result = db.remove_duplicate_properties(dry_run=dry_run)
+    if result.get('dry_run'):
+        message = (
+            f"发现 {result['duplicate_groups']} 组重复房源，共 {result['duplicate_total']} 条可清理。"
+            f"确认清理请调用 deduplicate_properties(dry_run=False)。"
+        )
+    else:
+        message = f"已清理 {len(result['removable'])} 条重复房源（{result['duplicate_groups']} 组）。"
+        if result.get('skipped'):
+            message += f" 跳过 {len(result['skipped'])} 条有关联记录的房源。"
+    return json.dumps({"success": True, "result": result, "message": message}, ensure_ascii=False)
+
+
+registry.register(
+    name="deduplicate_properties",
+    toolset="real_estate",
+    schema={"name": "deduplicate_properties", "description": "房源去重：按标题+面积+价格找出重复房源，保留最早录入的一条。dry_run=True只统计，dry_run=False执行删除。", "parameters": {
+        "type": "object",
+        "properties": {
+            "dry_run": {"type": "boolean", "description": "True只统计不删除（默认），False执行删除"},
+        },
+    }},
+    handler=lambda args, **kw: deduplicate_properties(**args),
+)

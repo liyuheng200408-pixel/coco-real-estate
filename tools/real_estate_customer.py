@@ -60,8 +60,11 @@ def update_customer(
     birthday: str = None,
     task_id: str = None,
 ) -> str:
-    """更新客户信息"""
+    """更新客户信息（自动记录变更历史；预算大幅下调时给出需求漂移预警）"""
     db = _get_db()
+    old = db.get_customer(customer_id)
+    if old is None:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
     kwargs = {k: v for k, v in {
         'name': name, 'phone': phone, 'wechat': wechat, 'tier': tier,
         'budget_min': budget_min, 'budget_max': budget_max,
@@ -70,9 +73,45 @@ def update_customer(
         'notes': notes, 'status': status, 'birthday': birthday,
     }.items() if v is not None}
     result = db.update_customer(customer_id, **kwargs)
-    if result:
-        return json.dumps({"success": True, "customer": result}, ensure_ascii=False)
-    return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+
+    # 需求漂移预警：预算上限下调 >=30% → 客户可能转向更便宜的房子
+    alerts = []
+    if 'budget_max' in kwargs and old.get('budget_max'):
+        old_max = float(old['budget_max'])
+        new_max = float(kwargs['budget_max'])
+        if old_max > 0 and new_max < old_max * 0.7:
+            drop_pct = round((old_max - new_max) / old_max * 100)
+            alerts.append({
+                'type': 'budget_drift',
+                'level': 'warning',
+                'message': f"预算上限从 {old_max:.0f}万 下调到 {new_max:.0f}万（降 {drop_pct}%），"
+                           f"客户很可能在别处看到了更便宜的房子，建议主动联系确认需求变化。",
+            })
+    if 'location' in kwargs and old.get('location') and kwargs['location'] != old.get('location'):
+        alerts.append({
+            'type': 'location_change',
+            'level': 'info',
+            'message': f"意向区域从「{old['location']}」变更为「{kwargs['location']}」，留意需求方向变化。",
+        })
+
+    response = {"success": True, "customer": result}
+    if alerts:
+        response['alerts'] = alerts
+    return json.dumps(response, ensure_ascii=False)
+
+
+def customer_change_history(customer_id: int, limit: int = 20, task_id: str = None) -> str:
+    """查询客户需求变更历史（预算/区域/户型/等级等字段的变更记录）"""
+    db = _get_db()
+    customer = db.get_customer(customer_id)
+    if not customer:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    changes = db.get_customer_changes(customer_id, limit=limit)
+    return json.dumps({
+        "success": True, "customer_id": customer_id,
+        "customer_name": customer.get('name'),
+        "changes": changes, "count": len(changes),
+    }, ensure_ascii=False)
 
 
 def get_customer(customer_id: int, task_id: str = None) -> str:
@@ -179,8 +218,21 @@ registry.register(
 registry.register(
     name="update_customer",
     toolset="real_estate",
-    schema={"name": "update_customer", "description": "更新客户信息", "parameters": TOOLS[1]["parameters"]},
+    schema={"name": "update_customer", "description": "更新客户信息（自动记录变更历史；预算大幅下调≥30%时返回需求漂移预警）", "parameters": TOOLS[1]["parameters"]},
     handler=TOOLS[1]["handler"],
+)
+registry.register(
+    name="customer_change_history",
+    toolset="real_estate",
+    schema={"name": "customer_change_history", "description": "查询客户需求变更历史（预算/区域/户型/等级等字段的变更记录）", "parameters": {
+        "type": "object",
+        "properties": {
+            "customer_id": {"type": "integer", "description": "客户ID"},
+            "limit": {"type": "integer", "description": "返回条数，默认20"},
+        },
+        "required": ["customer_id"],
+    }},
+    handler=lambda args, **kw: customer_change_history(**args),
 )
 registry.register(
     name="get_customer",
@@ -325,7 +377,7 @@ def get_customer_form(task_id: str = None) -> str:
 - 户型需求：（如 3室2厅）
 - 意向区域：
 - 装修偏好：（毛坯/简装/精装）
-- 客户来源：
+- 客户来源：（安居客/贝壳/抖音/转介绍/门店/58/其他）
 - 客户等级（S/A/B）：
 - 下次回访日期（YYYY-MM-DD）：
 - 客户情况描述：

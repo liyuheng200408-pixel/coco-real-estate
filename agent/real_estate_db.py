@@ -89,6 +89,7 @@ class Customer(Base):
     followups = relationship("Followup", back_populates="customer")
     viewings = relationship("Viewing", back_populates="customer")
     deals = relationship("Deal", back_populates="customer")
+    changes = relationship("CustomerChange", back_populates="customer")
     
     __table_args__ = (
         CheckConstraint("tier IN ('S', 'A', 'B', 'C')", name='re_check_tier'),
@@ -319,6 +320,32 @@ class Script(Base):
     )
 
 
+class CustomerChange(Base):
+    """客户需求变更历史表（预算/区域/户型等字段变更留痕）"""
+    __tablename__ = 're_customer_changes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey('re_customers.id'), nullable=False)
+    field = Column(String(50), nullable=False)   # 变更字段：budget_min/budget_max/location/tier...
+    old_value = Column(String(200))
+    new_value = Column(String(200))
+    created_at = Column(DateTime, default=datetime.now)
+
+    customer = relationship("Customer", back_populates="changes")
+
+    __table_args__ = (
+        Index('re_idx_change_customer', 'customer_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'customer_id': self.customer_id,
+            'field': self.field, 'old_value': self.old_value,
+            'new_value': self.new_value,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 # ==================== 数据库管理 ====================
 
 class RealEstateDB:
@@ -344,9 +371,25 @@ class RealEstateDB:
             c = s.query(Customer).get(cid)
             if not c: return None
             for k, v in kwargs.items():
-                if hasattr(c, k): setattr(c, k, v)
+                if hasattr(c, k):
+                    old = getattr(c, k)
+                    if old != v:
+                        s.add(CustomerChange(
+                            customer_id=cid, field=k,
+                            old_value=str(old) if old is not None else None,
+                            new_value=str(v) if v is not None else None,
+                        ))
+                    setattr(c, k, v)
             s.commit(); s.refresh(c)
             return c.to_dict()
+    
+    def get_customer_changes(self, customer_id, limit=20):
+        """查询客户需求变更历史（预算/区域/户型等）"""
+        with self.get_session() as s:
+            return [ch.to_dict() for ch in s.query(CustomerChange)
+                .filter(CustomerChange.customer_id == customer_id)
+                .order_by(CustomerChange.created_at.desc(), CustomerChange.id.desc())
+                .limit(limit).all()]
     
     def get_customer(self, cid):
         with self.get_session() as s:
@@ -396,6 +439,49 @@ class RealEstateDB:
                 if hasattr(p, k): setattr(p, k, v)
             s.commit(); s.refresh(p)
             return p.to_dict()
+
+    def find_duplicate_properties(self):
+        """按 标题+面积+价格 找重复房源组（含Excel批量导入产生的完全重复项）
+        
+        返回 [[keep_id, dup_id, ...], ...]，每组按 id 升序，第一个为保留项。
+        """
+        with self.get_session() as s:
+            props = s.query(Property).all()
+            groups = {}
+            for p in props:
+                key = (p.title or '', round(p.area or 0, 2), float(p.price or 0))
+                groups.setdefault(key, []).append(p.id)
+            return [sorted(v) for v in groups.values() if len(v) > 1]
+
+    def remove_duplicate_properties(self, dry_run=True):
+        """去重：每组保留最早 id，删除其余（有关联记录则跳过，保守处理）
+        
+        dry_run=True 只统计不删除；返回 removable 列表供确认。
+        """
+        dups = self.find_duplicate_properties()
+        removed, skipped = [], []
+        with self.get_session() as s:
+            for group in dups:
+                keep_id = group[0]
+                for dup_id in group[1:]:
+                    rel = (s.query(Deal).filter(Deal.property_id == dup_id).count()
+                           + s.query(Followup).filter(Followup.property_id == dup_id).count()
+                           + s.query(Viewing).filter(Viewing.property_id == dup_id).count())
+                    if rel > 0:
+                        skipped.append({'id': dup_id, 'reason': '有关联带看/成交/跟进记录'})
+                        continue
+                    if not dry_run:
+                        p = s.query(Property).get(dup_id)
+                        if p: s.delete(p)
+                    removed.append(dup_id)
+            if not dry_run:
+                s.commit()
+        return {
+            'duplicate_groups': len(dups),
+            'duplicate_total': sum(len(g) - 1 for g in dups),
+            'removable': removed, 'skipped': skipped,
+            'dry_run': dry_run,
+        }
 
     def match_customers_for_property(self, property_id, top_n=5):
         """房源反匹配：新房源 → 扫描 S/A 级客户，按需求匹配推荐
@@ -567,6 +653,57 @@ class RealEstateDB:
                 .filter(Followup.next_date.isnot(None))
                 .order_by(Followup.next_date).all()]
     
+    def get_stale_customers(self):
+        """流失预警：按最后互动时间计算超期客户
+        
+        S级>5天 / A级>10天 / B级>30天 / C级>60天 无互动 → 预警。
+        最后互动时间 = 最后一条跟进记录时间；无跟进则取客户创建时间。
+        """
+        with self.get_session() as s:
+            now = datetime.now()
+            result = []
+            for c in s.query(Customer).filter(Customer.status == 'active').all():
+                last_fu = s.query(Followup).filter(Followup.customer_id == c.id) \
+                    .order_by(Followup.created_at.desc()).first()
+                last_time = last_fu.created_at if (last_fu and last_fu.created_at) else c.created_at
+                if not last_time:
+                    continue
+                days = (now - last_time).days
+                threshold = {'S': 5, 'A': 10, 'B': 30}.get(c.tier, 60)
+                if days > threshold:
+                    result.append({
+                        'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                        'days_inactive': days, 'threshold': threshold,
+                        'last_contact': last_time.isoformat() if last_time else None,
+                    })
+            return result
+    
+    def auto_downgrade_stale_customers(self):
+        """流失自动降级：S级超5天→A，A级超10天→B，B级超30天→C
+        
+        降级同时写入变更历史。返回降级明细和仍超期的客户数。
+        """
+        stale = self.get_stale_customers()
+        downgrades = []
+        with self.get_session() as s:
+            for item in stale:
+                c = s.query(Customer).get(item['customer_id'])
+                if not c:
+                    continue
+                mapping = {'S': 'A', 'A': 'B', 'B': 'C'}
+                new_tier = mapping.get(c.tier)
+                if new_tier and c.tier != new_tier:
+                    old = c.tier
+                    c.tier = new_tier
+                    s.add(CustomerChange(customer_id=c.id, field='tier',
+                                         old_value=old, new_value=new_tier))
+                    downgrades.append({
+                        'customer_id': c.id, 'name': c.name,
+                        'from': old, 'to': new_tier, 'days_inactive': item['days_inactive'],
+                    })
+            s.commit()
+        return {'downgrades': downgrades, 'still_stale': len(stale) - len(downgrades)}
+    
     # ---------- 统计 ----------
     def get_stats(self):
         with self.get_session() as s:
@@ -578,6 +715,26 @@ class RealEstateDB:
                 'total_customers': total, 'tier_counts': tiers,
                 'available_properties': props, 'overdue_followups': overdue,
             }
+    
+    def get_channel_stats(self):
+        """渠道线索统计：按客户来源分组统计客户数、分级、成交数、成交率"""
+        with self.get_session() as s:
+            channels = {}
+            for c in s.query(Customer).all():
+                src = (c.source or '').strip() or '未填写'
+                ch = channels.setdefault(src, {
+                    'source': src, 'customers': 0,
+                    'tiers': {'S': 0, 'A': 0, 'B': 0, 'C': 0}, 'deals': 0,
+                })
+                ch['customers'] += 1
+                tier = c.tier or 'C'
+                ch['tiers'][tier] = ch['tiers'].get(tier, 0) + 1
+                if s.query(Deal).filter(Deal.customer_id == c.id).first():
+                    ch['deals'] += 1
+            result = sorted(channels.values(), key=lambda x: -x['customers'])
+            for ch in result:
+                ch['conversion_rate'] = round(ch['deals'] / ch['customers'] * 100, 1) if ch['customers'] else 0
+            return result
     
     def daily_report(self):
         stats = self.get_stats()

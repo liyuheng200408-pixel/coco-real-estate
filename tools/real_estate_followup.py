@@ -40,12 +40,36 @@ def get_followups(customer_id: int, limit: int = 20, task_id: str = None) -> str
 
 
 def get_overdue(task_id: str = None) -> str:
-    """获取逾期跟进列表（需要立即处理的客户）"""
+    """获取逾期跟进列表 + 流失预警（超期无互动客户自动降级）"""
     db = _get_db()
     result = db.get_overdue()
+    # 流失预警：自动降级长期无互动客户（S>5天→A，A>10天→B，B>30天→C）
+    downgrade = db.auto_downgrade_stale_customers()
+    stale = db.get_stale_customers()
+    message = f"有 {len(result)} 条跟进已逾期" if result else "暂无逾期跟进"
+    response = {"success": True, "overdue": result, "count": len(result), "message": message}
+    if downgrade.get('downgrades'):
+        response['downgrades'] = downgrade['downgrades']
+        response['message'] = message + f"；{len(downgrade['downgrades'])} 位客户长期无互动已自动降级"
+    if stale:
+        response['stale_customers'] = stale
+    return json.dumps(response, ensure_ascii=False)
+
+
+def stale_check(task_id: str = None) -> str:
+    """流失预警检查：自动降级长期无互动客户并返回预警列表
+
+    S级>5天无互动→降A，A级>10天→降B，B级>30天→降C；降级写入变更历史。
+    """
+    db = _get_db()
+    downgrade = db.auto_downgrade_stale_customers()
+    stale = db.get_stale_customers()
     return json.dumps({
-        "success": True, "overdue": result, "count": len(result),
-        "message": f"有 {len(result)} 条跟进已逾期" if result else "暂无逾期跟进"
+        "success": True,
+        "downgrades": downgrade['downgrades'],
+        "still_stale": stale,
+        "still_stale_count": len(stale),
+        "message": f"本次自动降级 {len(downgrade['downgrades'])} 位客户" if downgrade['downgrades'] else "无客户需要降级",
     }, ensure_ascii=False)
 
 
@@ -67,16 +91,28 @@ def schedule_reminder(customer_id: int, date: str, time: str, content: str = Non
 
 
 def daily_report(task_id: str = None) -> str:
-    """生成每日早报"""
+    """生成每日早报（附带流失预警与自动降级信息）"""
     db = _get_db()
     report = db.daily_report()
+    downgrade = db.auto_downgrade_stale_customers()
+    stale = db.get_stale_customers()
+    if downgrade.get('downgrades'):
+        report['downgrades'] = downgrade['downgrades']
+    if stale:
+        report['stale_customers'] = stale
     return json.dumps({"success": True, "report": report}, ensure_ascii=False)
 
 
 def midday_check(task_id: str = None) -> str:
-    """午间检查"""
+    """午间检查（附带流失预警）"""
     db = _get_db()
     check = db.midday_check()
+    downgrade = db.auto_downgrade_stale_customers()
+    stale = db.get_stale_customers()
+    if downgrade.get('downgrades'):
+        check['downgrades'] = downgrade['downgrades']
+    if stale:
+        check['stale_customers'] = stale
     return json.dumps({"success": True, "check": check}, ensure_ascii=False)
 
 
@@ -111,6 +147,9 @@ TOOLS = [
     {"name": "midday_check", "description": "午间检查", "parameters": {
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: midday_check()},
+    {"name": "stale_check", "description": "流失预警检查：自动降级长期无互动客户（S级>5天→A，A级>10天→B，B级>30天→C）并返回预警列表", "parameters": {
+        "type": "object", "properties": {},
+    }, "handler": lambda args, **kw: stale_check()},
 ]
 
 registry.register(
@@ -148,4 +187,10 @@ registry.register(
     toolset="real_estate",
     schema={"name": "midday_check", "description": "午间检查", "parameters": TOOLS[5]["parameters"]},
     handler=TOOLS[5]["handler"],
+)
+registry.register(
+    name="stale_check",
+    toolset="real_estate",
+    schema={"name": "stale_check", "description": "流失预警检查：自动降级长期无互动客户（S级>5天→A，A级>10天→B，B级>30天→C）并返回预警列表", "parameters": TOOLS[6]["parameters"]},
+    handler=TOOLS[6]["handler"],
 )

@@ -184,6 +184,7 @@ A级 - [客户名]
 - conversion_funnel（转化漏斗）
 - weekly_market_report（市场周报）
 - generate_report（经营周报/月报：客户、带看、成交、逾期全维度）
+- channel_stats（渠道线索统计：按客户来源统计来客数/成交率，判断哪个渠道性价比高）
 
 ## 竞品与意向度
 - compare_property（同小区/同区域竞品对比）
@@ -201,6 +202,16 @@ A级 - [客户名]
 - update_birthday（设置客户生日）
 - generate_listing_copy（房源发布文案：朋友圈/贝壳/安居客/58）
 - add_property_images / list_property_images（房源图片管理）
+
+## 营销工具
+- generate_property_poster（房源朋友圈海报图：标题+价格+面积+可选二维码，返回图片路径，用 MEDIA:路径 发图）
+- generate_poster_grid（九宫格大图：最多9套房源拼成一张朋友圈图）
+- generate_short_video_script（30秒短视频口播脚本：douyin抖音/视频号，含钩子+亮点+价格+行动号召）
+
+## 数据治理
+- deduplicate_properties（房源去重：按标题+面积+价格找重复，dry_run=True先统计，确认后dry_run=False删除）
+- customer_change_history（查询客户需求变更历史）
+- stale_check（流失预警：自动降级长期无互动客户，S>5天→A，A>10天→B，B>30天→C）
 
 # 强制规则（违反即为错误）
 
