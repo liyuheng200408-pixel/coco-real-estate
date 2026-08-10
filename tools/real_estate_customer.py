@@ -306,3 +306,50 @@ registry.register(
     }},
     handler=lambda args, **kw: list_customer_tags(**args),
 )
+
+
+def get_customer_form(task_id: str = None) -> str:
+    """获取客户录入模板"""
+    form = """
+【客户录入表】
+
+请按以下格式提供客户信息：
+
+1. 姓名：（必填）
+2. 手机号：
+3. 微信号：
+4. 客户类型：
+   - buy_new（买新房）
+   - buy_second_hand（买二手房）
+   - rent（租房）
+5. 预算范围：（万元，如 300-500）
+6. 面积偏好：（如 80-120㎡）
+7. 户型偏好：（如 3室2厅）
+8. 意向区域：
+9. 装修偏好：（毛坯/简装/精装）
+10. 客户来源：（如 58同城/朋友介绍/门店）
+11. 备注：
+
+示例：
+姓名：张三
+手机号：13800138001
+客户类型：buy_second_hand
+预算：300-500万
+面积：90-120㎡
+户型：3室2厅
+区域：朝阳区
+装修：精装
+来源：朋友介绍
+"""
+    return json.dumps({"success": True, "form": form}, ensure_ascii=False)
+
+
+registry.register(
+    name="get_customer_form",
+    toolset="real_estate",
+    schema={"name": "get_customer_form", "description": "获取客户录入模板", "parameters": {
+        "type": "object",
+        "properties": {},
+    }},
+    handler=lambda args, **kw: get_customer_form(**args),
+)
