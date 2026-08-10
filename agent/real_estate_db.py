@@ -156,7 +156,9 @@ class Property(Base):
         return {
             'id': self.id, 'title': self.title, 'community': self.community,
             'district': self.district, 'address': self.address,
-            'price': self.price, 'unit_price': self.unit_price,
+            # price 列是 Numeric(12,2)，读出为 Decimal，必须转 float 否则 json.dumps 崩溃
+            'price': float(self.price) if self.price is not None else None,
+            'unit_price': self.unit_price,
             'area': self.area, 'rooms': self.rooms, 'halls': self.halls,
             'bathrooms': self.bathrooms, 'floor': self.floor,
             'orientation': self.orientation, 'renovation': self.renovation,
