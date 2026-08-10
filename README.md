@@ -33,7 +33,7 @@ curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.
 
 ## ⚙️ 安装后配置
 
-### 1. 配置模型
+### 1. 配置模型（支持小米 MiMo、OpenAI、DeepSeek 等）
 
 ```bash
 cd ~/hermes-agent
