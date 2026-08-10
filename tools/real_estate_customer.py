@@ -336,7 +336,7 @@ def get_customer_form(task_id: str = None) -> str:
 registry.register(
     name="get_customer_form",
     toolset="real_estate",
-    schema={"name": "get_customer_form", "description": "获取客户录入模板", "parameters": {
+    schema={"name": "get_customer_form", "description": "客户登记/录入时获取标准表单模板，按模板逐项收集客户信息。当经纪人要求登记客户、录入客户、新建客户资料时，必须调用此工具，禁止自行编造录入格式。", "parameters": {
         "type": "object",
         "properties": {},
     }},
