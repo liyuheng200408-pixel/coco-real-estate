@@ -647,7 +647,7 @@ TOOLSETS = {
         "description": "Coco（可可）房产管理工具 - 客户管理、房源匹配、跟进提醒、带看、成交",
         "tools": [
             "add_customer", "update_customer", "get_customer", "list_customers", "update_tier", "customer_stats", "add_customer_tag", "remove_customer_tag", "list_customer_tags", "get_customer_form",
-            "add_property", "update_property", "search_property", "match_property", "property_stats",
+            "add_property", "update_property", "search_property", "match_property", "property_stats", "get_property_form",
             "add_followup", "get_followups", "get_overdue", "schedule_reminder", "daily_report", "midday_check", "mortgage_calculator", "tax_calculator", "roi_calculator", "get_script", "use_template", "performance_dashboard", "conversion_funnel", "weekly_market_report", "get_loan_policy", "list_policy_cities",
             "schedule_viewing", "record_viewing", "get_viewing", "list_viewings", "viewing_stats",
             "start_deal", "advance_deal", "get_deal", "list_deals", "deal_stats",

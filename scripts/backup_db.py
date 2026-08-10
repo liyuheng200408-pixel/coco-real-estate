@@ -196,13 +196,46 @@ class DatabaseBackup:
             self._save_hash()
             self._cleanup_old_backups()
 
-            file_size = backup_path.stat().st_size
-            self._log(f"备份成功: {backup_filename} ({file_size} bytes)")
+            # 备份房源图片目录（tar.gz，与数据库备份同名）
+            image_tar = self._backup_images(timestamp)
+            if image_tar:
+                file_size = backup_path.stat().st_size
+                self._log(f"备份成功: {backup_filename} ({file_size} bytes) + 图片 {image_tar}")
+            else:
+                file_size = backup_path.stat().st_size
+                self._log(f"备份成功: {backup_filename} ({file_size} bytes)")
             return True
 
         except Exception as e:
             self._log(f"备份失败: {str(e)}")
             return False
+
+    def _backup_images(self, timestamp: str) -> str:
+        """打包房源图片缓存目录到备份目录，返回 tar 文件名（无图片返回空字符串）"""
+        import tarfile
+        cache_candidates = [
+            Path.home() / ".hermes" / "cache" / "images",
+            Path.home() / "hermes-agent" / ".hermes" / "cache" / "images",
+        ]
+        image_dir = None
+        for cand in cache_candidates:
+            if cand.exists() and any(cand.iterdir()):
+                image_dir = cand
+                break
+        if image_dir is None:
+            return ""
+        tar_name = f"real_estate_images_{timestamp}.tar.gz"
+        tar_path = self.backup_dir / tar_name
+        try:
+            with tarfile.open(tar_path, "w:gz") as tar:
+                for img in image_dir.iterdir():
+                    if img.is_file():
+                        tar.add(img, arcname=f"images/{img.name}")
+            os.chmod(tar_path, 0o600)
+            return tar_name
+        except Exception as e:
+            self._log(f"图片备份失败: {e}")
+            return ""
 
     def restore(self, backup_filename: str) -> bool:
         """恢复备份"""

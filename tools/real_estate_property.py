@@ -19,21 +19,29 @@ def add_property(
     has_elevator: int = 1, parking: int = 0,
     property_type: str = "second_hand",
     tags: str = None, images: str = None,
-    agent_id: str = None, task_id: str = None,
+    image_paths: str = None, agent_id: str = None, task_id: str = None,
 ) -> str:
     """添加新房源
     
     property_type: new(新房) / second_hand(二手房) / rental(租房)
+    images: 图片链接或标识（逗号分隔）
+    image_paths: 本地图片文件路径（逗号分隔），优先于 images 合并存储
     """
     db = _get_db()
     unit_price = int(price * 10000 / area) if area > 0 else None
+    # 合并 images 和 image_paths
+    img_list = []
+    for src in (images, image_paths):
+        if src:
+            img_list.extend([x.strip() for x in src.split(',') if x.strip()])
+    merged_images = ','.join(img_list) if img_list else None
     result = db.add_property(
         title=title, price=price, area=area, community=community,
         district=district, address=address, unit_price=unit_price,
         rooms=rooms, halls=halls, bathrooms=bathrooms, floor=floor,
         orientation=orientation, renovation=renovation, year_built=year_built,
         has_elevator=has_elevator, parking=parking, property_type=property_type,
-        tags=tags, images=images, agent_id=agent_id,
+        tags=tags, images=merged_images, agent_id=agent_id,
     )
     # 房源反匹配：自动扫描 S/A 级客户
     try:
@@ -125,6 +133,7 @@ TOOLS = [
             "renovation": {"type": "string", "enum": ["毛坯", "简装", "精装"], "description": "装修状态"},
             "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型：new(新房)/second_hand(二手房)/rental(租房)"},
             "images": {"type": "string", "description": "房源图片，多个用逗号分隔（URL或本地路径）"},
+            "image_paths": {"type": "string", "description": "经纪人消息中附带的图片本地路径，多个用逗号分隔，与 images 合并存入房源"},
         }, "required": ["title", "price", "area"],
     }, "handler": lambda args, **kw: add_property(**args)},
     {"name": "update_property", "description": "更新房源信息", "parameters": {
@@ -151,6 +160,39 @@ TOOLS = [
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: property_stats()},
 ]
+
+def get_property_form(task_id: str = None) -> str:
+    """获取房源录入模板"""
+    form = """【房源录入表】
+
+- 房源标题：（必填，如"望京新城精装三居"）
+- 售价：（万元，必填）
+- 面积：（㎡，必填）
+- 小区名称：
+- 所在区域：
+- 详细地址：
+- 户型：室 / 厅 / 卫
+- 楼层：
+- 朝向：（南/北/东南/南北通透等）
+- 装修：（毛坯/简装/精装/豪装）
+- 建造年份：
+- 有无电梯：（有/无）
+- 车位：（有/无）
+- 房源类型：（新房/二手房/租房）
+- 特色标签：（如"学区房""地铁房"，多个用逗号分隔）
+- 房源图片：（可直接在消息中发送图片，会自动关联）"""
+    return json.dumps({"success": True, "form": form}, ensure_ascii=False)
+
+
+registry.register(
+    name="get_property_form",
+    toolset="real_estate",
+    schema={"name": "get_property_form", "description": "房源登记/录入时获取标准表单模板，按模板逐项收集房源信息。当经纪人要求登记房源、录入房源、添加房源、新建房源时，必须调用此工具，禁止自行编造录入格式。", "parameters": {
+        "type": "object",
+        "properties": {},
+    }},
+    handler=lambda args, **kw: get_property_form(**kw),
+)
 
 registry.register(
     name="add_property",
