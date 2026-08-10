@@ -107,8 +107,8 @@ registry.register(
         "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},
             "property_id": {"type": "integer", "description": "房源ID"},
-            "price": {"type": "integer", "description": "成交价（万元）"},
-            "deposit_amount": {"type": "integer", "description": "定金（万元）"},
+            "price": {"type": "integer", "description": "成交价（元，如 400万=4000000）"},
+            "deposit_amount": {"type": "integer", "description": "定金（元）"},
             "deposit_date": {"type": "string", "description": "定金日期 YYYY-MM-DD"},
             "notes": {"type": "string", "description": "备注"},
         },

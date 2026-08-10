@@ -54,7 +54,7 @@ for sheet_name in wb.sheetnames:
 | Excel列 | 系统字段 | 转换 |
 |---------|----------|------|
 | 房号+户型+面积 | title | 拼接字符串，可追加景观 |
-| 出售总价/元 | price | ÷10000（元→万元） |
+| 出售总价/元 | price | 直接存（系统单位即元） |
 | 面积m² | area | float |
 | 户型 | rooms+halls | 解析 |
 | 景观 | tags | 存为"景观:海景"，不进district |
@@ -63,8 +63,8 @@ for sheet_name in wb.sheetnames:
 ### 出租→rental
 | Excel列 | 系统字段 | 转换 |
 |---------|----------|------|
-| 年租价（col12） | price | 元/月→万元（÷10000） |
-| 6个月租价（col10） | price备选 | 年租为空时用，同样÷10000 |
+| 年租价（col12） | price | 直接存（元/月，系统单位即元） |
+| 6个月租价（col10） | price备选 | 年租为空时用，同样直接存 |
 
 ## 关键代码片段
 
@@ -111,7 +111,7 @@ def safe_float(val):
 - **价格异常**：二手房价格<5万或>500万 → 可能是月租金混入或录入错误
 - **标题为空**：title字段缺失或只有空格
 - **区域为空**：district为空字符串（Excel无区域列时留空即可，禁止用景观填充）
-- **租赁价格**：rental的price单位是万元，Excel月租（元）必须÷10000（1000元/月→0.1万）
+- **租赁价格**：rental的price单位是元，Excel月租（元）直接存（1000元/月→1000）
 
 ## JSON文件批量导入
 
@@ -158,8 +158,8 @@ data = json.loads(result["output"], strict=False)
 参考 `references/batch-import-script.py`（v1.1.0 修正版）：
 - 景观 → tags（`景观:海景`），不填 district
 - district/community/renovation 无真实数据时留空，禁止编造
-- 出租价格：元/月 ÷10000 → 万元
-- 出售总价：元 ÷10000 → 万元
+- 出租价格：元/月 直接存（系统单位即元）
+- 出售总价：元 直接存（系统单位即元）
 
 ## Pitfalls
 - **openpyxl必须单独安装**：pandas读xlsx报`Import openpyxl failed`，需先`pip install openpyxl`
@@ -169,9 +169,9 @@ data = json.loads(result["output"], strict=False)
 - 子代理批量导入时注意add_property的price必须是数字类型
 - 出租Sheet列结构与可售不同（6个月租价在col10，年租价在col12）
 - **大批量导入（>50条）建议用delegate_task**：单会话并行add_property过多会导致超时
-- **租金单位问题**：系统price单位是"万元"，Excel租金是"元/月"，必须÷10000（历史bug：月租1000被存成1000万）
+- **租金单位问题**（历史）：旧系统price存"万元"，Excel月租1000元需÷10000，曾出现存成1000万的事故；2026-08 起系统存"元"，Excel 元直接入库不再转换
 - **景观≠区域**：Excel景观列（园区/海景/园林）是卖点不是行政区，存tags不存district（历史bug：423条房源district全被填成景观）
-- **价格异常检测**：导入前检查price范围（二手房建议5-500万，租房建议0.05-0.5万/月）
+- **价格异常检测**：导入前检查price范围（二手房建议50000-5000000元，租房建议500-10000元/月）
 - **批次大小**：delegate_task子代理建议每批导入50-100条，打印进度
 - read_file读大JSON会在100K字符处截断，必须用terminal+python3读取完整文件
 - terminal输出的JSON含控制字符时，json.loads需加strict=False

@@ -40,14 +40,15 @@ def _poster_dir():
 
 
 def _fmt_price(p):
-    """价格展示：二手/新房 → '40万'，出租 → '0.13万/月'"""
+    """价格展示（系统存元）：二手/新房 → '400万'，出租 → '1000元/月'"""
     price = p.get('price')
     if price is None:
         return '价格待定'
     price = float(price)
     if p.get('property_type') == 'rental':
-        return f"{price:.2f}万/月" if price < 1 else f"{price:.0f}万/月"
-    return f"{price:.0f}万" if price == int(price) else f"{price:.1f}万"
+        return f"{price:.0f}元/月"
+    wan = price / 10000
+    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.1f}万"
 
 
 def _gradient(size, c1, c2):

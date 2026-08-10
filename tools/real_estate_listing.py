@@ -35,6 +35,18 @@ def _fmt_basic(p):
     return "，".join(parts)
 
 
+def _fmt_price(p):
+    """价格展示（系统存元）：二手/新房 → '400万'，出租 → '1000元/月'"""
+    price = p.get('price')
+    if price is None:
+        return '价格待定'
+    price = float(price)
+    if p.get('property_type') == 'rental':
+        return f"{price:.0f}元/月"
+    wan = price / 10000
+    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.1f}万"
+
+
 def generate_listing_copy(property_id: int, platform: str = "friends", task_id: str = None) -> str:
     """生成房源发布文案
 
@@ -53,7 +65,6 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
 
     title = _fmt_title(p)
     basic = _fmt_basic(p)
-    price = p.get('price')
     unit_price = p.get('unit_price')
     community = p.get('community') or ''
     district = p.get('district') or ''
@@ -65,7 +76,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"{title}\n"
             f"📍 {district} {community}\n"
             f"{basic}\n"
-            f"💰 总价 {price}万"
+            f"💰 价格 {_fmt_price(p)}"
             + (f"（单价 {unit_price}元/㎡）" if unit_price else "")
             + "\n\n"
             f"感兴趣的私信我，随时约看房！"
@@ -74,7 +85,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
         copy = (
             f"{title}，{district} {community}\n"
             f"{basic}\n"
-            f"总价：{price}万元"
+            f"价格：{_fmt_price(p)}"
             + (f"，单价：{unit_price}元/㎡" if unit_price else "")
             + "\n"
             f"地址：{address or community}\n"
@@ -85,7 +96,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"【{title}】\n"
             f"{district}·{community}\n"
             f"{basic}\n"
-            f"售价：{price}万元"
+            f"价格：{_fmt_price(p)}"
             + (f"（{unit_price}元/㎡）" if unit_price else "")
             + "\n"
             f"地址：{address or community}\n"
@@ -95,7 +106,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
         copy = (
             f"{title}（{community or district}）\n"
             f"【房屋信息】{basic}\n"
-            f"【售价】{price}万元"
+            f"【价格】{_fmt_price(p)}"
             + (f"（单价{unit_price}元/㎡）" if unit_price else "")
             + "\n"
             f"【位置】{address or community or district}\n"

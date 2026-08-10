@@ -28,7 +28,7 @@ def add_property(
     image_paths: 本地图片文件路径（逗号分隔），优先于 images 合并存储
     """
     db = _get_db()
-    unit_price = int(price * 10000 / area) if area > 0 else None
+    unit_price = int(price / area) if area > 0 else None  # 元/㎡
     # 合并 images 和 image_paths
     img_list = []
     for src in (images, image_paths):
@@ -125,7 +125,7 @@ TOOLS = [
     {"name": "add_property", "description": "添加新房源", "parameters": {
         "type": "object", "properties": {
             "title": {"type": "string", "description": "房源标题"},
-            "price": {"type": "integer", "description": "总价（万元）"},
+            "price": {"type": "integer", "description": "价格（元）：二手房/新房总价如 4000000=400万；出租月租如 1000=1000元/月"},
             "area": {"type": "number", "description": "面积（㎡）"},
             "community": {"type": "string", "description": "小区名"},
             "district": {"type": "string", "description": "区域"},
@@ -146,7 +146,7 @@ TOOLS = [
     }, "handler": lambda args, **kw: update_property(**args)},
     {"name": "search_property", "description": "搜索房源", "parameters": {
         "type": "object", "properties": {
-            "min_price": {"type": "integer"}, "max_price": {"type": "integer"},
+            "min_price": {"type": "integer", "description": "最低价（元）"}, "max_price": {"type": "integer", "description": "最高价（元）"},
             "min_area": {"type": "number"}, "max_area": {"type": "number"},
             "rooms": {"type": "integer"}, "district": {"type": "string"},
             "renovation": {"type": "string"},
@@ -167,7 +167,7 @@ def get_property_form(task_id: str = None) -> str:
     form = """【房源录入表】
 
 - 房源标题：（必填，如"望京新城精装三居"）
-- 售价：（万元，必填）
+- 售价：（元，必填，如 4000000=400万；出租房填月租，如 1000=1000元/月）
 - 面积：（㎡，必填）
 - 小区名称：
 - 所在区域：

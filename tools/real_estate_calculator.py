@@ -18,14 +18,14 @@ def mortgage_calculator(
     贷款计算器
     
     参数:
-        price: 房价（万元）
+        price: 房价（元，如 400万=4000000）
         down_payment_ratio: 首付比例（默认30%）
         loan_years: 贷款年限（默认30年）
         interest_rate: 年利率（默认4.5%）
         method: 还款方式 equal_installment(等额本息) / equal_principal(等额本金)
     """
     # 转换为元
-    price_yuan = price * 10000
+    price_yuan = price  # 系统价格单位为元（如 400万 = 4000000）
     down_payment = price_yuan * down_payment_ratio
     loan_amount = price_yuan - down_payment
     
@@ -48,7 +48,7 @@ def mortgage_calculator(
         monthly_payment = f"{first_month_payment:.2f} - {last_month_payment:.2f}"
     
     result = {
-        "房价": f"{price}万元",
+        "房价": f"{price/10000:.0f}万元",
         "首付比例": f"{down_payment_ratio*100}%",
         "首付金额": f"{down_payment/10000:.2f}万元",
         "贷款金额": f"{loan_amount/10000:.2f}万元",
@@ -74,12 +74,12 @@ def tax_calculator(
     税费计算器
     
     参数:
-        price: 房价（万元）
+        price: 房价（元，如 400万=4000000）
         area: 面积（㎡）
         is_first_home: 是否首套房
         hold_years: 持有年限
     """
-    price_yuan = price * 10000
+    price_yuan = price  # 系统价格单位为元（如 400万 = 4000000）
     
     # 契税
     if is_first_home:
@@ -106,7 +106,7 @@ def tax_calculator(
     total_tax = deed_tax + vat + personal_tax
     
     result = {
-        "房价": f"{price}万元",
+        "房价": f"{price/10000:.0f}万元",
         "面积": f"{area}㎡",
         "是否首套": "是" if is_first_home else "否",
         "持有年限": f"{hold_years}年",
@@ -130,12 +130,12 @@ def roi_calculator(
     投资回报率计算器
     
     参数:
-        price: 购入价（万元）
+        price: 购入价（元，如 400万=4000000）
         monthly_rent: 月租金（元）
         hold_years: 持有年限
         expected_appreciation: 预期年增值率（默认5%）
     """
-    price_yuan = price * 10000
+    price_yuan = price  # 系统价格单位为元（如 400万 = 4000000）
     
     # 租金回报
     annual_rent = monthly_rent * 12
@@ -154,7 +154,7 @@ def roi_calculator(
     annual_roi = ((1 + total_roi / 100) ** (1 / hold_years) - 1) * 100
     
     result = {
-        "购入价": f"{price}万元",
+        "购入价": f"{price/10000:.0f}万元",
         "月租金": f"{monthly_rent}元",
         "持有年限": f"{hold_years}年",
         "预期年增值率": f"{expected_appreciation*100}%",
@@ -178,7 +178,7 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "price": {"type": "number", "description": "房价（万元）"},
+                "price": {"type": "number", "description": "房价（元，如 400万=4000000）"},
                 "down_payment_ratio": {"type": "number", "description": "首付比例（默认0.3）"},
                 "loan_years": {"type": "integer", "description": "贷款年限（默认30年）"},
                 "interest_rate": {"type": "number", "description": "年利率（默认4.5%）"},
@@ -194,7 +194,7 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "price": {"type": "number", "description": "房价（万元）"},
+                "price": {"type": "number", "description": "房价（元，如 400万=4000000）"},
                 "area": {"type": "number", "description": "面积（㎡）"},
                 "is_first_home": {"type": "boolean", "description": "是否首套房"},
                 "hold_years": {"type": "integer", "description": "持有年限"},
@@ -209,7 +209,7 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "price": {"type": "number", "description": "购入价（万元）"},
+                "price": {"type": "number", "description": "购入价（元，如 400万=4000000）"},
                 "monthly_rent": {"type": "number", "description": "月租金（元）"},
                 "hold_years": {"type": "integer", "description": "持有年限"},
                 "expected_appreciation": {"type": "number", "description": "预期年增值率"},

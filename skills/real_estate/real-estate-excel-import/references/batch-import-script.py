@@ -3,7 +3,7 @@
 #   - 景观不再误填 district（之前导致 423 条房源区域全部错误）
 #   - 景观改存 tags，保留在 title
 #   - renovation 不再硬编码"精装"（避免编造数据）
-#   - 出租房源价格单位修正：Excel 是"元/月"，系统 price 是"万元"，需 ÷10000
+#   - 出租房源价格：Excel 是"元/月"，系统 price 是"元"，直接入库
 
 ## execute_code 中的数据处理模板
 
@@ -49,16 +49,16 @@ for sheet_name in wb.sheetnames:
         notes = str(row[21]) if len(row)>21 and row[21] else ""
 
         if is_rental:
-            # Excel 出租价是"元/月"（如 1000 = 1000元/月），系统 price 单位是"万元"
-            # 6个月租价在 col10，年租价在 col12；取非空值，单位统一转为万元
+            # Excel 出租价是"元/月"（如 1000 = 1000元/月），系统 price 单位是"元"，直接存
+            # 6个月租价在 col10，年租价在 col12；取非空值
             price_raw = safe_float(row[12]) or safe_float(row[10])
             prop_type = 'rental'
-            price_wan = round(price_raw / 10000, 4) if price_raw > 0 else 0
+            price_value = round(price_raw, 2) if price_raw > 0 else 0
         else:
-            # Excel 出售总价是"元"（如 400000 = 40万），转万元
+            # Excel 出售总价是"元"（如 400000 = 40万），系统 price 单位是"元"，直接存
             price_raw = safe_float(row[12])
             prop_type = 'second_hand'
-            price_wan = round(price_raw / 10000, 2) if price_raw > 10000 else round(price_raw, 2)
+            price_value = round(price_raw, 2) if price_raw > 0 else 0
 
         rooms, halls = parse_layout(layout)
 
@@ -68,10 +68,10 @@ for sheet_name in wb.sheetnames:
         # 景观是房源卖点，存入 tags（不占 district/区域字段）
         tags = f"景观:{landscape}" if landscape else ""
 
-        if (prop_type == 'second_hand' and price_wan > 0 and area > 0) or \
+        if (prop_type == 'second_hand' and price_value > 0 and area > 0) or \
            (prop_type == 'rental' and area > 0):
             all_props.append({
-                'title': title, 'price': price_wan, 'area': area,
+                'title': title, 'price': price_value, 'area': area,
                 'rooms': rooms, 'halls': halls, 'property_type': prop_type,
                 # district/community/renovation 无真实数据时留空，禁止编造
                 'district': '', 'community': '', 'renovation': '',
@@ -95,8 +95,8 @@ print(f"共 {len(all_props)} 条待导入")
 
 ## 数据修复（历史脏数据）
 
-如果此前用旧版脚本导入过数据（district 被填成"园区/海景"、出租价格未转万元），
-用以下 SQL 在服务器上修复（见 git 提交说明）：
+如果此前用旧版脚本导入过数据（district 被填成"园区/海景"、价格为万元），
+用以下方式在服务器上修复（见 git 提交说明）：
 - 景观从 district 移到 tags：`UPDATE re_properties SET tags = '景观:'||district WHERE district IN ('园区','海景','园林');`
 - 区域置空：`UPDATE re_properties SET district = '' WHERE district IN ('园区','海景','园林');`
-- 出租价格转万元：`UPDATE re_properties SET price = price/10000, unit_price = unit_price/10000 WHERE property_type='rental' AND price > 100;`
+- 价格单位迁移（万元→元）：在服务器执行 `bash scripts/migrate_price_to_yuan.sh`

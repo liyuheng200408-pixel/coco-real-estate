@@ -7,7 +7,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, Float, Numeric,
+    create_engine, Column, Integer, String, Text, Float, Numeric, BigInteger,
     DateTime, ForeignKey, CheckConstraint, Index
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
@@ -71,8 +71,8 @@ class Customer(Base):
     wechat = Column(EncryptedString)
     feishu_id = Column(String(100))
     tier = Column(String(1), default='C')
-    budget_min = Column(Integer)
-    budget_max = Column(Integer)
+    budget_min = Column(Integer)  # 预算下限（元，如 300万=3000000）
+    budget_max = Column(Integer)  # 预算上限（元）
     area_pref = Column(String(50))
     layout_pref = Column(String(50))
     location = Column(String(200))
@@ -121,8 +121,8 @@ class Property(Base):
     community = Column(String(100))
     district = Column(String(100))
     address = Column(String(300))
-    price = Column(Numeric(12, 2), nullable=False)  # 万元（支持出租房源月租小数，如0.13万）
-    unit_price = Column(Integer)
+    price = Column(BigInteger, nullable=False)  # 元（二手房总价如 4000000，出租月租如 1000）
+    unit_price = Column(Integer)  # 元/㎡ = price/area
     area = Column(Float, nullable=False)
     rooms = Column(Integer)
     halls = Column(Integer)
@@ -266,8 +266,8 @@ class Deal(Base):
     customer_id = Column(Integer, ForeignKey('re_customers.id'), nullable=False)
     property_id = Column(Integer, ForeignKey('re_properties.id'), nullable=False)
     stage = Column(String(20), default='deposit')  # deposit/signing/loan/transfer/finalized
-    price = Column(Integer)                         # 成交价（万元）
-    deposit_amount = Column(Integer)                # 定金（万元）
+    price = Column(Integer)                         # 成交价（元，如 400万=4000000）
+    deposit_amount = Column(Integer)                # 定金（元）
     deposit_date = Column(DateTime)                 # 定金日期
     signing_date = Column(DateTime)                 # 签约日期
     loan_date = Column(DateTime)                    # 贷款审批日期
@@ -511,7 +511,7 @@ class RealEstateDB:
 
                 # 预算匹配（权重 30）
                 budget_min = c.budget_min or 0
-                budget_max = c.budget_max or 999999
+                budget_max = c.budget_max or 999999999  # 无预算上限（元制）
                 if budget_min <= prop.price <= budget_max:
                     score += 30
                     reasons.append("预算匹配")
@@ -585,7 +585,7 @@ class RealEstateDB:
         
         min_area, max_area = self._parse_area(customer.get('area_pref'))
         budget_min = customer.get('budget_min') or 0
-        budget_max = customer.get('budget_max') or 999999
+        budget_max = customer.get('budget_max') or 999999999  # 无预算上限（元制）
         
         scores = []
         for prop in properties:

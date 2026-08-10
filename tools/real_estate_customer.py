@@ -160,8 +160,8 @@ TOOLS = [
             "phone": {"type": "string", "description": "手机号"},
             "wechat": {"type": "string", "description": "微信号"},
             "tier": {"type": "string", "enum": ["S", "A", "B", "C"], "description": "客户等级"},
-            "budget_min": {"type": "integer", "description": "预算下限（万元）"},
-            "budget_max": {"type": "integer", "description": "预算上限（万元）"},
+            "budget_min": {"type": "integer", "description": "预算下限（元，如 300万=3000000）"},
+            "budget_max": {"type": "integer", "description": "预算上限（元）"},
             "area_pref": {"type": "string", "description": "面积偏好，如 80-120"},
             "layout_pref": {"type": "string", "description": "户型偏好，如 3室2厅"},
             "location": {"type": "string", "description": "意向区域"},
@@ -372,7 +372,7 @@ def get_customer_form(task_id: str = None) -> str:
 - 客户电话：
 - 客户微信：
 - 客户类型：(买新房) / (买二手房) / (租房)
-- 预算范围：（万元，如 300-500）
+- 预算范围：（元，如 3000000-5000000；经纪人若说"300-500万"，换算成元后填写）
 - 面积偏好：（如 80-120㎡）
 - 户型需求：（如 3室2厅）
 - 意向区域：
