@@ -303,11 +303,19 @@ print_result() {
     echo ""
     echo -e "客户手机号、微信号等敏感数据已加密存储。"
     echo ""
-    echo -e "密钥文件已备份到: ${BLUE}~/backups/real_estate/enc_key.txt${NC}"
+    echo -e "您的加密密钥如下（${RED}请用鼠标选中并复制保存${NC}）："
     echo ""
-    echo -e "${RED}请务必把这个文件保存到安全的地方：${NC}"
-    echo -e "  1. 下载到自己的电脑 / U盘 / 网盘（推荐）"
-    echo -e "  2. 或打印一份纸质件收好"
+    if [[ -f ~/backups/real_estate/enc_key.txt ]]; then
+        echo -e "${GREEN}  $(cat ~/backups/real_estate/enc_key.txt)${NC}"
+    else
+        echo -e "${GREEN}  COCO_ENC_KEY=（密钥文件未找到，请检查 ~/backups/real_estate/enc_key.txt）${NC}"
+    fi
+    echo ""
+    echo -e "${YELLOW}保存方法（任选一种）：${NC}"
+    echo -e "  1. 复制上面的密钥，粘贴保存到自己的电脑记事本 / 网盘"
+    echo -e "  2. 下载密钥文件到本地电脑，在电脑上打开终端执行："
+    echo -e "     scp root@服务器IP:/root/backups/real_estate/enc_key.txt ~/Desktop/"
+    echo -e "     （把 服务器IP 换成您的服务器公网IP，Windows 用户在命令行执行）"
     echo ""
     echo -e "${RED}警告：如果服务器重装或文件丢失，没有这把钥匙，${NC}"
     echo -e "${RED}所有客户手机号、微信号将永远无法解密！${NC}"
