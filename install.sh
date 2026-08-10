@@ -268,8 +268,11 @@ start_service() {
     fi
     
     # 添加定时备份任务（每天凌晨2点）
-    (crontab -l 2>/dev/null; echo "0 2 * * * cd $INSTALL_DIR && source venv/bin/activate && python3 scripts/backup_db.py backup >> ~/backups/real_estate/backup.log 2>&1") | crontab -
-    ok "定时备份已设置（每天凌晨2点）"
+    if (crontab -l 2>/dev/null; echo "0 2 * * * cd $INSTALL_DIR && source venv/bin/activate && python3 scripts/backup_db.py backup >> ~/backups/real_estate/backup.log 2>&1") | crontab - 2>/dev/null; then
+        ok "定时备份已设置（每天凌晨2点）"
+    else
+        warn "定时备份设置失败（crontab 不可用），可稍后手动设置"
+    fi
 }
 
 # ==================== 打印结果 ====================
