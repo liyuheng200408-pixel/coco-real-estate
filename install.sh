@@ -204,6 +204,7 @@ RestartSec=10
 Environment=PYTHONUNBUFFERED=1
 Environment=HERMES_HOME=$INSTALL_DIR
 GATEWAY_ALLOW_ALL_USERS=true
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target
@@ -220,12 +221,14 @@ EOF
 start_service() {
     info "启动 Coco 房产助理..."
     if [[ "$OS" == "linux" ]] && command -v systemctl &> /dev/null; then
-        # 修复权限（数据库文件仅所有者可读写）
-        chmod 600 "$INSTALL_DIR/state.db" 2>/dev/null || true
-        chmod 600 "$INSTALL_DIR/hermes-agent/state.db" 2>/dev/null || true
-        chmod 600 "$HOME/hermes-agent/real_estate.db" 2>/dev/null || true
-        chmod 600 "$INSTALL_DIR/.env" 2>/dev/null || true
+        # 修复权限（数据库文件仅所有者可读写，含 WAL/SHM 伴随文件）
+        chmod 600 "$INSTALL_DIR/state.db" "$INSTALL_DIR/state.db-wal" "$INSTALL_DIR/state.db-shm" 2>/dev/null || true
+        chmod 600 "$INSTALL_DIR/real_estate.db" "$INSTALL_DIR/real_estate.db-wal" "$INSTALL_DIR/real_estate.db-shm" 2>/dev/null || true
+        chmod 600 "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.db" 2>/dev/null || true
         sudo systemctl start $SERVICE_NAME
+        # 服务启动可能新建数据库文件，再补一次权限（UMask 已兜底 0600）
+        sleep 2
+        chmod 600 "$INSTALL_DIR/real_estate.db" "$INSTALL_DIR/real_estate.db-wal" "$INSTALL_DIR/real_estate.db-shm" 2>/dev/null || true
         ok "服务已启动"
     else
         cd "$INSTALL_DIR"
