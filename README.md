@@ -89,6 +89,8 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py re
 
 迁移到新服务器时，一条命令完成数据库 + 图片 + 加密密钥恢复：
 
+> 📖 **完整操作手册见 [docs/BACKUP_MIGRATION.md](docs/BACKUP_MIGRATION.md)**（含重装系统、换服务器、单独恢复、FAQ 速查卡）
+
 ```bash
 # 旧服务器打包（含数据库备份、图片备份、加密密钥）
 cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
