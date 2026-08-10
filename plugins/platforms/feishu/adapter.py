@@ -3415,37 +3415,62 @@ class FeishuAdapter(BasePlatformAdapter):
         await self._dispatch_inbound_event(normalized)
 
     async def _maybe_remind_key_backup(self, chat_id: str) -> None:
-        """Coco: 首次对话时提醒经纪人备份数据加密密钥（仅一次）
+        """Coco: 首次对话时把加密密钥直接发给经纪人（仅一次）
+
+        安装脚本自动备份密钥到 ~/backups/real_estate/enc_key.txt，
+        但经纪人未必真正保存到外部。首次对话时把密钥内容直接推送给
+        经纪人，聊天记录里随时可查，确保密钥不丢失。
 
         触发条件：
         - 真实用户消息（非 bot、非命令）
-        - 密钥备份文件 ~/backups/real_estate/enc_key.txt 不存在（说明未做外部备份）
-        - 未发送过提醒（标记文件 ~/.hermes/.coco_key_reminder_sent 不存在）
+        - 未发送过提醒（标记文件 .coco_key_reminder_sent 不存在）
         """
         try:
             marker = os.path.expanduser("~/.hermes/.coco_key_reminder_sent")
             if os.path.exists(marker):
                 return
 
+            # 读取密钥内容（优先备份文件，兜底 .env.db）
+            enc_key = None
             backup_key = os.path.expanduser("~/backups/real_estate/enc_key.txt")
             if os.path.exists(backup_key):
-                # 密钥已备份，写标记避免后续重复检查
                 try:
-                    os.makedirs(os.path.dirname(marker), exist_ok=True)
-                    with open(marker, "w", encoding="utf-8") as f:
-                        f.write("1")
+                    for line in open(backup_key, encoding="utf-8"):
+                        line = line.strip()
+                        if line.startswith("COCO_ENC_KEY="):
+                            enc_key = line.split("=", 1)[1].strip()
+                            break
                 except Exception:
                     pass
-                return
+            if not enc_key:
+                env_db = os.path.expanduser("~/hermes-agent/.env.db")
+                if os.path.exists(env_db):
+                    try:
+                        for line in open(env_db, encoding="utf-8"):
+                            line = line.strip()
+                            if line.startswith("COCO_ENC_KEY="):
+                                enc_key = line.split("=", 1)[1].strip()
+                                break
+                    except Exception:
+                        pass
 
-            reminder = (
-                "🔐 安全提醒（仅此一次）\n\n"
-                "您的客户数据（手机号、微信号）已加密存储，加密密钥在服务器上：\n"
-                "~/backups/real_estate/enc_key.txt\n\n"
-                "请尽快把该密钥文件保存到安全的地方（电脑/U盘/网盘），"
-                "如果服务器重装或文件丢失，没有这把钥匙，客户数据将永远无法解密。\n\n"
-                "如有疑问，请回复 /help 查看帮助。"
-            )
+            if enc_key:
+                reminder = (
+                    "🔐 重要！请立即保存您的数据加密密钥（仅此一次）\n\n"
+                    "您的客户数据（手机号、微信号）已加密存储，加密密钥如下：\n\n"
+                    f"COCO_ENC_KEY={enc_key}\n\n"
+                    "请立即复制上面的密钥，保存到您的电脑记事本 / 网盘。\n"
+                    "如果服务器重装或文件丢失，没有这把钥匙，客户数据将永远无法解密！\n\n"
+                    "密钥文件同时备份在服务器 ~/backups/real_estate/enc_key.txt"
+                )
+            else:
+                reminder = (
+                    "🔐 重要！请立即备份数据加密密钥（仅此一次）\n\n"
+                    "您的客户数据（手机号、微信号）已加密存储。\n"
+                    "密钥文件在服务器 ~/backups/real_estate/enc_key.txt\n"
+                    "请尽快把它保存到安全的地方（电脑/U盘/网盘），"
+                    "如果服务器重装或文件丢失，没有这把钥匙，客户数据将永远无法解密。"
+                )
             await self.send(chat_id=chat_id, content=reminder)
 
             try:
