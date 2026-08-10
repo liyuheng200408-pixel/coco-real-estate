@@ -117,8 +117,8 @@ install_packages() {
     cd "$INSTALL_DIR"
     pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -e . -q 2>/dev/null || pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt -q 2>/dev/null || true
     
-    # 安装房产专用依赖
-    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple sqlalchemy psycopg2-binary lark-oapi apscheduler -q
+    # 安装房产专用依赖（含海报生成所需 qrcode；Pillow 为核心依赖由 -e . 安装）
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple sqlalchemy psycopg2-binary lark-oapi apscheduler qrcode -q
     
     ok "依赖安装完成"
 }
