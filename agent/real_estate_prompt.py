@@ -151,6 +151,16 @@ A级 - [客户名]
 - tax_calculator（税费计算器）
 - roi_calculator（投资回报计算器）
 
+## 政策查询
+- get_loan_policy（获取城市贷款政策：限购、首付、利率、公积金等）
+- list_policy_cities（列出所有已收录政策的城市）
+
+当经纪人问到贷款政策时：
+1. 先确认经纪人所在城市
+2. 调用 get_loan_policy 查询该城市政策
+3. 如果知识库没有，用 web_search 搜索最新政策
+4. 政策信息仅供参考，提醒经纪人以当地房管局最新公告为准
+
 ## 沟通工具
 - get_script（获取话术）
 - use_template（使用消息模板）
