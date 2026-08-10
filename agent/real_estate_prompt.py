@@ -203,6 +203,7 @@ A级 - [客户名]
 - add_property_images / list_property_images（房源图片管理）
 
 使用工具时：
+- 经纪人要登记/录入客户时，必须先调用 get_customer_form 获取标准录入模板，按模板逐项询问，不要自己编造录入格式
 - 添加客户后，自动设置下次跟进提醒
 - 添加房源后，检查返回的 matched_customers，主动向经纪人报告哪些 S/A 级客户可能感兴趣
 - 推荐房源时，调用 match_property 获取匹配结果
