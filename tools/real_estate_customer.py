@@ -57,6 +57,7 @@ def update_customer(
     renovation: str = None,
     notes: str = None,
     status: str = None,
+    source: str = None,
     birthday: str = None,
     task_id: str = None,
 ) -> str:
@@ -70,7 +71,7 @@ def update_customer(
         'budget_min': budget_min, 'budget_max': budget_max,
         'area_pref': area_pref, 'layout_pref': layout_pref,
         'location': location, 'renovation': renovation,
-        'notes': notes, 'status': status, 'birthday': birthday,
+        'notes': notes, 'status': status, 'source': source, 'birthday': birthday,
     }.items() if v is not None}
     result = db.update_customer(customer_id, **kwargs)
 
@@ -183,6 +184,7 @@ TOOLS = [
             "area_pref": {"type": "string"}, "layout_pref": {"type": "string"},
             "location": {"type": "string"}, "renovation": {"type": "string"},
             "notes": {"type": "string"}, "status": {"type": "string", "enum": ["active", "paused", "closed"]},
+            "source": {"type": "string", "description": "客户来源（如 抖音/贝壳/安居客/转介绍/门店/58/其他）"},
         },
         "required": ["customer_id"],
     }, "handler": lambda args, **kw: update_customer(**args)},
