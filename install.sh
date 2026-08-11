@@ -196,6 +196,16 @@ setup_config() {
     ok "SOUL.md 身份文件已复制"
 }
 
+# ==================== 初始化数据库表 ====================
+setup_tables() {
+    info "初始化数据库表..."
+    cd "$INSTALL_DIR"
+    set -a
+    source "$INSTALL_DIR/.env.db" 2>/dev/null || true
+    set +a
+    "$INSTALL_DIR/venv/bin/python" -c "from agent.real_estate_db import init_real_estate_db; init_real_estate_db(); print('[Coco] 数据库表创建完成')" || warn "建表失败（首次工具调用时会自动重试）"
+}
+
 # ==================== 创建系统服务 ====================
 setup_service() {
     info "配置系统服务..."
@@ -345,6 +355,7 @@ main() {
     install_packages
     setup_database
     setup_config
+    setup_tables
     setup_service
     start_service
     print_result

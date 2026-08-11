@@ -995,6 +995,9 @@ def init_real_estate_db(database_url: str = None) -> RealEstateDB:
     return _db_instance
 
 def get_real_estate_db() -> RealEstateDB:
+    global _db_instance
     if _db_instance is None:
-        raise RuntimeError("Real estate DB not initialized. Call init_real_estate_db() first.")
+        # 惰性初始化：gateway 启动不走 init_agent（CLI 专用），首次工具调用
+        # 时自动建表，避免重装后新库无表（2026-08-11 真实事故）
+        init_real_estate_db()
     return _db_instance
