@@ -106,6 +106,16 @@ cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q
 
 > 注意：此命令只更新代码与依赖。若更新涉及已有表结构/数据单位变更（如 2026-08 价格单位改元），需先执行 `bash scripts/migrate_price_to_yuan.sh` 迁移旧数据，再重启服务。新增表启动时自动创建，无需处理。
 
+### 部署健康自检
+
+安装或更新后，一条命令体检（依赖 / 服务 / 联网搜索后端 / 数据库 / 密钥 / 定时任务）：
+
+```bash
+cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
+```
+
+全部 PASS 说明部署健康；FAIL 项会附修复提示。
+
 ### 服务管理
 
 ```bash

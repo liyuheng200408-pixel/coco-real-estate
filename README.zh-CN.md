@@ -104,6 +104,16 @@ cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q
 
 > 注意：更新命令已移除 `git clean -fd`（会删除数据库和配置，勿手动执行）。
 
+### 部署健康自检
+
+安装或更新后，一条命令体检（依赖 / 服务 / 联网搜索后端 / 数据库 / 密钥 / 定时任务）：
+
+```bash
+cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
+```
+
+全部 PASS 说明部署健康；FAIL 项会附修复提示。
+
 ### 服务管理
 
 ```bash
