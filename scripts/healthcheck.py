@@ -55,7 +55,10 @@ def warn(msg, hint=""):
 def sh(cmd, timeout=15):
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        return r.returncode == 0, r.stdout.strip()
+        out = r.stdout.strip()
+        if r.stderr.strip():
+            out = out + "\n" + r.stderr.strip()
+        return r.returncode == 0, out
     except Exception as e:
         return False, str(e)
 
@@ -111,7 +114,7 @@ else:
 
 # ---- 3. Python 依赖 ----
 print("\n[3] Python 依赖")
-PY = os.path.join(INSTALL_DIR, "venv", "bin", "python")
+PY = os.environ.get("COCO_PYTHON", os.path.join(INSTALL_DIR, "venv", "bin", "python"))
 missing = []
 for pkg in ("ddgs", "PIL", "qrcode", "lark_oapi", "sqlalchemy", "psycopg2", "cryptography", "apscheduler"):
     if importlib.util.find_spec(pkg) is None:
@@ -148,10 +151,11 @@ if db_url:
     db_code = f"""
 import sqlalchemy
 try:
-    e = sqlalchemy.create_engine({db_url!r}, connect_args={{'connect_timeout': 5}})
+    kw = {{'connect_args': {{'connect_timeout': 5}}}} if {db_url.startswith('postgresql')!r} else {{}}
+    e = sqlalchemy.create_engine({db_url!r}, **kw)
     with e.connect() as c:
-        props = c.execute('select count(*) from re_properties').scalar()
-        custs = c.execute('select count(*) from re_customers').scalar()
+        props = c.execute(sqlalchemy.text('select count(*) from re_properties')).scalar()
+        custs = c.execute(sqlalchemy.text('select count(*) from re_customers')).scalar()
     print(f'OK props={{props}} custs={{custs}}')
 except Exception as ex:
     print('ERR:' + str(ex)[:120])
