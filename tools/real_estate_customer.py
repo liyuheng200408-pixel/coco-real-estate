@@ -159,7 +159,7 @@ TOOLS = [
             "name": {"type": "string", "description": "客户姓名"},
             "phone": {"type": "string", "description": "手机号"},
             "wechat": {"type": "string", "description": "微信号"},
-            "tier": {"type": "string", "enum": ["S", "A", "B", "C"], "description": "客户等级"},
+            "tier": {"type": "string", "enum": ["S", "A", "B", "C"], "description": "客户等级（仅经纪人明确告知等级时才传；未告知则不传，默认 C 级）"},
             "budget_min": {"type": "integer", "description": "预算下限（元，如 300万=3000000）"},
             "budget_max": {"type": "integer", "description": "预算上限（元）"},
             "area_pref": {"type": "string", "description": "面积偏好，如 80-120"},
@@ -173,12 +173,12 @@ TOOLS = [
         },
         "required": ["name"],
     }, "handler": lambda args, **kw: add_customer(**args)},
-    {"name": "update_customer", "description": "更新客户信息", "parameters": {
+    {"name": "update_customer", "description": "更新客户信息。注意：仅当经纪人明确要求调整客户等级时才传 tier 参数，否则不要传、不要自行修改客户等级", "parameters": {
         "type": "object",
         "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},
             "name": {"type": "string"}, "phone": {"type": "string"},
-            "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
+            "tier": {"type": "string", "enum": ["S", "A", "B", "C"], "description": "客户等级（仅经纪人明确要求调整等级时传，禁止自行修改）"},
             "budget_min": {"type": "integer"}, "budget_max": {"type": "integer"},
             "area_pref": {"type": "string"}, "layout_pref": {"type": "string"},
             "location": {"type": "string"}, "renovation": {"type": "string"},
