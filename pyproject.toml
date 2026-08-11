@@ -123,6 +123,10 @@ dependencies = [
   # install rather than gating it behind an extra + a mid-session lazy install
   # (which deadlocked the CLI under prompt_toolkit — see #40490).
   "Pillow==12.3.0",
+  # ddgs: DuckDuckGo 免费搜索后端（web_search 默认后端，无需 API Key）。
+  # 作为核心依赖，让已安装实例执行更新命令（git pull + pip install -e .）
+  # 时能自动补装，而非只在 install.sh 重装时生效。
+  "ddgs==9.14.4",
   # Windows log rotation. Stdlib ``RotatingFileHandler.doRollover()`` uses
   # ``os.rename()`` which fails with ``PermissionError [WinError 32]`` on
   # Windows whenever any other process holds an append-mode handle on
