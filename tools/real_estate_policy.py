@@ -32,7 +32,7 @@ def get_loan_policy(
     policies = _load_policies()
     
     if not policies:
-        return json.dumps({"success": False, "error": "政策知识库为空"}, ensure_ascii=False)
+        return json.dumps({"success": False, "error": "政策知识库已停用（政策信息时效性强，为避免误导未收录固定数据），请用 web_search 查询该城市最新政策"}, ensure_ascii=False)
     
     # 如果没有指定城市，返回所有城市列表
     if not city:
@@ -107,7 +107,7 @@ def list_policy_cities(task_id: str = None) -> str:
 registry.register(
     name="get_loan_policy",
     toolset="real_estate",
-    schema={"name": "get_loan_policy", "description": "获取城市贷款政策（限购、首付、利率、公积金等）", "parameters": {
+    schema={"name": "get_loan_policy", "description": "获取城市贷款政策（限购、首付、利率、公积金等）。注意：本地政策知识库已停用（政策时效性强），查询城市贷款政策请优先使用 web_search，本工具通常返回空库提示", "parameters": {
         "type": "object",
         "properties": {
             "city": {"type": "string", "description": "城市名称，如 北京、上海"},
