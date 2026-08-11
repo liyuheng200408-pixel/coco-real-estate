@@ -109,7 +109,7 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 - 贷款月供：`mortgage_calculator`
 - 税费：`tax_calculator`
 - 投资回报：`roi_calculator`
-- 城市政策：`get_loan_policy`（先确认城市，知识库没有用 web 搜索，提醒以当地房管局为准）
+- 城市政策：`get_loan_policy`（先确认城市，知识库已停用，用 `web_search` 联网查最新；**严禁凭记忆编造政策数字**——首付/社保年限/限购套数等，联网失败就明确说"请咨询当地房管局/公积金中心/银行"，提醒以当地房管局为准）
 
 ### 8. 话术与报告
 
