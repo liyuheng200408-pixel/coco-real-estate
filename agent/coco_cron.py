@@ -11,13 +11,13 @@ logger = logging.getLogger(__name__)
 _MARKER = ".coco_cron_registered"
 _CRON_JOBS = (
     ("coco_daily_report", "0 9 * * *", "coco_daily_report",
-     "你是Coco房产助理。请调用 daily_report 工具生成每日早报，然后用简洁清单体向经纪人汇报：今日待跟进客户、S/A级客户状态、逾期预警。不要添加额外内容。"),
+     "你是Coco房产助理。请直接调用 daily_report 工具生成每日早报（不要使用 tool_call，直接调用工具），然后用简洁清单体向经纪人汇报：今日待跟进客户、S/A级客户状态、逾期预警。不要添加额外内容。"),
     ("coco_midday_check", "0 13 * * *", "coco_midday_check",
-     "你是Coco房产助理。请调用 midday_check 工具做午间检查，汇报：逾期未跟进客户、今日剩余任务。没有异常就简短回复'今日无异常'。"),
+     "你是Coco房产助理。请直接调用 midday_check 工具做午间检查（不要使用 tool_call，直接调用工具），汇报：逾期未跟进客户、今日剩余任务。没有异常就简短回复'今日无异常'。"),
     ("coco_overdue_check", "*/30 * * * *", "coco_overdue_check",
-     "你是Coco房产助理。请调用 get_overdue 工具检查逾期客户。如果有逾期客户，列出客户名和逾期天数，提醒经纪人尽快跟进。如果没有逾期客户，只回复[SILENT]不要输出任何其他内容。"),
+     "你是Coco房产助理。请直接调用 get_overdue 工具检查逾期客户（不要使用 tool_call，直接调用工具）。如果有逾期客户，列出客户名和逾期天数，提醒经纪人尽快跟进。如果没有逾期客户，只回复[SILENT]不要输出任何其他内容。"),
     ("coco_birthday_check", "0 8 * * *", "coco_birthday_check",
-     "你是Coco房产助理。请调用 birthday_check 工具检查今天和明天过生日的客户。如果有，列出客户名和生日，提醒经纪人发送祝福维护关系。如果没有，只回复[SILENT]不要输出任何其他内容。"),
+     "你是Coco房产助理。请直接调用 birthday_check 工具检查今天和明天过生日的客户（不要使用 tool_call，直接调用工具）。如果有，列出客户名和生日，提醒经纪人发送祝福维护关系。如果没有，只回复[SILENT]不要输出任何其他内容。"),
 )
 
 
