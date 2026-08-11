@@ -503,6 +503,10 @@ class RealEstateDB:
             ).all()
             if not candidates:
                 return []
+            # 排除已有交易记录的客户（进行中或已完成，不再推新房源）
+            candidates = [c for c in candidates if not c.deals]
+            if not candidates:
+                return []
 
             results = []
             for c in candidates:
@@ -576,9 +580,18 @@ class RealEstateDB:
             if 'property_type' in filters: q = q.filter(Property.property_type == filters['property_type'])
             return [p.to_dict() for p in q.limit(limit).all()]
     
+    def customer_has_deal(self, customer_id) -> bool:
+        """客户是否已有交易记录（进行中或已完成）"""
+        with self.get_session() as s:
+            return s.query(Deal).filter(Deal.customer_id == customer_id).first() is not None
+
     def match_property(self, customer_id, top_n=5):
         customer = self.get_customer(customer_id)
         if not customer: return []
+        # 已有交易记录（进行中或已完成）的客户不再推送房源
+        # （真实案例 2026-08-11：客户过户完成仍被推荐房源）
+        if self.customer_has_deal(customer_id):
+            return []
         
         properties = self.search_properties()
         if not properties: return []

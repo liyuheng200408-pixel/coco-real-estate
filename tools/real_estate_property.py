@@ -105,10 +105,20 @@ def match_property(customer_id: int, top_n: int = 5, task_id: str = None) -> str
     customer = db.get_customer(customer_id)
     if not customer:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    # 已有交易记录的客户不再推送房源（真实案例 2026-08-11：过户完成仍被推荐）
+    if db.customer_has_deal(customer_id):
+        return json.dumps({
+            "success": True, "customer": customer.get('name'),
+            "customer_tier": customer.get('tier'),
+            "matched": False,
+            "reason": "客户已有交易记录（进行中或已完成），不再推送房源；除非经纪人明确说明客户还需购房",
+            "matches": [],
+        }, ensure_ascii=False)
     matches = db.match_property(customer_id, top_n)
     return json.dumps({
         "success": True, "customer": customer.get('name'),
         "customer_tier": customer.get('tier'),
+        "matched": True,
         "total_properties": len(db.search_properties()),
         "matches": [{k: v for k, v in m.items() if k in ('id','title','community','price','area','rooms','halls','district','score','match_reasons')} for m in matches],
     }, ensure_ascii=False)
