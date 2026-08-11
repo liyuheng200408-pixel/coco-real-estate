@@ -6,7 +6,7 @@
 
 覆盖检查项:
     1. 安装目录与代码版本（是否落后远程）
-    2. hermes-agent 服务状态
+    2. hermes-gateway 服务状态（用户服务，备选 hermes-agent 系统服务）
     3. Python 依赖（ddgs 缺失 = web_search 对模型不可见）
     4. web_search 后端可用性（Coco 能否联网查政策）
     5. 数据库连接与数据量
@@ -24,7 +24,12 @@ import subprocess
 import sys
 
 INSTALL_DIR = os.environ.get("HERMES_AGENT_DIR", os.path.expanduser("~/hermes-agent"))
-SERVICE = "hermes-agent"
+# 2026-08-12 真实事故后适配：真正跑 Coco 的是 hermes-gateway（systemd 用户服务，
+# hermes gateway install 生成），install.sh 的 hermes-agent（系统服务）仅作备选。
+# 顺序：先查用户服务 hermes-gateway，再查系统服务 hermes-agent。
+SERVICE = "hermes-gateway"
+SERVICE_USER = True  # 用户服务需 systemctl --user
+SERVICE_FALLBACK = "hermes-agent"  # 系统服务（install.sh 注册，已停用时可作提示）
 HERMES_HOME = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
 
 PASS = FAIL = WARN = 0
@@ -97,7 +102,7 @@ if os.path.isdir(os.path.join(INSTALL_DIR, ".git")):
     rc, behind = sh(f"git -C {INSTALL_DIR} rev-list --count HEAD..origin/master 2>/dev/null")
     if rc and behind.isdigit() and int(behind) > 0:
         warn(f"代码落后远程 {behind} 个提交",
-             "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent")
+             "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && systemctl --user restart hermes-gateway.service")
     elif rc:
         ok("代码已是最新")
 else:
@@ -105,12 +110,29 @@ else:
 
 # ---- 2. 服务状态 ----
 print("\n[2] 服务状态")
-rc, _ = sh(f"systemctl is-active --quiet {SERVICE}")
+_user = "--user " if SERVICE_USER else ""
+rc, _ = sh(f"systemctl {_user}is-active --quiet {SERVICE}")
 if rc:
-    rc2, since = sh(f"systemctl show -p ActiveEnterTimestamp --value {SERVICE}")
+    rc2, since = sh(f"systemctl {_user}show -p ActiveEnterTimestamp --value {SERVICE}")
     ok(f"服务 {SERVICE} 运行中" + (f"（自 {since}）" if rc2 and since else ""))
 else:
-    bad(f"服务 {SERVICE} 未运行", f"sudo systemctl start {SERVICE} 或 sudo systemctl restart {SERVICE}")
+    # 主服务未运行，查备选系统服务（老部署只有 hermes-agent）
+    rc3, _ = sh(f"systemctl is-active --quiet {SERVICE_FALLBACK}")
+    if rc3:
+        rc4, since2 = sh(f"systemctl show -p ActiveEnterTimestamp --value {SERVICE_FALLBACK}")
+        warn(
+            f"主服务 {SERVICE}（用户服务）未运行，但备选 {SERVICE_FALLBACK} 运行中",
+            f"推荐统一用 {SERVICE}：systemctl --user restart {SERVICE}；"
+            f"若两者并存会互相冲突（2026-08-12 事故），停掉一个",
+        )
+        if rc4 and since2:
+            print(f"        {SERVICE_FALLBACK} 自 {since2} 运行")
+    else:
+        bad(
+            f"服务 {SERVICE}（用户服务）与 {SERVICE_FALLBACK}（系统服务）均未运行",
+            f"systemctl --user start {SERVICE} 或 systemctl --user restart {SERVICE}；"
+            f"查看状态: systemctl --user status {SERVICE}",
+        )
 
 # ---- 3. Python 依赖 ----
 print("\n[3] Python 依赖")
@@ -123,7 +145,7 @@ if not missing:
     ok("依赖齐全（ddgs/Pillow/qrcode/lark-oapi/sqlalchemy/psycopg2 等）")
 else:
     bad(f"缺少依赖: {', '.join(missing)}",
-        "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent")
+        "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && systemctl --user restart hermes-gateway.service")
 
 # ---- 4. web_search 可用性 ----
 print("\n[4] web_search 联网搜索后端")
@@ -139,7 +161,7 @@ if ws_state == "OK":
     ok("web_search 后端可用，Coco 可联网查最新政策")
 elif ws_state == "NO":
     bad("web_search 不可用（未检测到搜索后端），Coco 只能回复'未收录'",
-        "确认 ddgs 已装: pip show ddgs; 再重启: sudo systemctl restart hermes-agent")
+        "确认 ddgs 已装: pip show ddgs; 再重启: systemctl --user restart hermes-gateway.service")
 else:
     warn(f"web_search 检查异常: {ws_state}", "把以下日志发技术顾问")
 
@@ -213,11 +235,12 @@ else:
 
 # ---- 10. 网关日志 ----
 print("\n[10] 网关近期日志（最近 200 行）")
-rc, out = sh(f"journalctl -u {SERVICE} -n 200 --no-pager 2>/dev/null")
+_user = "--user " if SERVICE_USER else ""
+rc, out = sh(f"journalctl {_user}-u {SERVICE} -n 200 --no-pager 2>/dev/null")
 if rc and out:
     errs = [l for l in out.splitlines() if "ERROR" in l or "Traceback" in l]
     if errs:
-        warn(f"近期日志有 {len(errs)} 处错误/异常", "sudo journalctl -u hermes-agent -n 100 --no-pager 查看详情并发给技术顾问")
+        warn(f"近期日志有 {len(errs)} 处错误/异常", f"journalctl {_user}-u {SERVICE} -n 100 --no-pager 查看详情并发给技术顾问")
     else:
         ok("近期日志无错误")
 else:
