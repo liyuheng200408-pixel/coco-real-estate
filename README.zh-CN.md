@@ -16,32 +16,29 @@
 | 🏷 发布助手 | 一键生成朋友圈/贝壳/安居客/58 房源发布文案 |
 | 🔐 数据加密 | 客户手机号、微信号等敏感字段 AES 加密存储，密钥自动生成（`.env.db`） |
 
-## 🚀 一键安装
+## 🚀 一键安装与配置
+
+### 第一步：一键安装
+
+这是我本人维护的渠道，最稳定，也最适合中国大陆的网络环境：
 
 ```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 ```
 
-安装脚本自动完成：
-1. 检测系统环境（Ubuntu / CentOS / MacOS）
-2. 安装 Python、PostgreSQL 等依赖
-3. 克隆代码并安装 Python 依赖
-4. 创建 PostgreSQL 数据库（自动生成随机密码）
-5. 注册 systemd 服务并启动
+这个脚本会自动完成所有安装步骤（检测系统环境、安装依赖、克隆代码、创建数据库、注册服务并启动）。
 
-安装完成后按提示配置即可使用。
+### 第二步：安装后的配置
 
-## ⚙️ 安装后配置与测试
+安装脚本执行成功后，你需要完成以下配置才能使用 Hermes。
 
-### 1. 刷新环境变量
-
-安装完成后，为了让 hermes 命令立即生效：
+1. 刷新环境变量，为了让 hermes 命令立即生效：
 
 ```bash
 source ~/.bashrc
 ```
 
-### 2. 验证安装
+2. 验证安装，检查 hermes 命令是否可用：
 
 ```bash
 hermes --version
@@ -49,34 +46,36 @@ hermes --version
 
 如果能看到版本号（例如 hermes v0.20.0），就说明核心程序安装成功了。
 
-### 3. 设置 Hermes 后台运行（Gateway 网关服务）
+3. 设置 Hermes 后台运行，最常用的是 Gateway（网关服务）：
 
 ```bash
+# 1. 安装为后台服务
 hermes gateway install
+# 2. 启动服务
 hermes gateway start
 ```
 
 这样即使关掉终端，Hermes 也会在后台持续运行，飞书消息也能正常收发。
 
-### 4. 配置模型（最关键一步，连接 AI 模型，需要 API Key）
+4. 配置模型，这是最关键的一步，用来连接 AI 模型。你需要一个 API Key（DeepSeek API Key 购买：[https://platform.deepseek.com/usage](https://platform.deepseek.com/usage)）：
 
 ```bash
 hermes model
 ```
 
-### 5. 运行配置向导（连接飞书）
+5. 运行配置向导（连接飞书，飞书开放平台：[https://open.feishu.cn/?lang=zh-CN](https://open.feishu.cn/?lang=zh-CN)）：
 
 ```bash
 hermes setup
 ```
 
-### 6. 重启服务并发布应用
+### 第三步：重启服务并发布应用
 
 ```bash
 hermes gateway restart
 ```
 
-### 7. 测试机器人
+### 第四步：测试机器人
 
 1. 打开飞书 App，搜索你的机器人名称
 2. 发送一条消息（如"你好"）
