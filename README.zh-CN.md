@@ -31,29 +31,57 @@ curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.
 
 安装完成后按提示配置即可使用。
 
-## ⚙️ 安装后配置
+## ⚙️ 安装后配置与测试
 
-### 1. 配置模型（支持小米 MiMo、OpenAI、DeepSeek 等）
+### 1. 刷新环境变量
+
+安装完成后，为了让 hermes 命令立即生效：
 
 ```bash
-cd ~/hermes-agent
-source venv/bin/activate
+source ~/.bashrc
+```
+
+### 2. 验证安装
+
+```bash
+hermes --version
+```
+
+如果能看到版本号（例如 hermes v0.20.0），就说明核心程序安装成功了。
+
+### 3. 设置 Hermes 后台运行（Gateway 网关服务）
+
+```bash
+hermes gateway install
+hermes gateway start
+```
+
+这样即使关掉终端，Hermes 也会在后台持续运行，飞书消息也能正常收发。
+
+### 4. 配置模型（最关键一步，连接 AI 模型，需要 API Key）
+
+```bash
 hermes model
 ```
 
-### 2. 配置飞书机器人
+### 5. 运行配置向导（连接飞书）
 
 ```bash
-cd ~/hermes-agent
-source venv/bin/activate
 hermes setup
 ```
 
-### 3. 启动服务
+### 6. 重启服务并发布应用
 
 ```bash
-sudo systemctl start hermes-agent
+hermes gateway restart
 ```
+
+### 7. 测试机器人
+
+1. 打开飞书 App，搜索你的机器人名称
+2. 发送一条消息（如"你好"）
+3. 机器人会回复配对码，在终端执行批准：`hermes pairing approve feishu <配对码>`
+4. 批准后再发消息，机器人应该正常回复
 
 ## 🔧 常用命令
 
