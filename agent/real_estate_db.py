@@ -510,6 +510,10 @@ class RealEstateDB:
 
             results = []
             for c in candidates:
+                # 户型硬性要求：客户明确 N 室/N 厅而房源不满足 → 跳过
+                #（与 match_property 对称，防止"2 室房源推给要 3 室的客户"）
+                if c.layout_pref and not self._match_layout(c.layout_pref, prop.rooms, prop.halls):
+                    continue
                 score = 0
                 reasons = []
 
@@ -613,6 +617,11 @@ class RealEstateDB:
             area = prop.get('area', 0)
             if min_area <= area <= max_area:
                 score += 20; reasons.append("面积匹配")
+            
+            # 户型硬性要求：客户明确 N 室/N 厅而房源不满足 → 直接排除
+            #（真实案例 2026-08-11：客户要 3 室却被推 2 室房源并标"匹配度较高"）
+            if customer.get('layout_pref') and not self._match_layout(customer.get('layout_pref'), prop.get('rooms'), prop.get('halls')):
+                continue
             
             if self._match_layout(customer.get('layout_pref'), prop.get('rooms'), prop.get('halls')):
                 score += 25; reasons.append("户型匹配")
