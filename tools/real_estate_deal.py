@@ -45,7 +45,7 @@ def start_deal(customer_id: int, property_id: int, price: int = None, deposit_am
     result = db.add_deal(customer_id=customer_id, property_id=property_id, **kwargs)
     return json.dumps({
         "success": True, "deal": result,
-        "message": f"已创建成交单：{customer.get('name')} 成交 {result.get('property_title')}，当前阶段：定金"
+        "message": f"已创建成交单：{customer.get('name')} 成交 {result.get('property_title')}，当前阶段：定金；该房源已标记售出/出租，不再对外推荐"
     }, ensure_ascii=False)
 
 

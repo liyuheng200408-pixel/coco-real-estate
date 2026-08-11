@@ -92,6 +92,11 @@ r = call('add_property', {"title":"测试小区单间出租","price":1000,"area"
     "rooms":1,"halls":1,"bathrooms":1,"property_type":"rental","tags":"拎包入住"})
 rental_pid = r[1]['property']['id']; results['add_property_rental'] = r
 
+# 第二套在售房源：营销类工具（海报/短视频/传图）用它——播种房源成交后已下架
+r = call('add_property', {"title":"在售房源二号","price":2000000,"area":120.0,"community":"和风家园","district":"琼山",
+    "rooms":3,"halls":2,"bathrooms":2,"property_type":"second_hand","tags":"南北通透"})
+pid2 = r[1]['property']['id']; results['add_property_second'] = r
+
 r = call('save_script', {"name":"议价话术","content":"理解您的预算考虑，这套房可以谈","scenario":"objection_handling"})
 sid = r[1]['script']['id']; results['save_script'] = r
 
@@ -152,18 +157,18 @@ CASES = [
     ("update_birthday", {"customer_id":cid,"birthday":"1990-01-01"}),
     ("generate_listing_copy", {"property_id":pid,"platform":"friends"}),
     ("generate_listing_copy", {"property_id":rental_pid,"platform":"beike"}),      # 出租文案应显示"1000元/月"
-    ("generate_short_video_script", {"property_id":pid,"platform":"douyin"}),
-    ("add_property_images", {"property_id":pid,"images":TEST_IMG}),
-    ("list_property_images", {"property_id":pid}),
-    ("compare_property", {"property_id":pid}),
+    ("generate_short_video_script", {"property_id":pid2,"platform":"douyin"}),
+    ("add_property_images", {"property_id":pid2,"images":TEST_IMG}),
+    ("list_property_images", {"property_id":pid2}),
+    ("compare_property", {"property_id":pid2}),
     ("intent_score", {"customer_id":cid}),
     ("list_intent_scores", {}),
     ("get_script_by_name", {"name":"议价话术"}),
     ("list_scripts", {}),
     ("delete_script", {"script_id":sid}),
     ("generate_report", {"period":"week"}),
-    ("generate_property_poster", {"property_id":pid}),
-    ("generate_poster_grid", {"property_ids":str(pid)}),
+    ("generate_property_poster", {"property_id":pid2}),
+    ("generate_poster_grid", {"property_ids":str(pid2)}),
 ]
 
 for name, args in CASES:

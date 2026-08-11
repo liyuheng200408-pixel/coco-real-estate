@@ -834,7 +834,13 @@ class RealEstateDB:
     def add_deal(self, customer_id, property_id, **kwargs):
         with self.get_session() as s:
             d = Deal(customer_id=customer_id, property_id=property_id, **kwargs)
-            s.add(d); s.commit(); s.refresh(d)
+            s.add(d)
+            # 成交后房源不再对外在售：二手房/新房 → sold，出租 → rented
+            # （真实案例 2026-08-11：阳光花园过户完成仍显示在售 21 套）
+            p = s.query(Property).get(property_id)
+            if p and p.status == 'available':
+                p.status = 'rented' if p.property_type == 'rental' else 'sold'
+            s.commit(); s.refresh(d)
             return d.to_dict()
 
     def update_deal(self, did, **kwargs):
