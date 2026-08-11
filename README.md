@@ -24,6 +24,18 @@
 
 这是我本人维护的渠道，最稳定，也最适合中国大陆的网络环境：
 
+SSH 重新连接后，先安装 Node.js 22（如果还没装）：
+
+```bash
+# 1. 安装 Node.js 22（如果还没装）
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+# 2. 验证 Node 版本
+node -v # 应该 v22.x
+```
+
+然后执行一键安装：
+
 ```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 ```
