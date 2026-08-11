@@ -83,21 +83,7 @@ hermes gateway start
 
 这样即使关掉终端，Hermes 也会在后台持续运行，飞书消息也能正常收发。
 
-> **⚠️ 部署提示（重要）**：`hermes gateway install` 生成的用户服务默认不带数据库环境变量，会导致房产数据写入本地 sqlite 而非 PostgreSQL（表现为 Coco 回复"添加成功"但查库没有数据）。一键安装脚本已自动预置补丁，无需手动处理；如果你手动执行 `hermes gateway install`，请确认存在以下补丁文件（不存在则手动创建）：
->
-> ```bash
-> # 确认补丁文件存在（install.sh 会自动生成）
-> cat ~/.config/systemd/user/hermes-gateway.service.d/override.conf
-> # 预期输出：
-> # [Service]
-> # EnvironmentFile=/root/hermes-agent/.env.db
-> #
-> # 如果文件不存在，手动创建：
-> mkdir -p ~/.config/systemd/user/hermes-gateway.service.d
-> printf '[Service]\nEnvironmentFile=/root/hermes-agent/.env.db\n' > ~/.config/systemd/user/hermes-gateway.service.d/override.conf
-> systemctl --user daemon-reload
-> systemctl --user restart hermes-gateway.service
-> ```
+> **部署提示**：一键安装脚本已自动配置网关数据库环境（PostgreSQL）。若手动执行 `hermes gateway install` 后 Coco 回复"添加成功"但查库无数据，说明服务未加载数据库环境——代码已内置防护：未配置 DATABASE_URL 时工具会直接报错而不是静默写入临时文件，按报错提示补环境即可。
 
 2. 重启服务使配置生效：
 

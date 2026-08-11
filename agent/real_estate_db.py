@@ -1021,16 +1021,20 @@ _db_instance = None
 def init_real_estate_db(database_url: str = None) -> RealEstateDB:
     global _db_instance
     if database_url is None:
-        database_url = os.getenv('DATABASE_URL', 'sqlite:///real_estate.db')
-        # 2026-08-12 真实事故警示：gateway 用户服务（hermes-gateway.service）默认
-        # 不带 EnvironmentFile，进程无 DATABASE_URL 时这里会静默回退 sqlite，
-        # 写入 ~/.hermes/real_estate.db 幽灵库——Coco 回复"添加成功"但 PostgreSQL
-        # 查不到，极难排查。生产环境必须显式指向 PostgreSQL，回退时打醒目日志。
-        if database_url == 'sqlite:///real_estate.db':
-            logger.warning(
-                "⚠️ 未配置 DATABASE_URL 环境变量，回退 sqlite:///real_estate.db。"
-                "生产环境数据将写入本地 sqlite 而非 PostgreSQL，飞书录入会\"假成功\"。"
-                "请检查 hermes-gateway.service 是否加载 .env.db（systemctl --user edit hermes-gateway.service 加 EnvironmentFile）。"
+        database_url = os.getenv('DATABASE_URL')
+        # 2026-08-12 真实事故治本方案：无 DATABASE_URL 时显式报错，禁止静默回退 sqlite。
+        # 背景：gateway 用户服务（hermes-gateway.service）默认不带 EnvironmentFile，
+        # 进程无 DATABASE_URL 时旧代码静默回退 sqlite:///real_estate.db，写入
+        # ~/.hermes/real_estate.db 幽灵库——Coco 回复"添加成功"但 PostgreSQL 查不到。
+        # 现在改为：未配置环境变量直接抛错，工具调用返回明确错误，模型无法编造成功。
+        # 显式传参（本地测试 sqlite）不受影响；healthcheck/install.sh 都显式设置环境变量。
+        if not database_url:
+            raise RuntimeError(
+                "未配置 DATABASE_URL 环境变量，拒绝初始化数据库。"
+                "请检查 hermes-gateway.service 是否加载 .env.db（systemctl --user edit "
+                "hermes-gateway.service 添加 EnvironmentFile=/root/hermes-agent/.env.db），"
+                "或手动 export DATABASE_URL=postgresql://... 后重试。"
+                "这是 2026-08-12 幽灵库事故的防复发机制：禁止静默回退 sqlite。"
             )
     _db_instance = RealEstateDB(database_url)
     return _db_instance
