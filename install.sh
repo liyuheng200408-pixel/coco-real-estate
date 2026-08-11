@@ -206,6 +206,25 @@ setup_tables() {
     "$INSTALL_DIR/venv/bin/python" -c "from agent.real_estate_db import init_real_estate_db; init_real_estate_db(); print('[Coco] 数据库表创建完成')" || warn "建表失败（首次工具调用时会自动重试）"
 }
 
+# ==================== gateway 用户服务环境补丁 ====================
+# 背景（2026-08-12 真实事故）：hermes gateway install 生成的用户服务
+# hermes-gateway.service 默认不带 EnvironmentFile，进程环境里没有 DATABASE_URL，
+# 导致 get_real_estate_db() 静默回退 sqlite（~/.hermes/real_estate.db 幽灵库），
+# Coco 回复"添加成功"但 PostgreSQL 查不到。这里预置 drop-in 补丁，
+# 声明式文件先创建不碍事，gateway install 生成服务时自动生效。
+setup_gateway_env_patch() {
+    info "预置 gateway 用户服务数据库环境补丁..."
+    local dropin_dir="$HOME/.config/systemd/user/hermes-gateway.service.d"
+    local dropin_file="$dropin_dir/override.conf"
+    mkdir -p "$dropin_dir"
+    cat > "$dropin_file" << EOF
+[Service]
+EnvironmentFile=$INSTALL_DIR/.env.db
+EOF
+    chmod 600 "$dropin_file"
+    ok "gateway 环境补丁已预置: $dropin_file"
+}
+
 # ==================== 创建系统服务 ====================
 setup_service() {
     info "配置系统服务..."
@@ -357,6 +376,7 @@ main() {
     setup_config
     setup_tables
     setup_service
+    setup_gateway_env_patch
     start_service
     print_result
 }

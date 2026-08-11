@@ -5,6 +5,7 @@ Coco（可可）的底层数据存储
 import os
 import json
 import re
+import logging
 from datetime import datetime, timedelta
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Float, Numeric, BigInteger,
@@ -13,6 +14,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from sqlalchemy.types import TypeDecorator
 from cryptography.fernet import Fernet
+
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 
@@ -1019,6 +1022,16 @@ def init_real_estate_db(database_url: str = None) -> RealEstateDB:
     global _db_instance
     if database_url is None:
         database_url = os.getenv('DATABASE_URL', 'sqlite:///real_estate.db')
+        # 2026-08-12 真实事故警示：gateway 用户服务（hermes-gateway.service）默认
+        # 不带 EnvironmentFile，进程无 DATABASE_URL 时这里会静默回退 sqlite，
+        # 写入 ~/.hermes/real_estate.db 幽灵库——Coco 回复"添加成功"但 PostgreSQL
+        # 查不到，极难排查。生产环境必须显式指向 PostgreSQL，回退时打醒目日志。
+        if database_url == 'sqlite:///real_estate.db':
+            logger.warning(
+                "⚠️ 未配置 DATABASE_URL 环境变量，回退 sqlite:///real_estate.db。"
+                "生产环境数据将写入本地 sqlite 而非 PostgreSQL，飞书录入会\"假成功\"。"
+                "请检查 hermes-gateway.service 是否加载 .env.db（systemctl --user edit hermes-gateway.service 加 EnvironmentFile）。"
+            )
     _db_instance = RealEstateDB(database_url)
     return _db_instance
 
