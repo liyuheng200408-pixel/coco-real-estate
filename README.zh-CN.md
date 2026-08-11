@@ -58,7 +58,21 @@ hermes --version
 
 如果能看到版本号（例如 hermes v0.20.0），就说明核心程序安装成功了。
 
-3. 设置 Hermes 后台运行，最常用的是 Gateway（网关服务）：
+3. 配置模型，这是最关键的一步，用来连接 AI 模型。你需要一个 API Key（DeepSeek API Key 购买：[https://platform.deepseek.com/usage](https://platform.deepseek.com/usage)）：
+
+```bash
+hermes model
+```
+
+4. 运行配置向导（连接飞书，飞书开放平台：[https://open.feishu.cn/?lang=zh-CN](https://open.feishu.cn/?lang=zh-CN)）：
+
+```bash
+hermes setup
+```
+
+### 第三步：设置后台运行并重启服务
+
+1. 设置 Hermes 后台运行，最常用的是 Gateway（网关服务）：
 
 ```bash
 # 1. 安装为后台服务
@@ -85,19 +99,7 @@ hermes gateway start
 > systemctl --user restart hermes-gateway.service
 > ```
 
-4. 配置模型，这是最关键的一步，用来连接 AI 模型。你需要一个 API Key（DeepSeek API Key 购买：[https://platform.deepseek.com/usage](https://platform.deepseek.com/usage)）：
-
-```bash
-hermes model
-```
-
-5. 运行配置向导（连接飞书，飞书开放平台：[https://open.feishu.cn/?lang=zh-CN](https://open.feishu.cn/?lang=zh-CN)）：
-
-```bash
-hermes setup
-```
-
-### 第三步：重启服务并发布应用
+2. 重启服务使配置生效：
 
 ```bash
 hermes gateway restart
