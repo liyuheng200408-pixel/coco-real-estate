@@ -177,6 +177,57 @@ sudo systemctl restart hermes-agent
 
 > 顺序说明：自动恢复数据库 → 图片 → 加密密钥（enc_key.txt 合并进 .env.db），任一步失败即中止并提示。密钥必须先于服务启动恢复，否则旧数据无法解密。
 
+### 重装系统完整恢复流程（2026-08-12 实测验证）
+
+以下流程已在真实服务器上重装系统实测通过（数据完整恢复，healthcheck 全 PASS）。**重装会清空服务器所有数据，动手前务必完成前两步。**
+
+**第 1 步：旧服务器备份并打包下载（重装前必做）**
+
+```bash
+cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py backup --force
+cd ~/backups/real_estate && ls -la          # 确认 .dump 备份和 enc_key.txt 都在
+cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump enc_key.txt
+```
+
+```bash
+# 在本地电脑执行：下载迁移包（重装后服务器上什么都没了，必须下载到电脑）
+scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
+```
+
+**第 2 步：重装系统**（云控制台重装 Ubuntu 24.04）
+
+**第 3 步：全新安装**（装完不要手动改任何环境，验证 install.sh 补丁是否生效）
+
+```bash
+curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
+cd ~/hermes-agent && source venv/bin/activate
+hermes model        # 配置模型 API Key
+hermes setup        # 配置飞书机器人
+hermes gateway install && hermes gateway start
+```
+
+**第 4 步：恢复数据**
+
+```bash
+# 把迁移包传回服务器（本地电脑执行）
+scp ~/Desktop/coco_migration.tar.gz root@服务器IP:/root/
+
+# 服务器执行恢复
+cd ~/hermes-agent && source venv/bin/activate
+python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+systemctl --user restart hermes-gateway.service
+```
+
+**第 5 步：验证**
+
+```bash
+cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
+```
+
+预期：数据库/密钥/备份新鲜度全部 PASS；在飞书给 Coco 发"看下房源统计"，数据完整返回（房源/客户/成交都在，品牌名保留）。
+
+> ⚠️ 若 healthcheck 数据库项 FAIL，说明 gateway 服务未加载数据库环境——这是 2026-08-12 幽灵库事故的复发信号，按报错提示修复环境后重启，不要继续使用。
+
 ## 📁 项目结构
 
 ```
