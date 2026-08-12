@@ -674,11 +674,27 @@ class RealEstateDB:
                 .order_by(Followup.created_at.desc()).limit(limit).all()]
     
     def get_overdue(self):
+        """逾期跟进：按客户取最新一条跟进，其 next_date 已过期才算逾期
+
+        2026-08-12 修复：原逻辑返回所有 next_date 过期的跟进记录，导致
+        record_viewing 自动生成的"带看后回访"提醒（1小时后过期）永远挂在
+        逾期列表——经纪人记了新跟进也不消解，cron 每 30 分钟重复提醒。
+        现改为：每个客户只看最新一条跟进（created_at 最大），只有它也过期
+        才报逾期；客户有过更新的跟进记录说明已处理，旧提醒不再报。
+        """
         with self.get_session() as s:
-            return [f.to_dict() for f in s.query(Followup)
-                .filter(Followup.next_date < datetime.now())
-                .filter(Followup.next_date.isnot(None))
-                .order_by(Followup.next_date).all()]
+            # 全量取出按创建时间升序，Python 聚合每组取最新（避免 PG 专有函数）
+            all_fu = s.query(Followup).order_by(Followup.created_at.asc()).all()
+            latest_by_customer = {}
+            for f in all_fu:
+                if f.customer_id is not None:
+                    latest_by_customer[f.customer_id] = f
+            overdue = []
+            now = datetime.now()
+            for f in latest_by_customer.values():
+                if f.next_date is not None and f.next_date < now:
+                    overdue.append(f)
+            return [f.to_dict() for f in overdue]
     
     def get_stale_customers(self):
         """流失预警：按最后互动时间计算超期客户
