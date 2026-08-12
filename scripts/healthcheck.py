@@ -11,10 +11,11 @@
     4. web_search 后端可用性（Coco 能否联网查政策）
     5. 数据库连接与数据量
     6. COCO_ENC_KEY 与密钥备份
-    7. cron 注册（4 个定时任务）
-    8. 技能同步
-    9. 磁盘空间
-    10. 网关近期日志错误
+    7. 备份新鲜度（最新 dump 是否 <48h，2026-08-12 加）
+    8. cron 注册（4 个定时任务）
+    9. 技能同步
+    10. 磁盘空间
+    11. 网关近期日志错误
 
 退出码: 0 = 全部通过/仅警告; 1 = 存在 FAIL 项
 """
@@ -22,6 +23,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+import time
 
 INSTALL_DIR = os.environ.get("HERMES_AGENT_DIR", os.path.expanduser("~/hermes-agent"))
 # 2026-08-12 真实事故后适配：真正跑 Coco 的是 hermes-gateway（systemd 用户服务，
@@ -204,8 +206,25 @@ if os.path.isfile(key_backup):
 else:
     warn("密钥备份不存在", "密钥丢失将无法解密客户手机号，尽快备份到安全位置")
 
-# ---- 7. cron 注册 ----
-print("\n[7] 定时任务（cron）")
+# ---- 7. 备份新鲜度 ----（2026-08-12 加）
+print("\n[7] 备份新鲜度")
+backup_dir = os.path.expanduser("~/backups/real_estate")
+dumps = []
+if os.path.isdir(backup_dir):
+    dumps = [f for f in os.listdir(backup_dir) if f.endswith(".dump")]
+if not dumps:
+    warn("无任何数据库备份", "立即执行: python3 scripts/backup_db.py backup --force；建议配置每日自动备份")
+else:
+    newest = max(dumps, key=lambda f: os.path.getmtime(os.path.join(backup_dir, f)))
+    age_h = (time.time() - os.path.getmtime(os.path.join(backup_dir, newest))) / 3600
+    if age_h <= 48:
+        ok(f"最新备份 {newest}（{age_h:.0f} 小时前），备份新鲜")
+    else:
+        warn(f"备份已过期（最新 {newest}，{age_h:.0f} 小时前 > 48h）",
+             "立即执行: python3 scripts/backup_db.py backup --force；检查每日自动备份任务是否失效")
+
+# ---- 8. cron 注册 ----
+print("\n[8] 定时任务（cron）")
 marker = os.path.join(HERMES_HOME, ".coco_cron_registered")
 if os.path.isfile(marker):
     ok("cron 已注册（标记文件存在），含早报/午间/逾期/生日 4 个任务")
@@ -221,8 +240,8 @@ if os.path.isfile(skill):
 else:
     warn("技能未同步", "重启服务后 gateway 自动同步: sudo systemctl restart hermes-agent")
 
-# ---- 9. 磁盘空间 ----
-print("\n[9] 磁盘空间")
+# ---- 10. 磁盘空间 ----
+print("\n[10] 磁盘空间")
 rc, out = sh("df -P / | awk 'NR==2{print $4}'")
 if rc and out.isdigit():
     free_mb = int(out) // 1024
@@ -233,8 +252,8 @@ if rc and out.isdigit():
 else:
     warn("无法读取磁盘空间")
 
-# ---- 10. 网关日志 ----
-print("\n[10] 网关近期日志（最近 200 行）")
+# ---- 11. 网关日志 ----
+print("\n[11] 网关近期日志（最近 200 行）")
 _user = "--user " if SERVICE_USER else ""
 rc, out = sh(f"journalctl {_user}-u {SERVICE} -n 200 --no-pager 2>/dev/null")
 if rc and out:
