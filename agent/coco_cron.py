@@ -9,7 +9,13 @@ logger = logging.getLogger(__name__)
 
 # 标记文件：防止重复注册（放在 HERMES_HOME 下，与 cron 存储一致）
 _MARKER = ".coco_cron_registered"
-_CRON_JOBS = (
+# ==================== Coco 定时任务（默认关闭，2026-08-12 老板决定） ====================
+# 老板决策：定时任务默认不注册（消耗 token），功能保留，经纪人需要时自行开启。
+# 开启方式：在 .env.db 设置 COCO_ENABLE_CRON=1 并重启服务，即注册以下任务。
+_CRON_JOBS = ()
+
+# 任务定义清单（供手动开启时参考，与 _CRON_JOBS 内容一致）
+_AVAILABLE_JOBS = (
     ("coco_daily_report", "0 9 * * *", "coco_daily_report",
      "你是Coco房产助理。请直接调用 daily_report 工具生成每日早报（不要使用 tool_call，直接调用工具），然后用简洁清单体向经纪人汇报：今日待跟进客户、S/A级客户状态、逾期预警。不要添加额外内容。"),
     ("coco_midday_check", "0 13 * * *", "coco_midday_check",
@@ -17,8 +23,7 @@ _CRON_JOBS = (
     ("coco_overdue_check", "*/30 * * * *", "coco_overdue_check",
      "你是Coco房产助理。请直接调用 get_overdue 工具检查逾期客户（不要使用 tool_call，直接调用工具）。如果有逾期客户，列出客户名和逾期天数，提醒经纪人尽快跟进。如果没有逾期客户，只回复[SILENT]不要输出任何其他内容。"),
 )
-# 2026-08-12 老板决定取消：coco_birthday_check（生日提醒）、coco_watchdog（备份/密钥监控）
-# 理由：定时任务消耗 token，这两个对当前使用价值不大。仓库不再注册，已注册的需在服务器手动删除。
+# 已取消（2026-08-12）：coco_birthday_check（生日提醒）、coco_watchdog（备份/密钥监控）
 
 
 def _marker_path() -> str:
@@ -57,7 +62,10 @@ def _job_exists(job_name: str) -> bool:
 
 
 def register_coco_cron_jobs(chat_id: str) -> dict:
-    """注册 Coco 定时任务到指定飞书会话（仅一次）
+    """注册 Coco 定时任务到指定飞书会话（默认关闭，2026-08-12 老板决定）
+
+    默认不注册任何定时任务（消耗 token）。如需开启：在 .env.db 设置
+    COCO_ENABLE_CRON=1 并重启服务，此函数才会注册 _AVAILABLE_JOBS 中的任务。
 
     Args:
         chat_id: 飞书会话 ID
@@ -66,8 +74,14 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
         dict: {"registered": [job names], "skipped": [job names]}
     """
     result = {"registered": [], "skipped": []}
+
+    # 开关：默认关闭；COCO_ENABLE_CRON=1 才注册
+    if os.getenv('COCO_ENABLE_CRON', '0') != '1':
+        logger.info("[Coco] 定时任务默认关闭（COCO_ENABLE_CRON 未设为 1），跳过注册")
+        return result
+
     marker = _marker_path()
-    all_jobs = list(_CRON_JOBS)
+    all_jobs = list(_AVAILABLE_JOBS)
 
     # 标记存在则跳过（幂等）；缺失任务由 _job_exists 兜底补注册
     if os.path.exists(marker):
