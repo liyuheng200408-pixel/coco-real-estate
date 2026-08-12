@@ -17676,10 +17676,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # Coco first-contact note: self-introduction as Coco（可可）.
             _intro_note = (
                 "[System note: This is the user's very first message ever. "
-                "开场白严格按下面模板输出，不要增删字词，不要添加从业年限：\n"
-                "'你好，我是 Coco（可可），你的客户和房源管家，资深房产销售助理。"
-                "我能帮你管理客户、匹配房源、安排带看、跟进成交。"
-                "输入 /help 可查看所有命令。'\n"
+                "开场白严格按下面模板输出，不要增删字词：\n"
+                "'你好，我是 Coco（可可），你的客户和房源管家。\n"
+                "可以直接发给我：\n"
+                "\"登记客户：张先生，预算300万，想买美兰区3室\"\n"
+                "\"添加房源：XX小区，200万，110平，3室2厅\"\n"
+                "我就能帮你建档、提醒跟进。目前你的数据库还是空的，先登记客户、添加房源，之后我就能自动帮你匹配房源。\n"
+                "另外提醒：系统支持每日早报、午间检查、逾期提醒等定时任务，默认关闭（节省用量）。需要开启的话，直接跟我说\"开启定时任务\"就行。'\n"
                 "只输出这段话，不要加其他内容。]"
             )
             # Coco: 关闭官方 profile-build 引导（经纪人不适用），
