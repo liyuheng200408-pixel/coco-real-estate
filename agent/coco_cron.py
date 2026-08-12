@@ -79,7 +79,7 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
     # 标记存在则跳过（幂等）；缺失任务由 _job_exists 兜底补注册
     if os.path.exists(marker):
         # 检查是否有缺失任务需要补注册（兼容 4 元组提示词任务与 5 元组脚本任务）
-        missing = [name for item in all_jobs if not _job_exists(item[2])]
+        missing = [item[2] for item in all_jobs if not _job_exists(item[2])]
         if not missing:
             return result
         logger.info("[Coco] missing jobs to re-register: %s", missing)
