@@ -132,6 +132,55 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
     return result
 
 
+def enable_coco_cron_jobs(chat_id: str) -> dict:
+    """经纪人自助开启定时任务（2026-08-12 加）：注册 _AVAILABLE_JOBS 全部任务
+
+    供工具 enable_cron 调用。与 register_coco_cron_jobs 不同：不受 COCO_ENABLE_CRON
+    环境变量限制，经纪人一句话即可开启。
+    """
+    result = {"registered": [], "skipped": []}
+    if not _cron_store_ready():
+        return {"registered": [], "skipped": [], "error": "cron 存储不可用"}
+    for item in _AVAILABLE_JOBS:
+        job_name, schedule, name = item[0], item[1], item[2]
+        if _job_exists(name):
+            result["skipped"].append(name)
+            continue
+        try:
+            from cron.jobs import create_job
+            create_job(
+                prompt=item[3],
+                schedule=schedule,
+                name=name,
+                deliver=f"feishu:{chat_id}",
+                enabled_toolsets=["real_estate"],
+            )
+            result["registered"].append(name)
+            logger.info("[Coco] cron job enabled: %s -> %s", name, chat_id)
+        except Exception as e:
+            logger.warning("[Coco] cron job %s enable failed: %s", name, e)
+            result["skipped"].append(f"{name}(error)")
+    return result
+
+
+def disable_coco_cron_jobs() -> dict:
+    """经纪人自助关闭定时任务（2026-08-12 加）：删除已注册的 _AVAILABLE_JOBS 任务"""
+    removed = []
+    try:
+        from cron.jobs import list_jobs, remove_job
+        known = {item[2] for item in _AVAILABLE_JOBS}
+        for job in list_jobs(include_disabled=True):
+            name = job.get("name") or ""
+            if name in known:
+                remove_job(job.get("id"))
+                removed.append(name)
+                logger.info("[Coco] cron job disabled: %s", name)
+    except Exception as e:
+        logger.warning("[Coco] disable_coco_cron_jobs failed: %s", e)
+        return {"removed": removed, "error": str(e)}
+    return {"removed": removed}
+
+
 def remove_duplicate_coco_jobs() -> int:
     """清理重复注册的 Coco 任务，保留每个任务第一个，返回删除数"""
     removed = 0

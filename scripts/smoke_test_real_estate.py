@@ -50,6 +50,7 @@ STATIC_TOOLS = [
     "generate_report",
     "generate_property_poster","generate_poster_grid",
     "save_agent_brand","get_agent_brand",
+    "enable_cron","disable_cron",
 ]
 
 # ---------- 造一张测试图片 ----------
@@ -175,6 +176,8 @@ CASES = [
     ("generate_property_poster", {"property_id":pid2}),
     ("generate_poster_grid", {"property_ids":str(pid2)}),
     ("get_agent_brand", {}),
+    ("enable_cron", {"chat_id":"oc_test"}),
+    ("disable_cron", {}),
 ]
 
 for name, args in CASES:

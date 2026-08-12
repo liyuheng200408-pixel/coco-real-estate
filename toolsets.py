@@ -659,6 +659,7 @@ TOOLSETS = {
             "generate_report",
             "generate_property_poster", "generate_poster_grid",
             "save_agent_brand", "get_agent_brand",
+            "enable_cron", "disable_cron",
         ],
         "includes": []
     },
