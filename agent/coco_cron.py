@@ -16,16 +16,9 @@ _CRON_JOBS = (
      "你是Coco房产助理。请直接调用 midday_check 工具做午间检查（不要使用 tool_call，直接调用工具），汇报：逾期未跟进客户、今日剩余任务。没有异常就简短回复'今日无异常'。"),
     ("coco_overdue_check", "*/30 * * * *", "coco_overdue_check",
      "你是Coco房产助理。请直接调用 get_overdue 工具检查逾期客户（不要使用 tool_call，直接调用工具）。如果有逾期客户，列出客户名和逾期天数，提醒经纪人尽快跟进。如果没有逾期客户，只回复[SILENT]不要输出任何其他内容。"),
-    ("coco_birthday_check", "0 8 * * *", "coco_birthday_check",
-     "你是Coco房产助理。请直接调用 birthday_check 工具检查今天和明天过生日的客户（不要使用 tool_call，直接调用工具）。如果有，列出客户名和生日，提醒经纪人发送祝福维护关系。如果没有，只回复[SILENT]不要输出任何其他内容。"),
 )
-
-# 脚本型 watchdog 任务（no_agent）：不走 LLM，异常才输出告警，正常静默（2026-08-12 加）
-_WATCHDOG_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "scripts", "watchdog_alert.py")
-_WATCHDOG_JOB = ("coco_watchdog", "0 */6 * * *", "coco_watchdog",
-                 "备份/密钥/磁盘/服务 watchdog（每 6 小时，异常告警，正常静默）",
-                 {"script": _WATCHDOG_SCRIPT, "no_agent": True})
+# 2026-08-12 老板决定取消：coco_birthday_check（生日提醒）、coco_watchdog（备份/密钥监控）
+# 理由：定时任务消耗 token，这两个对当前使用价值不大。仓库不再注册，已注册的需在服务器手动删除。
 
 
 def _marker_path() -> str:
@@ -74,7 +67,7 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
     """
     result = {"registered": [], "skipped": []}
     marker = _marker_path()
-    all_jobs = list(_CRON_JOBS) + [_WATCHDOG_JOB]
+    all_jobs = list(_CRON_JOBS)
 
     # 标记存在则跳过（幂等）；缺失任务由 _job_exists 兜底补注册
     if os.path.exists(marker):
