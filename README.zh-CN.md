@@ -186,8 +186,8 @@ sudo systemctl restart hermes-agent
 
 ```bash
 cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py backup --force
-cd ~/backups/real_estate && ls -la          # 确认 .dump 备份和 enc_key.txt 都在
-cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump enc_key.txt
+cd ~/backups/real_estate && ls -la          # 确认 .dump 备份、real_estate_images_*.tar.gz、enc_key.txt 都在
+cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
 ```
 
 ```bash
