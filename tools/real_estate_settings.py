@@ -63,5 +63,5 @@ registry.register(
         "type": "object",
         "properties": {},
     }},
-    handler=lambda args, **kw: get_agent_brand(**kw),
+    handler=lambda args, **kw: get_agent_brand(**args),
 )

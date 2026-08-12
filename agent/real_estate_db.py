@@ -599,6 +599,7 @@ class RealEstateDB:
             if 'district' in filters: q = q.filter(Property.district.contains(filters['district']))
             if 'renovation' in filters: q = q.filter(Property.renovation == filters['renovation'])
             if 'property_type' in filters: q = q.filter(Property.property_type == filters['property_type'])
+            if 'title' in filters: q = q.filter(Property.title.contains(filters['title']))
             return [p.to_dict() for p in q.limit(limit).all()]
     
     def customer_has_deal(self, customer_id) -> bool:

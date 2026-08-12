@@ -78,10 +78,11 @@ def search_property(
     min_area: float = None, max_area: float = None,
     rooms: int = None, district: str = None,
     renovation: str = None, property_type: str = None,
-    limit: int = 20, task_id: str = None,
+    title: str = None, limit: int = 20, task_id: str = None,
 ) -> str:
-    """搜索房源（支持按价格、面积、户型、区域、类型筛选）
+    """搜索房源（支持按标题关键词、价格、面积、户型、区域、类型筛选）
     
+    title: 标题关键词（模糊匹配，如"华庭"可匹配滨海华庭）
     property_type: new(新房) / second_hand(二手房) / rental(租房)
     """
     db = _get_db()
@@ -94,6 +95,7 @@ def search_property(
     if district: filters['district'] = district
     if renovation: filters['renovation'] = renovation
     if property_type: filters['property_type'] = property_type
+    if title: filters['title'] = title
     if limit: filters['limit'] = limit
     result = db.search_properties(**filters)
     return json.dumps({"success": True, "properties": result, "count": len(result)}, ensure_ascii=False)
@@ -154,8 +156,9 @@ TOOLS = [
             "status": {"type": "string", "enum": ["available", "sold", "rented"]},
         }, "required": ["property_id"],
     }, "handler": lambda args, **kw: update_property(**args)},
-    {"name": "search_property", "description": "搜索房源", "parameters": {
+    {"name": "search_property", "description": "搜索房源（支持按标题关键词/价格/面积/户型/区域/类型筛选）", "parameters": {
         "type": "object", "properties": {
+            "title": {"type": "string", "description": "标题关键词（模糊匹配，如华庭可匹配滨海华庭）"},
             "min_price": {"type": "integer", "description": "最低价（元）"}, "max_price": {"type": "integer", "description": "最高价（元）"},
             "min_area": {"type": "number"}, "max_area": {"type": "number"},
             "rooms": {"type": "integer"}, "district": {"type": "string"},
