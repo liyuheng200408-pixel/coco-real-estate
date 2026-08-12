@@ -214,6 +214,7 @@ class DatabaseBackup:
         """打包房源图片缓存目录到备份目录，返回 tar 文件名（无图片返回空字符串）"""
         import tarfile
         cache_candidates = [
+            Path.home() / ".hermes" / "image_cache",          # 房源图片实际位置（海报/上传）
             Path.home() / ".hermes" / "cache" / "images",
             Path.home() / "hermes-agent" / ".hermes" / "cache" / "images",
         ]
@@ -245,6 +246,7 @@ class DatabaseBackup:
             self._log(f"错误: 图片备份不存在: {image_tar_filename}")
             return False
         cache_candidates = [
+            Path.home() / ".hermes" / "image_cache",          # 房源图片实际位置（海报/上传）
             Path.home() / ".hermes" / "cache" / "images",
             Path.home() / "hermes-agent" / ".hermes" / "cache" / "images",
         ]
