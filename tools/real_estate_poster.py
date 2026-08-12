@@ -428,9 +428,10 @@ def _draw_vibrant(img, draw, p, qr_content):
     draw.text((50, H - 80), _get_brand() + " · 真实房源", font=f_foot, fill=(140, 90, 70))
 
 
-def generate_property_poster(property_id: int, qr_content: str = None, template: str = None, task_id: str = None) -> str:
+def generate_property_poster(property_id: int = None, title: str = None, qr_content: str = None, template: str = None, task_id: str = None) -> str:
     """生成房源朋友圈海报图（1080x1440）
 
+    property_id 或 title 二选一：传 id 精确匹配；传标题模糊匹配（包含关系，多个匹配取第一个）。
     template 可选：premium（高端黑金）/ modern（现代白卡）/ vibrant（活力橙红）
     不传时按房源类型自动选：new→premium、second_hand→modern、rental→vibrant。
     qr_content 可选：二维码内容（如微信号/房源链接），不传则不画二维码。
@@ -444,10 +445,18 @@ def generate_property_poster(property_id: int, qr_content: str = None, template:
     db = _get_db()
     properties = db.search_properties()
     p = None
-    for item in properties:
-        if item.get('id') == property_id:
-            p = item
-            break
+    if property_id is not None:
+        for item in properties:
+            if item.get('id') == property_id:
+                p = item
+                break
+    elif title:
+        # 标题模糊匹配：包含关系，返回第一个命中（2026-08-12 加：Coco 曾用标题搜索失败）
+        tl = str(title).strip()
+        for item in properties:
+            if tl and tl in (item.get('title') or ''):
+                p = item
+                break
     if p is None:
         return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
 
@@ -543,14 +552,14 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, task_id: str
 registry.register(
     name="generate_property_poster",
     toolset="real_estate",
-    schema={"name": "generate_property_poster", "description": "生成房源朋友圈海报图（标题+价格+面积+可选二维码），支持三套模板（premium 高端黑金/现代白卡 vibrant 活力橙红），返回图片路径，发消息时用 MEDIA:路径 发送图片", "parameters": {
+    schema={"name": "generate_property_poster", "description": "生成房源朋友圈海报图（标题+价格+面积+可选二维码），支持三套模板（premium 高端黑金/modern 现代白卡/vibrant 活力橙红）。传 property_id 或 title（标题模糊匹配）定位房源，返回图片路径，发消息时用 MEDIA:路径 发送图片", "parameters": {
         "type": "object",
         "properties": {
-            "property_id": {"type": "integer", "description": "房源ID"},
+            "property_id": {"type": "integer", "description": "房源ID（与 title 二选一，优先用 ID）"},
+            "title": {"type": "string", "description": "房源标题关键词（与 property_id 二选一，模糊匹配）"},
             "qr_content": {"type": "string", "description": "可选：二维码内容（微信号/房源链接），不传不画二维码"},
             "template": {"type": "string", "enum": ["premium", "modern", "vibrant"], "description": "可选：海报模板 premium(高端黑金)/modern(现代白卡)/vibrant(活力橙红)，不传按房源类型自动选"},
         },
-        "required": ["property_id"],
     }},
     handler=lambda args, **kw: generate_property_poster(**args),
 )
