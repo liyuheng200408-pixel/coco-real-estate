@@ -78,8 +78,8 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
 
     # 标记存在则跳过（幂等）；缺失任务由 _job_exists 兜底补注册
     if os.path.exists(marker):
-        # 检查是否有缺失任务需要补注册
-        missing = [name for _, _, name, _ in all_jobs if not _job_exists(name)]
+        # 检查是否有缺失任务需要补注册（兼容 4 元组提示词任务与 5 元组脚本任务）
+        missing = [name for item in all_jobs if not _job_exists(item[2])]
         if not missing:
             return result
         logger.info("[Coco] missing jobs to re-register: %s", missing)
@@ -88,13 +88,15 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
         logger.warning("[Coco] cron store not ready, skip cron registration")
         return result
 
-    for job_name, schedule, name, prompt in all_jobs:
+    for item in all_jobs:
+        job_name, schedule, name = item[0], item[1], item[2]
         if _job_exists(name):
             result["skipped"].append(name)
             continue
         try:
             from cron.jobs import create_job
             extra = {}
+            prompt = item[3]
             if isinstance(prompt, dict):  # 脚本型任务（watchdog）
                 extra = prompt
                 prompt = None
