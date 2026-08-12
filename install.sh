@@ -54,14 +54,16 @@ install_deps() {
     case $PKG_MANAGER in
         apt)
             sudo apt-get update -qq
-            sudo apt-get install -y -qq python3 python3-pip python3-venv git curl build-essential libpq-dev postgresql postgresql-contrib
+            sudo apt-get install -y -qq python3 python3-pip python3-venv git curl build-essential libpq-dev postgresql postgresql-contrib fonts-wqy-zenhei
             ;;
         yum|dnf)
             sudo $PKG_MANAGER install -y python3 python3-pip git curl gcc gcc-c++ postgresql-server postgresql-devel
+            sudo $PKG_MANAGER install -y wqy-zenhei-fonts 2>/dev/null || sudo $PKG_MANAGER install -y google-noto-sans-cjk-fonts 2>/dev/null || true
             sudo postgresql-setup --initdb 2>/dev/null || true
             ;;
         brew)
             brew install python3 git postgresql
+            brew install --cask font-wqy-zenhei 2>/dev/null || true
             ;;
         *)
             error "请手动安装: python3, pip3, git, curl, postgresql"
