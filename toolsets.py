@@ -658,6 +658,7 @@ TOOLSETS = {
             "save_script", "get_script_by_name", "list_scripts", "delete_script",
             "generate_report",
             "generate_property_poster", "generate_poster_grid",
+            "save_agent_brand", "get_agent_brand",
         ],
         "includes": []
     },

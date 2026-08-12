@@ -49,6 +49,7 @@ STATIC_TOOLS = [
     "save_script","get_script_by_name","list_scripts","delete_script",
     "generate_report",
     "generate_property_poster","generate_poster_grid",
+    "save_agent_brand","get_agent_brand",
 ]
 
 # ---------- 造一张测试图片 ----------
@@ -99,6 +100,10 @@ pid2 = r[1]['property']['id']; results['add_property_second'] = r
 
 r = call('save_script', {"name":"议价话术","content":"理解您的预算考虑，这套房可以谈","scenario":"objection_handling"})
 sid = r[1]['script']['id']; results['save_script'] = r
+
+# 保存经纪人品牌（海报生成前置条件，2026-08-12 起海报无品牌返回 need_brand）
+r = call('save_agent_brand', {"brand_name":"测试房产"})
+results['save_agent_brand'] = r
 
 r = call('schedule_viewing', {"customer_id":cid,"property_id":pid,"viewing_time":"2026-08-16 14:00"})
 vid = r[1]['viewing']['id']; results['schedule_viewing'] = r
@@ -169,6 +174,7 @@ CASES = [
     ("generate_report", {"period":"week"}),
     ("generate_property_poster", {"property_id":pid2}),
     ("generate_poster_grid", {"property_ids":str(pid2)}),
+    ("get_agent_brand", {}),
 ]
 
 for name, args in CASES:

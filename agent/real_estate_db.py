@@ -225,6 +225,20 @@ class Reminder(Base):
     )
 
 
+class Setting(Base):
+    """经纪人配置表（key/value，2026-08-12 加）
+
+    存经纪人品牌/公司名等非结构化配置：key 唯一，value 字符串。
+    目前唯一 key: brand_name（海报品牌展示）。
+    """
+    __tablename__ = 're_settings'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(100), nullable=False, unique=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class Viewing(Base):
     """带看记录表"""
     __tablename__ = 're_viewings'
@@ -660,6 +674,26 @@ class RealEstateDB:
         if hm and halls is not None and halls != int(hm.group(1)): return False
         return True
     
+    # ---------- 经纪人配置 ----------
+    def get_setting(self, key: str) -> str:
+        """读取配置；不存在返回 None"""
+        with self.get_session() as s:
+            row = s.query(Setting).filter(Setting.key == key).first()
+            return row.value if row else None
+
+    def set_setting(self, key: str, value: str) -> str:
+        """写入/更新配置，返回当前值"""
+        with self.get_session() as s:
+            row = s.query(Setting).filter(Setting.key == key).first()
+            if row:
+                row.value = value
+                row.updated_at = datetime.now()
+            else:
+                row = Setting(key=key, value=value)
+                s.add(row)
+            s.commit()
+            return value
+
     # ---------- 跟进 ----------
     def add_followup(self, **kwargs):
         with self.get_session() as s:

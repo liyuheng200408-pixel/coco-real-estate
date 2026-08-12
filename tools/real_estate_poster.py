@@ -86,8 +86,15 @@ def _ellipsis(draw, text, font, max_width):
 # ==================== B 档专业模板（2026-08-12 加） ====================
 
 def _get_brand():
-    """品牌名：环境变量 COCO_BRAND，默认 COCO 房产"""
-    return os.getenv('COCO_BRAND', 'COCO 房产')
+    """品牌名：数据库 re_settings.brand_name 优先，环境变量 COCO_BRAND 兜底；都无返回空"""
+    try:
+        from tools.real_estate_settings import get_brand_or_none
+        db_brand = get_brand_or_none()
+        if db_brand:
+            return db_brand
+    except Exception:
+        pass
+    return os.getenv('COCO_BRAND', '')
 
 
 def _load_property_image(p, target_w, target_h):
@@ -443,6 +450,15 @@ def generate_property_poster(property_id: int, qr_content: str = None, template:
             break
     if p is None:
         return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
+
+    # 品牌必须真实：数据库/环境变量都无品牌时，不生成，让模型先询问经纪人（2026-08-12 加）
+    brand = _get_brand()
+    if not brand:
+        return json.dumps({
+            "success": False,
+            "need_brand": True,
+            "error": "经纪人品牌名称未配置。请先询问经纪人公司/门店名称（说明：海报上需要展示您的品牌，避免用错误信息生成），获取准确名称后调用 save_agent_brand 保存，再生成海报。",
+        }, ensure_ascii=False)
 
     # 模板选择：显式指定 > 按类型自动
     if not template:
