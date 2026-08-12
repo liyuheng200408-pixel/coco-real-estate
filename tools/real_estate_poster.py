@@ -83,9 +83,349 @@ def _ellipsis(draw, text, font, max_width):
     return text + '…'
 
 
-def generate_property_poster(property_id: int, qr_content: str = None, task_id: str = None) -> str:
+# ==================== B 档专业模板（2026-08-12 加） ====================
+
+def _get_brand():
+    """品牌名：环境变量 COCO_BRAND，默认 COCO 房产"""
+    return os.getenv('COCO_BRAND', 'COCO 房产')
+
+
+def _load_property_image(p, target_w, target_h):
+    """加载房源第一张图片并 cover 裁剪到目标尺寸；无图返回 None"""
+    from PIL import Image
+    images = [x.strip() for x in (p.get('images') or '').split(',') if x.strip()]
+    if not images:
+        return None
+    try:
+        img = Image.open(images[0]).convert('RGB')
+    except Exception:
+        return None
+    # cover 裁剪
+    iw, ih = img.size
+    scale = max(target_w / iw, target_h / ih)
+    nw, nh = int(iw * scale + 0.5), int(ih * scale + 0.5)
+    img = img.resize((nw, nh), Image.LANCZOS)
+    left = (nw - target_w) // 2
+    top = (nh - target_h) // 2
+    return img.crop((left, top, left + target_w, top + target_h))
+
+
+def _overlay_gradient_mask(img, bottom_dark=True, alpha=150):
+    """在图片上叠加竖向渐变蒙版（底部压暗，让文字可读）"""
+    from PIL import Image, ImageDraw
+    w, h = img.size
+    mask = Image.new('L', (1, h), 0)
+    md = ImageDraw.Draw(mask)
+    if bottom_dark:
+        for y in range(h):
+            ratio = y / max(h - 1, 1)
+            md.point((0, y), fill=int(alpha * ratio))
+    else:
+        for y in range(h):
+            ratio = 1 - y / max(h - 1, 1)
+            md.point((0, y), fill=int(alpha * ratio))
+    mask = mask.resize((w, h))
+    black = Image.new('RGB', (w, h), (0, 0, 0))
+    img.paste(black, (0, 0), mask)
+    return img
+
+
+def _rounded_card(size, radius, fill, outline=None, width=0):
+    """圆角卡片（带可选描边）"""
+    from PIL import Image, ImageDraw
+    w, h = size
+    card = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(card)
+    d.rounded_rectangle([(0, 0), (w - 1, h - 1)], radius=radius, fill=fill,
+                        outline=outline, width=width)
+    return card
+
+
+def _draw_qr(img, qr_content, center_x, center_y, size=260, bg_light=True):
+    """在 img 上画二维码（居中定位）"""
+    if not qr_content:
+        return
+    try:
+        import qrcode
+        from PIL import Image
+        qr = qrcode.make(qr_content)
+        qr = qr.convert('RGB')
+        # 白底
+        pad = 18
+        panel = Image.new('RGB', (size + pad * 2, size + pad * 2), (255, 255, 255))
+        panel.paste(qr.resize((size, size)), (pad, pad))
+        img.paste(panel, (int(center_x - panel.width / 2), int(center_y - panel.height / 2)))
+    except ImportError:
+        pass
+
+
+def _draw_premium(img, draw, p, qr_content):
+    """模板1 高端黑金：深黑蓝渐变 + 金色价格 + 细线装饰（新房）"""
+    from PIL import ImageDraw
+    W, H = img.size
+    gold = (212, 175, 55)
+    white = (255, 255, 255)
+    soft = (200, 210, 230)
+
+    # 顶部房源大图（0-640）压暗
+    photo = _load_property_image(p, W, 640)
+    if photo:
+        photo = _overlay_gradient_mask(photo, bottom_dark=True, alpha=190)
+        img.paste(photo, (0, 0))
+    else:
+        c1, c2 = _type_colors(p.get('property_type'))
+        img.paste(_gradient((W, 640), c1, c2), (0, 0))
+
+    # 类型角标（左上）
+    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '新房'}.get(p.get('property_type'), '房源')
+    f_type = _load_font(30)
+    tw = draw.textlength(type_label, font=f_type) + 36
+    draw.rounded_rectangle([(40, 40), (40 + tw, 92)], radius=26,
+                           fill=(212, 175, 55, 220))
+    draw.text((40 + 18, 48), type_label, font=f_type, fill=(20, 20, 25))
+
+    # 品牌（右上）
+    f_brand = _load_font(34)
+    brand = _get_brand()
+    bw = draw.textlength(brand, font=f_brand)
+    draw.text((W - 40 - bw, 48), brand, font=f_brand, fill=white)
+
+    # 标题（图片下方）
+    f_title = _load_font(56)
+    title = _ellipsis(draw, p.get('title') or '优质房源', f_title, W - 100)
+    draw.text((50, 700), title, font=f_title, fill=(30, 30, 40))
+
+    # 金色装饰线
+    draw.rectangle([(50, 800), (160, 806)], fill=gold)
+
+    # 价格
+    price_text = _fmt_price(p)
+    f_price = _load_font(120)
+    draw.text((50, 830), price_text, font=f_price, fill=gold)
+    f_unit = _load_font(34)
+    if p.get('unit_price'):
+        draw.text((50, 990), f"单价 {p['unit_price']} 元/㎡", font=f_unit, fill=(120, 125, 140))
+
+    # 信息卡（白色圆角卡片）
+    area = p.get('area')
+    rooms, halls = p.get('rooms'), p.get('halls')
+    layout = f"{rooms}室{halls}厅" if (rooms and halls) else ('开间' if rooms == 1 else '')
+    district = p.get('district') or p.get('community') or '位置详情'
+    items = [
+        ('面积', f"{area}㎡" if area else '-'),
+        ('户型', layout or '-'),
+        ('区域', district),
+    ]
+    card = _rounded_card((W - 100, 180), 24, (255, 255, 255))
+    img.paste(card, (50, 1050), card)
+    f_k = _load_font(30)
+    f_v = _load_font(36)
+    x = 80
+    for k, v in items:
+        draw.text((x, 1085), k, font=f_k, fill=(130, 135, 150))
+        draw.text((x, 1125), _ellipsis(draw, v, f_v, 260), font=f_v, fill=(40, 40, 50))
+        x += 310
+
+    # 标签（金色描边）
+    tags = [t.strip() for t in (p.get('tags') or '').split(',') if t.strip()]
+    y = 1270
+    if tags:
+        f_tag = _load_font(30)
+        x = 50
+        for tag in tags[:4]:
+            tw = draw.textlength(tag, font=f_tag) + 36
+            draw.rounded_rectangle([(x, y), (x + tw, y + 58)], radius=29,
+                                   outline=gold, width=2)
+            draw.text((x + 18, y + 12), tag, font=f_tag, fill=(60, 55, 40))
+            x += tw + 20
+
+    # 底部：二维码 + 引导语
+    if qr_content:
+        _draw_qr(img, qr_content, W - 170, H - 150, size=200)
+    f_foot = _load_font(34)
+    draw.text((50, H - 220), "真实房源 · 随时约看", font=f_foot, fill=(110, 115, 130))
+
+
+def _draw_modern(img, draw, p, qr_content):
+    """模板2 现代白卡：白/浅灰背景 + 圆角卡片 + 清爽灰调（二手房）"""
+    from PIL import Image, ImageDraw
+    W, H = img.size
+    dark = (40, 45, 55)
+    gray = (130, 135, 145)
+    accent = (52, 120, 246)
+    white = (255, 255, 255)
+    bg = (245, 247, 250)
+
+    # 背景浅灰
+    img.paste(Image.new('RGB', (W, H), bg), (0, 0))
+
+    # 顶部大图（0-560）白色圆角卡片包裹
+    photo = _load_property_image(p, W - 60, 500)
+    if photo:
+        photo = _overlay_gradient_mask(photo, bottom_dark=True, alpha=140)
+        card = _rounded_card((W - 60, 500), 28, (255, 255, 255))
+        img.paste(card, (30, 30), card)
+        img.paste(photo, (30, 30), card)
+    else:
+        c1, c2 = _type_colors(p.get('property_type'))
+        photo2 = _gradient((W - 60, 500), c1, c2)
+        card = _rounded_card((W - 60, 500), 28, (255, 255, 255))
+        img.paste(card, (30, 30), card)
+        img.paste(photo2, (30, 30), card)
+
+    # 类型角标
+    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '新房'}.get(p.get('property_type'), '房源')
+    f_type = _load_font(28)
+    tw = draw.textlength(type_label, font=f_type) + 30
+    draw.rounded_rectangle([(52, 52), (52 + tw, 96)], radius=22, fill=accent)
+    draw.text((52 + 15, 60), type_label, font=f_type, fill=white)
+
+    # 标题
+    f_title = _load_font(52)
+    title = _ellipsis(draw, p.get('title') or '优质房源', f_title, W - 100)
+    draw.text((50, 590), title, font=f_title, fill=dark)
+
+    # 价格（accent 蓝）
+    price_text = _fmt_price(p)
+    f_price = _load_font(110)
+    draw.text((50, 660), price_text, font=f_price, fill=accent)
+    f_unit = _load_font(32)
+    if p.get('unit_price'):
+        draw.text((50, 800), f"单价 {p['unit_price']} 元/㎡", font=f_unit, fill=gray)
+
+    # 信息卡（三列白卡）
+    area = p.get('area')
+    rooms, halls = p.get('rooms'), p.get('halls')
+    layout = f"{rooms}室{halls}厅" if (rooms and halls) else ('开间' if rooms == 1 else '')
+    district = p.get('district') or p.get('community') or '位置详情'
+    items = [
+        ('面积', f"{area}㎡" if area else '-'),
+        ('户型', layout or '-'),
+        ('区域', district),
+    ]
+    f_k = _load_font(28)
+    f_v = _load_font(32)
+    x = 50
+    for k, v in items:
+        card = _rounded_card((300, 130), 20, white)
+        img.paste(card, (x, 850), card)
+        draw.text((x + 22, 880), k, font=f_k, fill=gray)
+        draw.text((x + 22, 915), _ellipsis(draw, v, f_v, 250), font=f_v, fill=dark)
+        x += 320
+
+    # 标签（浅蓝底圆角）
+    tags = [t.strip() for t in (p.get('tags') or '').split(',') if t.strip()]
+    y = 1020
+    if tags:
+        f_tag = _load_font(28)
+        x = 50
+        for tag in tags[:4]:
+            tw = draw.textlength(tag, font=f_tag) + 32
+            draw.rounded_rectangle([(x, y), (x + tw, y + 54)], radius=27,
+                                   fill=(232, 240, 255))
+            draw.text((x + 16, y + 11), tag, font=f_tag, fill=accent)
+            x += tw + 18
+
+    # 底部品牌 + 二维码
+    f_brand = _load_font(30)
+    brand = _get_brand()
+    draw.text((50, H - 130), brand, font=f_brand, fill=gray)
+    f_foot = _load_font(30)
+    draw.text((50, H - 80), "真实房源 · 随时约看", font=f_foot, fill=gray)
+    if qr_content:
+        _draw_qr(img, qr_content, W - 140, H - 120, size=170)
+
+
+def _draw_vibrant(img, draw, p, qr_content):
+    """模板3 活力橙红：橙红渐变 + 大号促销价签 + 行动号召（出租/快节奏）"""
+    from PIL import ImageDraw
+    W, H = img.size
+    white = (255, 255, 255)
+    soft = (255, 225, 215)
+    red = (232, 65, 24)
+
+    # 顶部大图 + 渐变
+    photo = _load_property_image(p, W, 620)
+    if photo:
+        photo = _overlay_gradient_mask(photo, bottom_dark=True, alpha=170)
+        img.paste(photo, (0, 0))
+    else:
+        c1, c2 = ((214, 69, 28), (255, 140, 60))
+        img.paste(_gradient((W, 620), c1, c2), (0, 0))
+
+    # 类型角标
+    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '新房'}.get(p.get('property_type'), '房源')
+    f_type = _load_font(30)
+    tw = draw.textlength(type_label, font=f_type) + 36
+    draw.rounded_rectangle([(40, 40), (40 + tw, 92)], radius=26, fill=red)
+    draw.text((40 + 18, 48), type_label, font=f_type, fill=white)
+
+    # 品牌
+    f_brand = _load_font(34)
+    brand = _get_brand()
+    bw = draw.textlength(brand, font=f_brand)
+    draw.text((W - 40 - bw, 48), brand, font=f_brand, fill=white)
+
+    # 标题
+    f_title = _load_font(56)
+    title = _ellipsis(draw, p.get('title') or '优质房源', f_title, W - 100)
+    draw.text((50, 680), title, font=f_title, fill=(40, 30, 25))
+
+    # 价格（橙红大价签）
+    price_text = _fmt_price(p)
+    f_price = _load_font(130)
+    draw.text((50, 760), price_text, font=f_price, fill=red)
+    f_unit = _load_font(34)
+    if p.get('unit_price'):
+        draw.text((50, 930), f"单价 {p['unit_price']} 元/㎡", font=f_unit, fill=(140, 90, 70))
+
+    # 信息卡（半透明白卡片）
+    area = p.get('area')
+    rooms, halls = p.get('rooms'), p.get('halls')
+    layout = f"{rooms}室{halls}厅" if (rooms and halls) else ('开间' if rooms == 1 else '')
+    district = p.get('district') or p.get('community') or '位置详情'
+    items = [
+        ('面积', f"{area}㎡" if area else '-'),
+        ('户型', layout or '-'),
+        ('区域', district),
+    ]
+    f_k = _load_font(30)
+    f_v = _load_font(34)
+    x = 50
+    for k, v in items:
+        card = _rounded_card((300, 120), 20, (255, 255, 255, 230))
+        img.paste(card, (x, 1000), card)
+        draw.text((x + 22, 1025), k, font=f_k, fill=(150, 100, 80))
+        draw.text((x + 22, 1060), _ellipsis(draw, v, f_v, 250), font=f_v, fill=(60, 40, 30))
+        x += 320
+
+    # 标签（橙红描边）
+    tags = [t.strip() for t in (p.get('tags') or '').split(',') if t.strip()]
+    y = 1160
+    if tags:
+        f_tag = _load_font(28)
+        x = 50
+        for tag in tags[:4]:
+            tw = draw.textlength(tag, font=f_tag) + 32
+            draw.rounded_rectangle([(x, y), (x + tw, y + 54)], radius=27,
+                                   outline=red, width=2)
+            draw.text((x + 16, y + 11), tag, font=f_tag, fill=red)
+            x += tw + 18
+
+    # 底部行动号召 + 二维码
+    f_cta = _load_font(44)
+    draw.text((50, H - 260), "🏠 好房不等人 速约看房", font=f_cta, fill=red)
+    if qr_content:
+        _draw_qr(img, qr_content, W - 150, H - 130, size=190)
+    f_foot = _load_font(30)
+    draw.text((50, H - 80), _get_brand() + " · 真实房源", font=f_foot, fill=(140, 90, 70))
+
+
+def generate_property_poster(property_id: int, qr_content: str = None, template: str = None, task_id: str = None) -> str:
     """生成房源朋友圈海报图（1080x1440）
 
+    template 可选：premium（高端黑金）/ modern（现代白卡）/ vibrant（活力橙红）
+    不传时按房源类型自动选：new→premium、second_hand→modern、rental→vibrant。
     qr_content 可选：二维码内容（如微信号/房源链接），不传则不画二维码。
     返回图片绝对路径，可直接在飞书发送。
     """
@@ -104,83 +444,32 @@ def generate_property_poster(property_id: int, qr_content: str = None, task_id: 
     if p is None:
         return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
 
+    # 模板选择：显式指定 > 按类型自动
+    if not template:
+        template = {'new': 'premium', 'second_hand': 'modern', 'rental': 'vibrant'}.get(
+            p.get('property_type'), 'modern')
+    if template not in ('premium', 'modern', 'vibrant'):
+        template = 'modern'
+
     W, H = 1080, 1440
-    c1, c2 = _type_colors(p.get('property_type'))
-    img = _gradient((W, H), c1, c2)
+    img = Image.new('RGB', (W, H), (240, 244, 250))
     draw = ImageDraw.Draw(img)
-    white = (255, 255, 255)
-    soft = (220, 230, 245)
 
-    # 品牌条
-    draw.rectangle([(0, 0), (W, 150)], fill=(0, 0, 0, 90))
-    f_brand = _load_font(52)
-    draw.text((60, 45), "COCO 房产", font=f_brand, fill=white)
-    f_type = _load_font(36)
-    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '新房'}.get(p.get('property_type'), '房源')
-    draw.text((W - 200, 52), type_label, font=f_type, fill=soft)
+    if template == 'premium':
+        _draw_premium(img, draw, p, qr_content)
+    elif template == 'vibrant':
+        _draw_vibrant(img, draw, p, qr_content)
+    else:
+        _draw_modern(img, draw, p, qr_content)
 
-    # 标题（最多两行）
-    f_title = _load_font(64)
-    title = p.get('title') or '优质房源'
-    line1 = _ellipsis(draw, title, f_title, W - 120)
-    draw.text((60, 210), line1, font=f_title, fill=white)
-
-    # 价格
-    price_text = _fmt_price(p)
-    f_price = _load_font(150)
-    draw.text((60, 380), price_text, font=f_price, fill=white)
-    f_unit = _load_font(40)
-    if p.get('unit_price'):
-        draw.text((60, 570), f"单价 {p['unit_price']} 元/㎡", font=f_unit, fill=soft)
-
-    # 信息卡
-    f_info = _load_font(46)
-    area = p.get('area')
-    rooms = p.get('rooms')
-    halls = p.get('halls')
-    layout = f"{rooms}室{halls}厅" if (rooms and halls) else ('开间' if rooms == 1 else '')
-    district = p.get('district') or p.get('community') or '位置详情'
-    info_lines = [
-        f"面积：{area}㎡" if area else None,
-        f"户型：{layout}" if layout else None,
-        f"区域：{district}",
-    ]
-    info_lines = [x for x in info_lines if x]
-    y = 700
-    for line in info_lines:
-        draw.text((60, y), line, font=f_info, fill=white)
-        y += 76
-
-    # 特色标签
-    tags = [t.strip() for t in (p.get('tags') or '').split(',') if t.strip()]
-    if tags:
-        f_tag = _load_font(36)
-        x = 60
-        for tag in tags[:4]:
-            tw = draw.textlength(tag, font=f_tag) + 40
-            draw.rounded_rectangle([(x, y + 10), (x + tw, y + 74)], radius=32, fill=(255, 255, 255, 40), outline=soft)
-            draw.text((x + 20, y + 18), tag, font=f_tag, fill=white)
-            x += tw + 24
-
-    # 底部文案 + 二维码
-    f_foot = _load_font(40)
-    draw.text((60, H - 320), "真实房源 · 随时约看", font=f_foot, fill=soft)
-    if qr_content:
-        try:
-            import qrcode
-            qr = qrcode.make(qr_content)
-            qr = qr.convert('RGB').resize((280, 280))
-            img.paste(qr, (W - 340, H - 360))
-        except ImportError:
-            pass  # 无 qrcode 库则只出文案版
-
-    path = os.path.join(_poster_dir(), f'poster_{property_id}.png')
+    path = os.path.join(_poster_dir(), f'poster_{property_id}_{template}.png')
     img.save(path)
     return json.dumps({
         "success": True,
         "property_id": property_id,
+        "template": template,
         "poster_path": path,
-        "message": f"海报已生成：{path}（发送时用 MEDIA:{path} 直接发图）",
+        "message": f"海报已生成（模板 {template}）：{path}（发送时用 MEDIA:{path} 直接发图）",
     }, ensure_ascii=False)
 
 
@@ -238,11 +527,12 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, task_id: str
 registry.register(
     name="generate_property_poster",
     toolset="real_estate",
-    schema={"name": "generate_property_poster", "description": "生成房源朋友圈海报图（标题+价格+面积+可选二维码），返回图片路径，发消息时用 MEDIA:路径 发送图片", "parameters": {
+    schema={"name": "generate_property_poster", "description": "生成房源朋友圈海报图（标题+价格+面积+可选二维码），支持三套模板（premium 高端黑金/现代白卡 vibrant 活力橙红），返回图片路径，发消息时用 MEDIA:路径 发送图片", "parameters": {
         "type": "object",
         "properties": {
             "property_id": {"type": "integer", "description": "房源ID"},
             "qr_content": {"type": "string", "description": "可选：二维码内容（微信号/房源链接），不传不画二维码"},
+            "template": {"type": "string", "enum": ["premium", "modern", "vibrant"], "description": "可选：海报模板 premium(高端黑金)/modern(现代白卡)/vibrant(活力橙红)，不传按房源类型自动选"},
         },
         "required": ["property_id"],
     }},
