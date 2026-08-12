@@ -20,6 +20,13 @@ _CRON_JOBS = (
      "你是Coco房产助理。请直接调用 birthday_check 工具检查今天和明天过生日的客户（不要使用 tool_call，直接调用工具）。如果有，列出客户名和生日，提醒经纪人发送祝福维护关系。如果没有，只回复[SILENT]不要输出任何其他内容。"),
 )
 
+# 脚本型 watchdog 任务（no_agent）：不走 LLM，异常才输出告警，正常静默（2026-08-12 加）
+_WATCHDOG_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "scripts", "watchdog_alert.py")
+_WATCHDOG_JOB = ("coco_watchdog", "0 */6 * * *", "coco_watchdog",
+                 "备份/密钥/磁盘/服务 watchdog（每 6 小时，异常告警，正常静默）",
+                 {"script": _WATCHDOG_SCRIPT, "no_agent": True})
+
 
 def _marker_path() -> str:
     """标记文件路径：跟随 HERMES_HOME（与 cron 存储同目录）"""
@@ -67,11 +74,12 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
     """
     result = {"registered": [], "skipped": []}
     marker = _marker_path()
+    all_jobs = list(_CRON_JOBS) + [_WATCHDOG_JOB]
 
     # 标记存在则跳过（幂等）；缺失任务由 _job_exists 兜底补注册
     if os.path.exists(marker):
         # 检查是否有缺失任务需要补注册
-        missing = [name for _, _, name, _ in _CRON_JOBS if not _job_exists(name)]
+        missing = [name for _, _, name, _ in all_jobs if not _job_exists(name)]
         if not missing:
             return result
         logger.info("[Coco] missing jobs to re-register: %s", missing)
@@ -80,18 +88,23 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
         logger.warning("[Coco] cron store not ready, skip cron registration")
         return result
 
-    for job_name, schedule, name, prompt in _CRON_JOBS:
+    for job_name, schedule, name, prompt in all_jobs:
         if _job_exists(name):
             result["skipped"].append(name)
             continue
         try:
             from cron.jobs import create_job
+            extra = {}
+            if isinstance(prompt, dict):  # 脚本型任务（watchdog）
+                extra = prompt
+                prompt = None
             create_job(
                 prompt=prompt,
                 schedule=schedule,
                 name=name,
                 deliver=f"feishu:{chat_id}",
                 enabled_toolsets=["real_estate"],
+                **extra,
             )
             result["registered"].append(name)
             logger.info("[Coco] cron job registered: %s -> %s", name, chat_id)
