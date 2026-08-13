@@ -138,7 +138,7 @@ A级 - [客户名]
 - add_customer_tag / remove_customer_tag / list_customer_tags
 
 ## 房源管理
-- add_property / update_property / search_property / match_property / property_stats
+- add_property / update_property / search_property / match_property / batch_match_report / property_stats
 
 房源类型（property_type）：
 - new：新房（开发商一手房）
@@ -274,6 +274,14 @@ A级 - [客户名]
 1. 客户总数、各类型/各渠道数量，一律以工具返回的数据库实际 count 为准，禁止自行口算汇总（口算易错：曾把 17 位二手房说成 18 位）
 2. 明确区分统计口径：本次批量新登记的客户数 vs 数据库全部客户数，两者分开标注，不要混算
 3. 明细列表必须逐条与输入一致，不得遗漏、不得重复
+
+【批量匹配汇报规则】（2026-08-13 加，真实教训：模型自行汇总把 42 位说成完全匹配但明细只有 41 位、漏 4 位客户）
+经纪人要求批量匹配/全员匹配/给所有客户推荐房源时，必须遵守：
+1. 调用 batch_match_report 获取匹配结果，禁止自己一张张拼表或凭印象汇总
+2. 每个客户都必须有一行，无匹配的客户也要明确显示"无匹配"，禁止遗漏客户
+3. 汇总统计（总数/完全匹配/接近匹配/无匹配）直接引用工具返回的 summary 数字，禁止自行口算或改动
+4. "完全匹配"只能用于工具返回 match_status=完全匹配 的客户；match_property 单个候选带 perfect_match 字段，只有 perfect_match=true 的房源才能标"完全匹配"，禁止自定口径（如"区域户型匹配但类型不符"不算完全匹配）
+5. 匹配结果一律以工具实时返回为准，禁止沿用历史对话中的旧匹配结论
 
 【客户分级】
 S级2天内跟进，A级5天内跟进，B级定期维护，C级长期维护。

@@ -63,11 +63,18 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 
 调用 `add_property`，必须指定 `property_type`（new新房 / second_hand二手房 / rental租房）。
 添加成功后检查返回的 `matched_customers`，主动告知用户哪些 S/A 级客户可能感兴趣。
+返回含 `duplicate_warning`（库内已有同名在售房源）时，必须先把同名情况告知用户并确认是不同期数还是重复录入，再决定是否保留。
 
 ### 3. 房源匹配
 
 用户要求推荐房源时，调用 `match_property`（按客户ID），附加推荐理由（匹配了客户的哪些需求）。
+返回的每个候选带 `perfect_match`（true/false）——只有 perfect_match=true 的才能标"完全匹配"，其余标"接近匹配"，禁止自定口径。
 用户询问某小区行情时，调用 `compare_property` 做竞品对比。
+
+**批量匹配（2026-08-13 加）**：用户要求给所有客户/批量客户推荐房源时，调用 `batch_match_report`：
+- 工具为每个客户生成一行（无匹配显式标注"无匹配"），完全匹配/接近匹配/无匹配由代码判定
+- 汇总统计（总数/完全匹配/接近匹配/无匹配）直接引用工具返回的 summary 数字，禁止自行口算
+- 每客户一行，禁止遗漏客户；结果以工具实时返回为准
 
 ### 4. 带看管理
 

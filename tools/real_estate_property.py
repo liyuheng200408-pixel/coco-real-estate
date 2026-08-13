@@ -48,7 +48,24 @@ def add_property(
         matched = db.match_customers_for_property(result['id'])
     except Exception:
         matched = []
+    # 同名提示（2026-08-13 加）：防重复录入——同标题在售房源已存在时提醒经纪人确认
+    #（真实案例：雅居乐金沙湾/保利中央海岸/恒大美丽沙均录入两条价格、区域冲突的记录）
+    duplicate_warning = None
+    try:
+        same_title = [d for d in db.search_properties(title=title, limit=10)
+                      if d.get('title') == title]
+        if same_title:
+            d0 = same_title[0]
+            duplicate_warning = (
+                f"库内已有同名在售房源 {len(same_title)} 条（如 id={d0['id']} {d0['title']} "
+                f"{d0['price']}元 {d0.get('district') or '区域未填'}），"
+                f"请确认是否为不同期数/楼栋，避免重复录入"
+            )
+    except Exception:
+        duplicate_warning = None
     response = {"success": True, "property": result}
+    if duplicate_warning:
+        response["duplicate_warning"] = duplicate_warning
     if matched:
         response["matched_customers"] = matched
         response["message"] = f"房源已添加，有 {len(matched)} 位 S/A 级客户可能感兴趣"
@@ -126,6 +143,29 @@ def match_property(customer_id: int, top_n: int = 5, task_id: str = None) -> str
     }, ensure_ascii=False)
 
 
+def batch_match_report(
+    customer_type: str = None, tier: str = None, district: str = None,
+    top_n: int = 1, task_id: str = None,
+) -> str:
+    """批量匹配汇报：为全部客户（或按类型/等级/区域筛选）生成逐客户匹配明细与汇总
+
+    每个客户必有一行（无匹配显式标注"无匹配"），汇总统计由代码生成，禁止自行口算。
+    customer_type: buy_new(买新房) / buy_second_hand(买二手房) / rent(租房)
+    tier: S/A/B/C
+    district: 区域筛选（如"美兰区"或"美兰"）
+    top_n: 每个客户展示的最佳房源数（默认 1）
+    """
+    db = _get_db()
+    result = db.match_all_customers(top_n=top_n, customer_type=customer_type,
+                                    tier=tier, district=district)
+    return json.dumps({
+        "success": True,
+        "total_properties": len(db.search_properties(limit=10000)),
+        "summary": result['summary'],
+        "customers": result['customers'],
+    }, ensure_ascii=False)
+
+
 def property_stats(task_id: str = None) -> str:
     """获取房源统计数据"""
     db = _get_db()
@@ -173,6 +213,14 @@ TOOLS = [
     {"name": "property_stats", "description": "获取房源统计数据", "parameters": {
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: property_stats()},
+    {"name": "batch_match_report", "description": "批量匹配汇报：为全部客户（或按类型/等级/区域筛选）生成逐客户匹配明细与汇总，每个客户一行（无匹配显式标注），完全匹配/接近匹配/无匹配由代码判定，汇总数字由代码统计，禁止自行口算", "parameters": {
+        "type": "object", "properties": {
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型筛选：buy_new买新房/buy_second_hand买二手房/rent租房"},
+            "tier": {"type": "string", "enum": ["S", "A", "B", "C"], "description": "客户等级筛选"},
+            "district": {"type": "string", "description": "区域筛选，如 美兰区 或 美兰"},
+            "top_n": {"type": "integer", "description": "每个客户展示的最佳房源数，默认1"},
+        },
+    }, "handler": lambda args, **kw: batch_match_report(**args)},
 ]
 
 def get_property_form(task_id: str = None) -> str:
@@ -237,6 +285,12 @@ registry.register(
     toolset="real_estate",
     schema={"name": "property_stats", "description": "获取房源统计数据", "parameters": TOOLS[4]["parameters"]},
     handler=TOOLS[4]["handler"],
+)
+registry.register(
+    name="batch_match_report",
+    toolset="real_estate",
+    schema={"name": "batch_match_report", "description": "批量匹配汇报：为全部客户（或按类型/等级/区域筛选）生成逐客户匹配明细与汇总，每个客户一行（无匹配显式标注），完全匹配/接近匹配/无匹配由代码判定，汇总数字由代码统计，禁止自行口算", "parameters": TOOLS[5]["parameters"]},
+    handler=TOOLS[5]["handler"],
 )
 
 
