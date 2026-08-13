@@ -527,6 +527,11 @@ class RealEstateDB:
 
             results = []
             for c in candidates:
+                # 租买互斥（2026-08-13 加）：租房客户只推出租房源，买房客户只推买卖房源
+                if prop.property_type == 'rental' and c.customer_type != 'rent':
+                    continue
+                if prop.property_type in ('new', 'second_hand') and c.customer_type == 'rent':
+                    continue
                 # 户型硬性要求：客户明确 N 室/N 厅而房源不满足 → 跳过
                 #（与 match_property 对称，防止"2 室房源推给要 3 室的客户"）
                 if c.layout_pref and not self._match_layout(c.layout_pref, prop.rooms, prop.halls):
@@ -562,13 +567,15 @@ class RealEstateDB:
                         score += 20
                         reasons.append("面积匹配")
 
-                # 区域匹配（权重 15）
-                if c.location and prop.district and c.location in prop.district:
+                # 区域匹配（权重 15）：区名归一化优先，原子串兜底
+                region_ok = self._match_region(c.location, prop.district, prop.community, reasons)
+                if region_ok and c.location:
                     score += 15
-                    reasons.append("区域匹配")
-                elif c.location and prop.community and c.location in prop.community:
-                    score += 15
-                    reasons.append("小区匹配")
+
+                # 类型匹配（新房/二手房/租房）：不匹配不加分但标注，且不算完全匹配
+                type_ok = self._match_type(c.customer_type, prop.property_type)
+                if c.customer_type and not type_ok:
+                    reasons.append("类型不符")
 
                 # 装修匹配（权重 10）
                 if c.renovation and prop.renovation and c.renovation == prop.renovation:
@@ -576,12 +583,20 @@ class RealEstateDB:
                     reasons.append("装修匹配")
 
                 if score >= 40:
+                    # perfect_match：预算在区间 + 户型硬性匹配 + 区域匹配（或无区域需求）+ 类型匹配
+                    perfect_match = (
+                        budget_min <= prop.price <= budget_max
+                        and self._match_layout(c.layout_pref, prop.rooms, prop.halls)
+                        and (region_ok or not c.location)
+                        and type_ok
+                    )
                     results.append({
                         'customer_id': c.id, 'customer_name': c.name,
                         'tier': c.tier, 'score': score, 'match_reasons': reasons,
                         'budget': [budget_min, budget_max],
                         'area_pref': c.area_pref, 'layout_pref': c.layout_pref,
                         'location': c.location,
+                        'perfect_match': perfect_match,
                     })
 
             results.sort(key=lambda x: x['score'], reverse=True)
@@ -615,22 +630,38 @@ class RealEstateDB:
         if self.customer_has_deal(customer_id):
             return []
         
-        properties = self.search_properties()
+        properties = self.search_properties(limit=10000)
         if not properties: return []
         
         min_area, max_area = self._parse_area(customer.get('area_pref'))
         budget_min = customer.get('budget_min') or 0
         budget_max = customer.get('budget_max') or 999999999  # 无预算上限（元制）
+        loc = customer.get('location') or ''
+        layout_pref = customer.get('layout_pref')
+        ren_pref = customer.get('renovation')
+        ctype = customer.get('customer_type')
         
         scores = []
         for prop in properties:
             score = 0; reasons = []
             
+            prop_type = prop.get('property_type')
+            # 租买互斥硬过滤（2026-08-13 加）：租房客户只推出租房源，买房客户只推买卖房源
+            #（真实教训：月租 1500-2500 的客户被推 78 万总价二手房；反之亦然）
+            if prop_type == 'rental' and ctype != 'rent':
+                continue
+            if prop_type in ('new', 'second_hand') and ctype == 'rent':
+                continue
+            
             price = prop.get('price', 0)
             if budget_min <= price <= budget_max:
                 score += 30; reasons.append("价格匹配")
-            elif price < budget_min * 1.1:
-                score += 15; reasons.append("价格略高")
+            elif price < budget_min:
+                score += 15; reasons.append("略低于预算")
+            else:
+                # 超预算：不加分但必须显式标注，防止把超预算房源标成"完全匹配"
+                #（2026-08-13 真实案例：280 万房源被推给 230 万预算客户并标完全匹配）
+                reasons.append("超预算")
             
             area = prop.get('area', 0)
             if min_area <= area <= max_area:
@@ -638,24 +669,85 @@ class RealEstateDB:
             
             # 户型硬性要求：客户明确 N 室/N 厅而房源不满足 → 直接排除
             #（真实案例 2026-08-11：客户要 3 室却被推 2 室房源并标"匹配度较高"）
-            if customer.get('layout_pref') and not self._match_layout(customer.get('layout_pref'), prop.get('rooms'), prop.get('halls')):
+            if layout_pref and not self._match_layout(layout_pref, prop.get('rooms'), prop.get('halls')):
                 continue
-            
-            if self._match_layout(customer.get('layout_pref'), prop.get('rooms'), prop.get('halls')):
+            if self._match_layout(layout_pref, prop.get('rooms'), prop.get('halls')):
                 score += 25; reasons.append("户型匹配")
             
-            loc = customer.get('location')
-            if loc and (loc in prop.get('district', '') or loc in prop.get('community', '')):
-                score += 15; reasons.append("区域匹配")
+            # 区域匹配（权重 15）：区名归一化优先，原子串兜底
+            #（2026-08-13 真实案例：客户"美兰区"命中不了"美兰-海甸岛"格式，同房差 15 分）
+            region_ok = self._match_region(loc, prop.get('district'), prop.get('community'), reasons)
+            if region_ok and loc:
+                score += 15
             
-            if customer.get('renovation') and customer.get('renovation') == prop.get('renovation'):
+            # 类型匹配（新房/二手房/租房）：不匹配不加分但标注，且不算完全匹配
+            #（2026-08-13 真实案例：要买新房的客户被推二手房并标完全匹配）
+            type_ok = self._match_type(ctype, prop.get('property_type'))
+            if ctype and not type_ok:
+                reasons.append("类型不符")
+            
+            if ren_pref and ren_pref == prop.get('renovation'):
                 score += 10; reasons.append("装修匹配")
             
             if score > 0:
-                scores.append({**prop, 'score': score, 'match_reasons': reasons})
+                # perfect_match：预算在区间 + 户型硬性匹配 + 区域匹配（或无区域需求）+ 类型匹配
+                #（2026-08-13 加：判定标准写死在代码里，模型只能引用此字段标"完全匹配"，
+                #   禁止自定口径——此前模型把 150 万标成 160-200 万预算客户的"完全匹配"）
+                perfect_match = (
+                    budget_min <= price <= budget_max
+                    and self._match_layout(layout_pref, prop.get('rooms'), prop.get('halls'))
+                    and (region_ok or not loc)
+                    and type_ok
+                )
+                scores.append({**prop, 'score': score, 'match_reasons': reasons,
+                               'perfect_match': perfect_match})
         
         scores.sort(key=lambda x: x['score'], reverse=True)
         return scores[:top_n]
+    
+    def match_all_customers(self, top_n=1, customer_type=None, tier=None, district=None):
+        """批量匹配：为全部 active 客户（排除有交易的）逐客户生成匹配明细与汇总
+
+        每个客户必有一行（无匹配显式标注"无匹配"），汇总统计由代码生成。
+        2026-08-13 真实教训：模型自行汇总必错（完全匹配 42 vs 明细 41、漏 4 位客户），
+        批量匹配汇报必须用本方法输出，禁止模型口算。
+        """
+        with self.get_session() as s:
+            customers = s.query(Customer).filter(Customer.status == 'active').all()
+        if tier:
+            customers = [c for c in customers if c.tier == tier]
+        if customer_type:
+            customers = [c for c in customers if c.customer_type == customer_type]
+        customers = [c for c in customers if not self.customer_has_deal(c.id)]
+        if district:
+            dnorm = self._norm_district(district)
+            customers = [c for c in customers
+                         if c.location and (dnorm == self._norm_district(c.location) or dnorm in c.location)]
+        
+        rows = []
+        for c in customers:
+            matches = self.match_property(c.id, top_n)
+            has_perfect = any(m.get('perfect_match') for m in matches)
+            status = '完全匹配' if has_perfect else ('接近匹配' if matches else '无匹配')
+            rows.append({
+                'customer_id': c.id,
+                'customer_name': c.name,
+                'tier': c.tier,
+                'customer_type': c.customer_type,
+                'budget_min': c.budget_min,
+                'budget_max': c.budget_max,
+                'location': c.location,
+                'layout_pref': c.layout_pref,
+                'match_status': status,
+                'matches': matches,
+            })
+        summary = {
+            'total': len(rows),
+            'perfect_match': sum(1 for r in rows if r['match_status'] == '完全匹配'),
+            'close_match': sum(1 for r in rows if r['match_status'] == '接近匹配'),
+            'no_match': sum(1 for r in rows if r['match_status'] == '无匹配'),
+        }
+        return {'customers': rows, 'summary': summary}
     
     def _parse_area(self, area_pref):
         if not area_pref: return (0, 999999)
@@ -669,11 +761,79 @@ class RealEstateDB:
     
     def _match_layout(self, layout_pref, rooms, halls):
         if not layout_pref: return True
-        rm = re.search(r'(\d+)室', layout_pref)
-        hm = re.search(r'(\d+)厅', layout_pref)
-        if rm and rooms is not None and rooms != int(rm.group(1)): return False
-        if hm and halls is not None and halls != int(hm.group(1)): return False
+        if rooms is None and halls is None: return True
+        # 支持范围式户型："4-5室"/"1-2厅"（房源室数在范围内即可）
+        #（2026-08-13 修：原单值正则会把"1-2室"解析成 2 室，1 室房源被错误排除）
+        rm = re.search(r'(\d+)\s*[-~到至]\s*(\d+)室', layout_pref)
+        if rm:
+            lo, hi = int(rm.group(1)), int(rm.group(2))
+            if rooms is not None and not (lo <= rooms <= hi): return False
+        else:
+            m = re.search(r'(\d+)室', layout_pref)
+            if m and rooms is not None and rooms != int(m.group(1)): return False
+        hm = re.search(r'(\d+)\s*[-~到至]\s*(\d+)厅', layout_pref)
+        if hm:
+            lo, hi = int(hm.group(1)), int(hm.group(2))
+            if halls is not None and not (lo <= halls <= hi): return False
+        else:
+            m = re.search(r'(\d+)厅', layout_pref)
+            if m and halls is not None and halls != int(m.group(1)): return False
         return True
+    
+    # ---------- 匹配辅助（2026-08-13 加） ----------
+    @staticmethod
+    def _norm_district(s):
+        """区域名归一化：'海口美兰区海甸岛'/'美兰-海甸岛'/'美兰区' → '美兰'
+
+        2026-08-13 真实案例：存量区域字段三种写法并存（海口美兰区…/美兰-海甸岛/美兰区），
+        裸子串匹配（客户"美兰区" in "美兰-海甸岛"=False）导致同套房区域分差 15 分。
+        """
+        if not s:
+            return ''
+        s = str(s).strip()
+        m = re.search(r'([\u4e00-\u9fa5]{2,3}?)区', s)
+        if m:
+            return m.group(1)
+        return s.split('-')[0].strip()
+
+    @staticmethod
+    def _match_region(loc, prop_district, prop_community, reasons=None):
+        """区域/小区匹配：区名归一化优先，原子串兜底（兼容客户直接填小片区如"海甸岛"）"""
+        if not loc:
+            return True  # 客户无区域需求视为区域满足（是否计入 perfect 由调用方决定）
+        prop_district = prop_district or ''
+        prop_community = prop_community or ''
+        norm_loc = RealEstateDB._norm_district(loc)
+        if norm_loc and (norm_loc == RealEstateDB._norm_district(prop_district) or norm_loc in prop_district):
+            if reasons is not None: reasons.append("区域匹配")
+            return True
+        # 客户 location 含房源所在区名（如客户"秀英大道" vs 房源"秀英-秀英小街"）→ 区域级匹配
+        #（2026-08-13 加：解决小片区粒度差异，客户写小片区、房源存"区-小片区"）
+        prop_norm = RealEstateDB._norm_district(prop_district)
+        if prop_norm and prop_norm in loc:
+            if reasons is not None: reasons.append("区域匹配")
+            return True
+        if loc in prop_district:
+            if reasons is not None: reasons.append("区域匹配")
+            return True
+        if loc in prop_community:
+            if reasons is not None: reasons.append("小区匹配")
+            return True
+        return False
+
+    _CUSTOMER_TYPE_TO_PROP_TYPE = {
+        'buy_new': 'new',            # 买新房 → 新房
+        'buy_second_hand': 'second_hand',  # 买二手房 → 二手房
+        'rent': 'rental',            # 租房 → 出租
+    }
+
+    @classmethod
+    def _match_type(cls, customer_type, prop_type):
+        """客户购房类型 ↔ 房源类型；未细分类型（buy）不限"""
+        want = cls._CUSTOMER_TYPE_TO_PROP_TYPE.get(customer_type or '')
+        if not want:
+            return True
+        return want == prop_type
     
     # ---------- 经纪人配置 ----------
     def get_setting(self, key: str) -> str:
