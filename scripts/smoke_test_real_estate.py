@@ -20,6 +20,8 @@ if os.path.exists(TEST_DB):
 from cryptography.fernet import Fernet
 os.environ['COCO_ENC_KEY'] = Fernet.generate_key().decode()
 os.environ.setdefault('COCO_IMG_DIR', '/tmp/coco_smoke_imgs')
+# 隔离 cron 存储（2026-08-13 加）：enable_cron 用例会真实注册任务，指向临时目录避免污染本机/服务器真实 cron
+os.environ.setdefault('HERMES_HOME', '/tmp/coco_smoke_cron')
 
 from agent.real_estate_db import init_real_estate_db
 init_real_estate_db()

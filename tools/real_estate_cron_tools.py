@@ -7,15 +7,28 @@ from tools.registry import registry
 
 
 def _get_chat_id(task_id: str = None, **kwargs) -> str:
-    """从多个来源获取飞书会话 ID：kwargs 注入 > task_id > 环境变量 COCO_CHAT_ID"""
-    # 1. kwargs 里框架可能注入 chat_id
+    """获取飞书会话 ID：框架注入 > session_id 提取 > task_id > 环境变量 COCO_CHAT_ID
+
+    2026-08-13 修复：原 handler 丢弃框架注入的 session_id，且 session_id 是复合格式
+    （agent:main:feishu:dm:oc_xxx），自动获取路径全部失效，只能手动配 COCO_CHAT_ID。
+    现支持从 session_id 各段中提取 oc_/ou_ 开头的会话 ID，全自动，无需再配环境变量。
+    """
+    # 1. 框架显式注入的会话 ID
     for key in ('chat_id', 'channel_id', 'conversation_id'):
-        if kwargs.get(key):
-            return str(kwargs[key])
-    # 2. task_id（注册任务时由调用方传入）
+        v = kwargs.get(key)
+        if v:
+            return str(v)
+    # 2. session_id 复合格式提取（agent:main:feishu:dm:oc_xxx → oc_xxx；
+    #    群聊含 user_id/thread_id 段时也能定位到 oc_/ou_ 段）
+    sid = kwargs.get('session_id')
+    if sid:
+        for seg in str(sid).split(':'):
+            if seg.startswith(('oc_', 'ou_')):
+                return seg
+    # 3. task_id（注册任务时由调用方传入）
     if task_id and str(task_id).startswith(('oc_', 'ou_')):
         return task_id
-    # 3. 环境变量兜底（.env.db 配置 COCO_CHAT_ID=oc_xxx）
+    # 4. 环境变量兜底（.env.db 配置 COCO_CHAT_ID=oc_xxx）
     import os
     return os.getenv('COCO_CHAT_ID', '')
 
@@ -41,6 +54,14 @@ def enable_cron(task_id: str = None, **kwargs) -> str:
             "message": f"定时任务已开启：{'、'.join(registered)}（早报 09:00 / 午间 13:00 / 逾期每 30 分钟）",
         }, ensure_ascii=False)
     if skipped:
+        # 区分"已存在跳过"与"注册失败"（2026-08-13 加：注册失败必须如实报错，
+        # 不能报"已经在运行中"误导——真实案例：本地缺 croniter 时全部注册失败仍报成功）
+        errors = [s for s in skipped if s.endswith('(error)')]
+        if errors:
+            return json.dumps({
+                "success": False,
+                "error": f"定时任务注册失败：{'、'.join(errors)}，请稍后重试或检查服务日志",
+            }, ensure_ascii=False)
         return json.dumps({
             "success": True,
             "enabled": [],
@@ -76,7 +97,16 @@ registry.register(
         "type": "object",
         "properties": {},
     }},
-    handler=lambda args, **kw: enable_cron(**args),
+    handler=lambda args, **kw: enable_cron(
+        **{k: v for k, v in {
+            'task_id': kw.get('task_id'),
+            'session_id': kw.get('session_id'),
+            'chat_id': kw.get('chat_id'),
+            'channel_id': kw.get('channel_id'),
+            'conversation_id': kw.get('conversation_id'),
+        }.items() if v is not None and k not in args},
+        **args,
+    ),
 )
 
 registry.register(
