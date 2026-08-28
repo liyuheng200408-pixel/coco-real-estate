@@ -14,13 +14,11 @@ class TestNormDistrict:
     def test_standard_xiqu(self, db):
         assert db._norm_district("美兰区") == "美兰"
 
-    def test_haikou_prefix_via_match_region(self, db):
-        """'海口美兰区海甸岛' 客户应命中 '美兰-海甸岛' 房源（8-13 案例端到端）。
-
-        注：_norm_district 对带城市前缀的字符串归一化为 '口美兰'（已知瑕疵），
-        但 _match_region 的子串兜底（房源区名 in 客户地址）保证最终命中。
-        """
-        assert db._match_region("海口美兰区海甸岛", "美兰-海甸岛", "某小区") is True
+    def test_haikou_prefix(self, db):
+        """带城市前缀的地址归一化出正确区名（2026-08-28 修：原正则截出'口美兰'）"""
+        assert db._norm_district("海口美兰区海甸岛") == "美兰"
+        assert db._norm_district("海口市龙华区国贸") == "龙华"
+        assert db._norm_district("三亚吉阳区某小区") == "吉阳"
 
     def test_dash_format(self, db):
         assert db._norm_district("美兰-海甸岛") == "美兰"
