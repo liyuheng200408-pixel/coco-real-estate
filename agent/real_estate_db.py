@@ -85,6 +85,7 @@ class Customer(Base):
     source = Column(String(100))
     customer_type = Column(String(20), default="buy")  # buy_new/buy_second_hand/rent
     birthday = Column(String(10))  # YYYY-MM-DD
+    stage = Column(String(20), default='lead')  # 生命周期阶段（2026-08-28 功能5）
     status = Column(String(20), default='active')
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
@@ -109,7 +110,7 @@ class Customer(Base):
             'layout_pref': self.layout_pref, 'location': self.location,
             'renovation': self.renovation, 'notes': self.notes, 'tags': self.tags,
             'source': self.source, 'customer_type': self.customer_type, 'status': self.status,
-            'birthday': self.birthday,
+            'birthday': self.birthday, 'stage': self.stage,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -564,6 +565,52 @@ class RealEstateDB:
                 })
             result.sort(key=lambda x: x['budget_max'], reverse=True)
             return result
+
+    # ---------- 生命周期阶段（2026-08-28 功能5） ----------
+    VALID_STAGES = ['lead', 'interested', 'strong', 'viewed',
+                    'negotiating', 'dealing', 'maintain', 'lost']
+
+    def update_stage(self, cid, stage):
+        """推进生命周期阶段，写变更历史；非法阶段报错"""
+        if stage not in self.VALID_STAGES:
+            raise ValueError(f"非法阶段: {stage}，可选 {self.VALID_STAGES}")
+        return self.update_customer(cid, stage=stage)
+
+    STAGE_TIMEOUT_RULES = {  # 阶段: (最大停留天数, 超时提示)
+        'strong': (7, '强意向超7天未推进，建议安排带看'),
+        'viewed': (14, '已看房超14天无动作，建议回访推进'),
+        'negotiating': (7, '谈判超7天无进展，建议破冰或调整筹码'),
+    }
+
+    def stage_stagnation_report(self):
+        """阶段滞留清单：strong/viewed/negotiating 停留超时的客户"""
+        from datetime import datetime
+        now = datetime.now()
+        alerts = []
+        with self.get_session() as s:
+            for stage, (max_days, hint) in self.STAGE_TIMEOUT_RULES.items():
+                customers = s.query(Customer).filter(
+                    Customer.status == 'active', Customer.stage == stage).all()
+                for c in customers:
+                    # 找该客户 stage 变为当前阶段的变更时间
+                    change = s.query(CustomerChange).filter(
+                        CustomerChange.customer_id == c.id,
+                        CustomerChange.field == 'stage',
+                        CustomerChange.new_value == stage,
+                    ).order_by(CustomerChange.created_at.desc()).first()
+                    # 没有变更记录（初始就是该阶段）用客户创建时间兜底
+                    since = change.created_at if change else c.created_at
+                    if not since:
+                        continue
+                    days = (now - since).days
+                    if days > max_days:
+                        alerts.append({
+                            'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                            'stage': stage, 'days_in_stage': days,
+                            'hint': hint,
+                        })
+        alerts.sort(key=lambda x: x['days_in_stage'], reverse=True)
+        return alerts
 
     # ---------- 流失预警（2026-08-28 功能2） ----------
     def churn_risk_customers(self, min_risk=40):
@@ -1367,6 +1414,10 @@ class RealEstateDB:
             p = s.query(Property).get(property_id)
             if p and p.status == 'available':
                 p.status = 'rented' if p.property_type == 'rental' else 'sold'
+            # 生命周期联动：开单自动推进到 dealing（2026-08-28 功能5，防忘）
+            cust = s.query(Customer).get(customer_id)
+            if cust and getattr(cust, 'stage', None) not in ('dealing', 'maintain'):
+                cust.stage = 'dealing'
             s.commit(); s.refresh(d)
             return d.to_dict()
 

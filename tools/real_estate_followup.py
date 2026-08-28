@@ -227,3 +227,27 @@ registry.register(
     }},
     handler=lambda args, **kw: churn_warning(**args),
 )
+
+
+def stage_stagnation(task_id: str = None) -> str:
+    """阶段滞留清单：强意向/已看房/谈判阶段停留超时的客户"""
+    db = _get_db()
+    alerts = db.stage_stagnation_report()
+    if not alerts:
+        return json.dumps({"success": True, "message": "无阶段滞留客户，节奏健康", "alerts": []}, ensure_ascii=False)
+    lines = [f"⏰ 阶段滞留提醒：{len(alerts)} 位客户停留超时"]
+    for a in alerts:
+        lines.append(f"\n· {a['name']}（{a['tier']}级）在「{a['stage']}」已停留 {a['days_in_stage']} 天")
+        lines.append(f"  建议: {a['hint']}")
+    return json.dumps({"success": True, "alerts": alerts, "message": "\n".join(lines)}, ensure_ascii=False)
+
+
+registry.register(
+    name="stage_stagnation",
+    toolset="real_estate",
+    schema={"name": "stage_stagnation", "description": "阶段滞留清单：强意向超7天/已看房超14天/谈判超7天无推进的客户", "parameters": {
+        "type": "object",
+        "properties": {},
+    }},
+    handler=lambda args, **kw: stage_stagnation(**args),
+)
