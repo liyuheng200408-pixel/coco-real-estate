@@ -173,6 +173,34 @@ class Property(Base):
         }
 
 
+class PriceHistory(Base):
+    """房源调价历史表（2026-08-28 功能1）"""
+    __tablename__ = 're_price_history'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    property_id = Column(Integer, ForeignKey('re_properties.id'), nullable=False)
+    old_price = Column(BigInteger)
+    new_price = Column(BigInteger, nullable=False)
+    change_reason = Column(String(200))
+    created_at = Column(DateTime, default=datetime.now)
+
+    property = relationship("Property")
+
+    __table_args__ = (
+        Index('re_idx_price_history_prop', 'property_id'),
+        Index('re_idx_price_history_created', 'created_at'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'property_id': self.property_id,
+            'old_price': self.old_price, 'new_price': self.new_price,
+            'change': (self.new_price - self.old_price) if self.old_price else None,
+            'reason': self.change_reason,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Followup(Base):
     """跟进记录表"""
     __tablename__ = 're_followups'
@@ -454,10 +482,86 @@ class RealEstateDB:
         with self.get_session() as s:
             p = s.query(Property).get(pid)
             if not p: return None
+            # 调价检测：价格变动自动写入历史（2026-08-28 功能1）
+            old_price = p.price
+            new_price = kwargs.get('price')
+            price_changed = (new_price is not None
+                             and old_price is not None
+                             and int(new_price) != int(old_price))
             for k, v in kwargs.items():
                 if hasattr(p, k): setattr(p, k, v)
+            if price_changed:
+                ph = PriceHistory(
+                    property_id=pid,
+                    old_price=int(old_price),
+                    new_price=int(new_price),
+                    change_reason=kwargs.get('price_change_reason'),
+                )
+                s.add(ph)
             s.commit(); s.refresh(p)
-            return p.to_dict()
+            d = p.to_dict()
+            if price_changed:
+                d['price_changed'] = {'old': int(old_price), 'new': int(new_price)}
+            return d
+
+    # ---------- 调价历史与反匹配（2026-08-28 功能1） ----------
+    def get_price_history(self, property_id, limit=20):
+        """房源调价历史（新→旧）"""
+        with self.get_session() as s:
+            rows = s.query(PriceHistory).filter(
+                PriceHistory.property_id == property_id
+            ).order_by(PriceHistory.created_at.desc(), PriceHistory.id.desc()).limit(limit).all()
+            return [{
+                'id': r.id, 'property_id': r.property_id,
+                'old_price': r.old_price, 'new_price': r.new_price,
+                'change': (r.new_price - r.old_price) if r.old_price else None,
+                'reason': r.change_reason,
+                'created_at': r.created_at.isoformat() if r.created_at else None,
+            } for r in rows]
+
+    def find_customers_for_price_drop(self, property_id, days=7):
+        """降价反匹配：找"预算差一点够得着"的客户
+
+        纳入条件：预算上限 >= 新价*0.95 且 < 旧价（就差一点），
+                  排除已成交客户。
+        返回按 budget_max 降序（最接近成交的在前）。
+        """
+        from datetime import datetime, timedelta
+        since = datetime.now() - timedelta(days=days)
+        with self.get_session() as s:
+            drops = s.query(PriceHistory).filter(
+                PriceHistory.property_id == property_id,
+                PriceHistory.created_at >= since,
+            ).order_by(PriceHistory.created_at.desc()).all()
+            prop = s.query(Property).get(property_id)
+            if not prop or not drops:
+                return []
+            latest = drops[0]  # 最近一次调价
+            new_price = latest.new_price
+            old_price = latest.old_price
+            if old_price is None or new_price >= old_price:
+                return []  # 只反匹配"降价"
+
+            threshold = new_price * 0.95
+            customers = s.query(Customer).filter(
+                Customer.status == 'active',
+                Customer.budget_max.isnot(None),
+                Customer.budget_max >= threshold,
+                Customer.budget_max < old_price,
+            ).all()
+            result = []
+            for c in customers:
+                if self.customer_has_deal(c.id):
+                    continue
+                result.append({
+                    'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                    'budget_min': c.budget_min, 'budget_max': c.budget_max,
+                    'phone': c.phone,  # EncryptedString 自动加解密
+                    'gap': int(old_price - c.budget_max),  # 之前差多少
+                    'now_affordable': c.budget_max >= new_price,
+                })
+            result.sort(key=lambda x: x['budget_max'], reverse=True)
+            return result
 
     def find_duplicate_properties(self):
         """按 标题+面积+价格 找重复房源组（含Excel批量导入产生的完全重复项）

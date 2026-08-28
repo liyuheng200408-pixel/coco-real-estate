@@ -325,3 +325,87 @@ registry.register(
     }},
     handler=lambda args, **kw: deduplicate_properties(**args),
 )
+
+
+def price_history(property_id: int, limit: int = 20, task_id: str = None) -> str:
+    """查询房源调价历史"""
+    db = _get_db()
+    history = db.get_price_history(property_id, limit)
+    if not history:
+        return json.dumps({"success": True, "message": "该房源暂无调价记录", "history": []}, ensure_ascii=False)
+    total_change = 0
+    has_old = False
+    first_old = None
+    for h in history:
+        if h["old_price"] is not None:
+            if not has_old:
+                first_old = h["old_price"]
+                has_old = True
+            total_change += h["change"]
+    message = f"共 {len(history)} 次调价，累计变动 {total_change/10000:+.1f}万"
+    return json.dumps({"success": True, "message": message, "history": history}, ensure_ascii=False)
+
+
+def price_drop_alerts(days: int = 7, task_id: str = None) -> str:
+    """降价提醒：扫描近期降价房源，反匹配"预算差一点够得着"的客户，输出联系建议"""
+    db = _get_db()
+    props = db.search_properties(limit=10000)
+    alerts = []
+    for p in props:
+        customers = db.find_customers_for_price_drop(p["id"], days=days)
+        if customers:
+            history = db.get_price_history(p["id"], limit=1)
+            if not history:
+                continue
+            drop = history[0]
+            alerts.append({
+                "property_id": p["id"],
+                "title": p["title"],
+                "old_price": drop["old_price"],
+                "new_price": drop["new_price"],
+                "drop_amount": (drop["old_price"] - drop["new_price"]) if drop["old_price"] else None,
+                "matched_customers": customers,
+            })
+    if not alerts:
+        return json.dumps({"success": True, "message": f"近{days}天无降价房源或降价后无可捞回客户", "alerts": []}, ensure_ascii=False)
+    total_hits = sum(len(a["matched_customers"]) for a in alerts)
+    lines = [f"📢 近{days}天降价提醒：{len(alerts)} 套房降价，可捞回 {total_hits} 位客户"]
+    for a in alerts:
+        drop_w = (a["drop_amount"] or 0) / 10000
+        lines.append(f"\n· {a['title']}（ID:{a['property_id']}）降价 {drop_w:.0f}万 → 现价 {a['new_price']/10000:.0f}万")
+        for c in a["matched_customers"][:5]:
+            afford = "现在够得着" if c["now_affordable"] else "还差一点"
+            lines.append(f"   → {c['name']}（{c['tier']}级，预算上限{c['budget_max']/10000:.0f}万，上次差{c['gap']/10000:.0f}万，{afford}）建议联系")
+    return json.dumps({
+        "success": True,
+        "summary": f"{len(alerts)}套降价、{total_hits}位可捞回客户",
+        "alerts": alerts,
+        "message": "\n".join(lines),
+    }, ensure_ascii=False)
+
+
+registry.register(
+    name="price_history",
+    toolset="real_estate",
+    schema={"name": "price_history", "description": "查询房源调价历史（每次价格变动的记录）", "parameters": {
+        "type": "object",
+        "properties": {
+            "property_id": {"type": "integer", "description": "房源ID"},
+            "limit": {"type": "integer", "description": "返回条数（默认20）"},
+        },
+        "required": ["property_id"],
+    }},
+    handler=lambda args, **kw: price_history(**args),
+)
+
+registry.register(
+    name="price_drop_alerts",
+    toolset="real_estate",
+    schema={"name": "price_drop_alerts", "description": "降价提醒：扫描近期降价房源，找出预算刚够得着的客户并生成联系建议", "parameters": {
+        "type": "object",
+        "properties": {
+            "days": {"type": "integer", "description": "扫描近几天的调价（默认7天）"},
+        },
+    }},
+    handler=lambda args, **kw: price_drop_alerts(**args),
+)
