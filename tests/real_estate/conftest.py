@@ -82,3 +82,6 @@ def make_property(db, **overrides):
     )
     data.update(overrides)
     return db.add_property(**data)
+
+
+# 2026-08-28: paths 过滤器验证注释——tests/real_estate/** 变更应触发房产 CI
