@@ -2,12 +2,19 @@
 #
 # Coco（可可）房产助理 - 一键安装脚本
 # 基于 Hermes Agent 定制版
-# 用法: curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
+# 用法(国内): curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
+# 用法(海外): curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
+# 脚本自动探测网络：Gitee 不通时自动切换 GitHub 源
 #
 set -euo pipefail
 
 # ==================== 配置 ====================
-REPO_URL="https://gitee.com/liyuheng200408/coco-real-estate.git"
+# 双源配置：Gitee（国内快）+ GitHub（海外稳定），自动切换
+GITEE_RAW_URL="https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh"
+GITEE_REPO_URL="https://gitee.com/liyuheng200408/coco-real-estate.git"
+GITEE_ZIP_URL="https://gitee.com/liyuheng200408/coco-real-estate/repository/archive/master.zip"
+GITHUB_REPO_URL="https://github.com/liyuheng200408-pixel/coco-real-estate.git"
+GITHUB_ZIP_URL="https://github.com/liyuheng200408-pixel/coco-real-estate/archive/refs/heads/master.zip"
 INSTALL_DIR="$HOME/hermes-agent"
 SERVICE_NAME="hermes-agent"
 
@@ -92,22 +99,52 @@ setup_python() {
 }
 
 # ==================== 克隆项目 ====================
+# 探测可用的源：优先 Gitee（国内快），不通自动切换 GitHub
+probe_source() {
+    if timeout 8 git ls-remote "$GITEE_REPO_URL" HEAD >/dev/null 2>&1; then
+        echo "gitee"
+    elif timeout 8 git ls-remote "$GITHUB_REPO_URL" HEAD >/dev/null 2>&1; then
+        echo "github"
+    else
+        echo "none"
+    fi
+}
+
 clone_project() {
     info "下载 Coco 房产助理..."
     if [[ -d "$INSTALL_DIR" ]]; then
         warn "目录已存在，删除后重新下载..."
         rm -rf "$INSTALL_DIR"
     fi
-    git clone "$REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
-        warn "git clone 失败，尝试下载 zip..."
-        ZIP_URL="https://gitee.com/liyuheng200408/coco-real-estate/repository/archive/master.zip"
-        curl -fsSL "$ZIP_URL" -o /tmp/coco.zip
-        unzip -q /tmp/coco.zip -d /tmp/
-        mv /tmp/coco-real-estate-master "$INSTALL_DIR"
-        rm -f /tmp/coco.zip
-    }
+    local src
+    src=$(probe_source)
+    case "$src" in
+        gitee)
+            info "使用 Gitee 源..."
+            git clone "$GITEE_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
+                warn "git clone 失败，尝试下载 zip..."
+                curl -fsSL "$GITEE_ZIP_URL" -o /tmp/coco.zip
+                unzip -q /tmp/coco.zip -d /tmp/
+                mv /tmp/coco-real-estate-master "$INSTALL_DIR"
+                rm -f /tmp/coco.zip
+            }
+            ;;
+        github)
+            info "Gitee 不可达，切换 GitHub 源..."
+            git clone "$GITHUB_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
+                warn "git clone 失败，尝试下载 zip..."
+                curl -fsSL "$GITHUB_ZIP_URL" -o /tmp/coco.zip
+                unzip -q /tmp/coco.zip -d /tmp/
+                mv /tmp/coco-real-estate-master "$INSTALL_DIR"
+                rm -f /tmp/coco.zip
+            }
+            ;;
+        *)
+            error "Gitee 和 GitHub 均无法访问，请检查服务器网络后重试"
+            ;;
+    esac
     cd "$INSTALL_DIR"
-    ok "代码下载完成"
+    ok "代码下载完成（来源: $src）"
 }
 
 # ==================== 安装依赖 ====================
