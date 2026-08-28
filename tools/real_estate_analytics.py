@@ -96,10 +96,18 @@ def weekly_market_report(
     """
     db = _get_db()
     stats = db.get_stats()
-    
-    # 获取本周新增房源（模拟）
-    new_listings = 5  # 实际应从数据库统计
-    
+
+    # 本周新增房源真实统计（2026-08-28 修硬编码）
+    from datetime import datetime, timedelta
+    week_ago = datetime.now() - timedelta(days=7)
+    try:
+        with db.get_session() as s:
+            from agent.real_estate_db import Property
+            new_listings = s.query(Property).filter(
+                Property.created_at >= week_ago).count()
+    except Exception:
+        new_listings = 0
+
     result = {
         "报告周期": "本周",
         "区域": district or "全部",
@@ -178,4 +186,87 @@ registry.register(
         "properties": {},
     }},
     handler=lambda args, **kw: channel_stats(**args),
+)
+
+
+def market_brief(city: str = None, district: str = None, task_id: str = None) -> str:
+    """市场行情简报：自家真实盘况 + 联网行情（标注来源）+ 行动建议"""
+    db = _get_db()
+    from datetime import datetime, timedelta
+    week_ago = datetime.now() - timedelta(days=7)
+
+    # ① 自家盘况（真实统计）
+    try:
+        with db.get_session() as s:
+            from agent.real_estate_db import Property, Viewing, Deal
+            new_props = s.query(Property).filter(Property.created_at >= week_ago).count()
+            avail = s.query(Property).filter(Property.status == 'available').count()
+            viewings_week = s.query(Viewing).filter(Viewing.viewing_time >= week_ago).count()
+            deals_week = s.query(Deal).filter(Deal.created_at >= week_ago).count()
+    except Exception:
+        new_props = avail = viewings_week = deals_week = 0
+
+    conversion = f"{deals_week / viewings_week * 100:.0f}%" if viewings_week else "暂无数据"
+
+    own_section = [
+        "一、自家盘况（系统数据）",
+        f"· 本周新增房源: {new_props} 套",
+        f"· 当前在售: {avail} 套",
+        f"· 本周带看: {viewings_week} 次",
+        f"· 本周成交: {deals_week} 单（带看转化率 {conversion}）",
+    ]
+
+    # ② 联网行情（标注来源；失败不阻塞）
+    news_section = ["\n二、市场动态（来源: 网络检索，仅供参考）"]
+    news_items = []
+    if city:
+        try:
+            from hermes_tools import web_search
+            query = f"{city} 楼市 最新政策 房价" + (f" {district}" if district else "")
+            res = web_search(query, limit=5)
+            items = (res.get("data") or {}).get("web") or []
+            for it in items[:3]:
+                title = (it.get("title") or "").strip()
+                if title:
+                    news_items.append(f"· {title}")
+                    news_items.append(f"  {it.get('url', '')}")
+        except Exception as e:
+            news_items.append(f"· 联网检索暂不可用（{str(e)[:50]}），建议稍后重试")
+    else:
+        news_items.append("· 未指定城市，跳过联网检索（传 city 参数可启用）")
+    news_section.extend(news_items or ["· 无结果"])
+
+    # ③ 行动建议（基于自家数据生成）
+    advice = ["\n三、本周行动建议"]
+    if deals_week == 0 and viewings_week > 0:
+        advice.append("· 有带看无成交：回访本周带看客户，用 intent_score 找接近成交的推进")
+    if avail < 10:
+        advice.append("· 在售房源偏少：联系房东补盘，可用 exclusive_expiring 找委托到期房源谈续期")
+    high = db.churn_risk_customers(min_risk=60)
+    if high:
+        advice.append(f"· {len(high)} 位客户流失风险高危，优先用 churn_warning 名单挽回")
+    if len(advice) == 1:
+        advice.append("· 节奏健康，按日常跟进计划执行即可")
+
+    report = "\n".join(own_section + news_section + advice)
+    return json.dumps({
+        "success": True,
+        "city": city, "district": district,
+        "stats": {"new_listings": new_props, "available": avail,
+                  "viewings": viewings_week, "deals": deals_week},
+        "message": report,
+    }, ensure_ascii=False)
+
+
+registry.register(
+    name="market_brief",
+    toolset="real_estate",
+    schema={"name": "market_brief", "description": "市场行情简报：自家盘况+联网行情（标注来源）+本周行动建议，可直接转发朋友圈/客户群", "parameters": {
+        "type": "object",
+        "properties": {
+            "city": {"type": "string", "description": "城市（启用联网行情检索）"},
+            "district": {"type": "string", "description": "区域（可选）"},
+        },
+    }},
+    handler=lambda args, **kw: market_brief(**args),
 )
