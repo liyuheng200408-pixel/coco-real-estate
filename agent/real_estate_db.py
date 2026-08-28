@@ -141,6 +141,10 @@ class Property(Base):
     tags = Column(Text)
     images = Column(Text)
     defect_tags = Column(Text)  # 缺陷标签（带看反馈反哺，2026-08-28 功能3）
+    owner_id = Column(Integer, ForeignKey('re_owners.id'))  # 房东（2026-08-28 功能7）
+    commission_rate = Column(Float)          # 佣金率（如 0.02 = 2%）
+    exclusive_until = Column(DateTime)       # 独家委托到期日
+    viewing_note = Column(String(200))       # 看房方式（钥匙/需预约等）
     status = Column(String(20), default='available')
     agent_id = Column(String(100))
     created_at = Column(DateTime, default=datetime.now)
@@ -170,6 +174,9 @@ class Property(Base):
             'year_built': self.year_built, 'has_elevator': self.has_elevator, 'property_type': self.property_type,
             'parking': self.parking, 'tags': self.tags, 'images': self.images,
             'defect_tags': self.defect_tags,
+            'owner_id': self.owner_id, 'commission_rate': self.commission_rate,
+            'exclusive_until': self.exclusive_until.isoformat() if self.exclusive_until else None,
+            'viewing_note': self.viewing_note,
             'status': self.status, 'agent_id': self.agent_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -200,6 +207,31 @@ class PriceHistory(Base):
             'old_price': self.old_price, 'new_price': self.new_price,
             'change': (self.new_price - self.old_price) if self.old_price else None,
             'reason': self.change_reason,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class Owner(Base):
+    """房东（业主）表（2026-08-28 功能7）"""
+    __tablename__ = 're_owners'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    phone = Column(EncryptedString)
+    wechat = Column(EncryptedString)
+    id_masked = Column(String(30))     # 脱敏身份证（如 4600**********1234）
+    trust_note = Column(String(200))   # 信任度备注
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.now)
+
+    properties = relationship("Property")
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'name': self.name,
+            'phone': self.phone, 'wechat': self.wechat,
+            'id_masked': self.id_masked, 'trust_note': self.trust_note,
+            'notes': self.notes,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -791,6 +823,59 @@ class RealEstateDB:
             p.defect_tags = json.dumps(detail, ensure_ascii=False) if detail else None
             s.commit()
             return True
+
+    # ---------- 房东委托管理（2026-08-28 功能7） ----------
+    def add_owner(self, **kwargs):
+        with self.get_session() as s:
+            o = Owner(**kwargs)
+            s.add(o); s.commit(); s.refresh(o)
+            return o.to_dict()
+
+    def get_owner(self, oid):
+        with self.get_session() as s:
+            o = s.query(Owner).get(oid)
+            return o.to_dict() if o else None
+
+    def list_owners(self, limit=50):
+        with self.get_session() as s:
+            return [o.to_dict() for o in s.query(Owner).limit(limit).all()]
+
+    def owner_portfolio(self, owner_id):
+        """房东名下房源列表 + 各房状态"""
+        with self.get_session() as s:
+            o = s.query(Owner).get(owner_id)
+            if not o:
+                return None
+            props = s.query(Property).filter(Property.owner_id == owner_id).all()
+            return {
+                'owner': o.to_dict(),
+                'properties': [p.to_dict() for p in props],
+                'stats': {
+                    'total': len(props),
+                    'available': sum(1 for p in props if p.status == 'available'),
+                    'dealed': sum(1 for p in props if p.status in ('sold', 'rented')),
+                },
+            }
+
+    def exclusive_expiring(self, days=30):
+        """独家委托 N 天内到期清单（重新谈委托/降价的时机）"""
+        from datetime import datetime, timedelta
+        deadline = datetime.now() + timedelta(days=days)
+        with self.get_session() as s:
+            props = s.query(Property).filter(
+                Property.exclusive_until.isnot(None),
+                Property.exclusive_until <= deadline,
+                Property.status == 'available',
+            ).all()
+            result = []
+            for p in props:
+                d = p.to_dict()
+                remain = (p.exclusive_until - datetime.now()).days
+                d['days_remaining'] = remain
+                d['urgency'] = '已过期' if remain < 0 else f'{remain}天'
+                result.append(d)
+            result.sort(key=lambda x: x['days_remaining'])
+            return result
 
     def find_duplicate_properties(self):
         """按 标题+面积+价格 找重复房源组（含Excel批量导入产生的完全重复项）
