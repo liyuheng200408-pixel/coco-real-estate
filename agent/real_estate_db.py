@@ -236,6 +236,38 @@ class Owner(Base):
         }
 
 
+class Referral(Base):
+    """转介绍表（2026-08-28 功能6）"""
+    __tablename__ = 're_referrals'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    referrer_customer_id = Column(Integer, ForeignKey('re_customers.id'), nullable=False)
+    referred_customer_id = Column(Integer, ForeignKey('re_customers.id'))
+    referred_name = Column(String(100), nullable=False)
+    referred_phone = Column(EncryptedString)
+    status = Column(String(20), default='registered')  # registered/contacted/viewing/dealing/dealed
+    reward_note = Column(String(200))                  # 酬谢备注
+    created_at = Column(DateTime, default=datetime.now)
+
+    referrer = relationship("Customer", foreign_keys=[referrer_customer_id])
+
+    __table_args__ = (
+        Index('re_idx_referral_referrer', 'referrer_customer_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'referrer_customer_id': self.referrer_customer_id,
+            'referrer_name': self.referrer.name if self.referrer else None,
+            'referred_customer_id': self.referred_customer_id,
+            'referred_name': self.referred_name,
+            'referred_phone': self.referred_phone,
+            'status': self.status, 'reward_note': self.reward_note,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Followup(Base):
     """跟进记录表"""
     __tablename__ = 're_followups'
@@ -355,6 +387,7 @@ class Deal(Base):
     finalize_date = Column(DateTime)                # 交房日期
     notes = Column(Text)
     agent_id = Column(String(100))
+    referral_id = Column(Integer, ForeignKey('re_referrals.id'))  # 转介绍来源（2026-08-28 功能6）
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
@@ -823,6 +856,57 @@ class RealEstateDB:
             p.defect_tags = json.dumps(detail, ensure_ascii=False) if detail else None
             s.commit()
             return True
+
+    # ---------- 转介绍经营（2026-08-28 功能6） ----------
+    def add_referral(self, referrer_customer_id, referred_name, referred_phone=None,
+                     referred_customer_id=None, reward_note=None):
+        """登记转介绍：自动建新客户档案并标记来源"""
+        with self.get_session() as s:
+            # 自动建被介绍人客户档案（来源标记为转介绍）
+            if referred_customer_id is None:
+                new_c = Customer(name=referred_name, phone=referred_phone,
+                                 source='转介绍', status='active')
+                s.add(new_c)
+                s.commit(); s.refresh(new_c)
+                referred_customer_id = new_c.id
+            r = Referral(
+                referrer_customer_id=referrer_customer_id,
+                referred_customer_id=referred_customer_id,
+                referred_name=referred_name,
+                referred_phone=referred_phone,
+                reward_note=reward_note,
+            )
+            s.add(r); s.commit(); s.refresh(r)
+            return r.to_dict()
+
+    def referral_stats(self, limit=20):
+        """转介绍贡献榜：谁介绍了几个、几个成交"""
+        with self.get_session() as s:
+            from sqlalchemy import func
+            rows = s.query(
+                Referral.referrer_customer_id,
+                func.count(Referral.id).label('total'),
+            ).group_by(Referral.referrer_customer_id).order_by(
+                func.count(Referral.id).desc()).limit(limit).all()
+            leaderboard = []
+            for cid, total in rows:
+                c = s.query(Customer).get(cid)
+                dealed = s.query(Deal).filter(
+                    Deal.customer_id.in_(
+                        s.query(Referral.referred_customer_id).filter(
+                            Referral.referrer_customer_id == cid,
+                            Referral.referred_customer_id.isnot(None),
+                        ).subquery()
+                    )
+                ).count()
+                leaderboard.append({
+                    'referrer_customer_id': cid,
+                    'referrer_name': c.name if c else None,
+                    'tier': c.tier if c else None,
+                    'referrals': total,
+                    'deals_from_referrals': dealed,
+                })
+            return leaderboard
 
     # ---------- 房东委托管理（2026-08-28 功能7） ----------
     def add_owner(self, **kwargs):

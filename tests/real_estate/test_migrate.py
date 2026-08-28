@@ -24,6 +24,7 @@ def sqlite_db(tmp_path):
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE re_customers (id INTEGER PRIMARY KEY, name TEXT)")
     conn.execute("CREATE TABLE re_properties (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("CREATE TABLE re_deals (id INTEGER PRIMARY KEY, name TEXT)")
     conn.commit()
     conn.close()
     return f"sqlite:///{db_path}"
