@@ -563,6 +563,128 @@ class RealEstateDB:
             result.sort(key=lambda x: x['budget_max'], reverse=True)
             return result
 
+    # ---------- 流失预警（2026-08-28 功能2） ----------
+    def churn_risk_customers(self, min_risk=40):
+        """流失风险评分：>14天未联系+30 / >30天+50 / 带看后沉默+20 / S级×1.5
+
+        返回 [{customer, risk_score, risk_level, signals, reason_hint}] 按
+        风险降序；min_risk 过滤（默认40，即中危起步）。
+        """
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        result = []
+        with self.get_session() as s:
+            customers = s.query(Customer).filter(Customer.status == 'active').all()
+            for c in customers:
+                if self.customer_has_deal(c.id):
+                    continue
+                signals = []
+                score = 0
+                # 信号1：最后跟进距今
+                last = s.query(Followup).filter(
+                    Followup.customer_id == c.id
+                ).order_by(Followup.created_at.desc()).first()
+                days_since = (now - last.created_at).days if last and last.created_at else None
+                if days_since is None:
+                    score += 40
+                    signals.append("从未跟进")
+                elif days_since > 30:
+                    score += 50
+                    signals.append(f"{days_since}天未联系")
+                elif days_since > 14:
+                    score += 30
+                    signals.append(f"{days_since}天未联系")
+                # 信号2：带看完成后零跟进
+                done_viewings = s.query(Viewing).filter(
+                    Viewing.customer_id == c.id, Viewing.status == 'done').count()
+                if done_viewings > 0:
+                    fp_after = s.query(Followup).filter(
+                        Followup.customer_id == c.id,
+                        Followup.created_at >= s.query(Viewing.created_at)
+                            .filter(Viewing.customer_id == c.id, Viewing.status == 'done')
+                            .order_by(Viewing.created_at.desc()).limit(1).scalar_subquery(),
+                    ).count()
+                    if fp_after == 0:
+                        score += 20
+                        signals.append("带看后无跟进")
+                if not signals:
+                    continue
+                score = int(score * (1.5 if c.tier == 'S' else 1.0))
+                if score < min_risk:
+                    continue
+                if days_since is not None and days_since > 30:
+                    reason_hint = "winback_long_absence"
+                elif done_viewings > 0:
+                    reason_hint = "winback_after_viewing"
+                else:
+                    reason_hint = "winback_long_absence"
+                result.append({
+                    'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                    'phone': c.phone,
+                    'risk_score': score,
+                    'risk_level': '高危' if score >= 60 else '中危',
+                    'signals': signals,
+                    'days_since_contact': days_since,
+                    'winback_script': reason_hint,
+                })
+        result.sort(key=lambda x: x['risk_score'], reverse=True)
+        return result
+
+    # ---------- 平替推荐（2026-08-28 功能4） ----------
+    def find_alternatives(self, property_id, limit=5):
+        """一键平替：同小区同户型 > 同小区 > 同区域同价位段 > 同区域近似面积
+
+        返回 [{...property, match_level, diff_price, diff_area}]，
+        已售/已租/本尊排除。
+        """
+        with self.get_session() as s:
+            origin = s.query(Property).get(property_id)
+            if not origin:
+                return []
+            origin_d = origin.to_dict()
+            candidates = s.query(Property).filter(
+                Property.id != property_id,
+                Property.status == 'available',
+            ).all()
+
+        def closeness(c):
+            """贴近度评分（越高越像）：小区40/户型25/价位20/面积15"""
+            score = 0
+            if origin.community and c.community == origin.community:
+                score += 40
+                if (origin.rooms and c.rooms == origin.rooms
+                        and origin.halls and c.halls == origin.halls):
+                    score += 25
+            if origin.price and c.price:
+                ratio = abs(c.price - origin.price) / origin.price
+                if ratio <= 0.10:
+                    score += 20
+                elif ratio <= 0.20:
+                    score += 8
+            if origin.area and c.area:
+                diff = abs((c.area or 0) - origin.area)
+                if diff <= 10:
+                    score += 15
+                elif diff <= 20:
+                    score += 6
+            # 同区轻微加分
+            if origin.district and c.district == origin.district:
+                score += 5
+            return score
+
+        scored = []
+        for c in candidates:
+            score = closeness(c)
+            if score < 20:   # 至少要有一点相关性
+                continue
+            d = c.to_dict()
+            d['match_level'] = score
+            d['diff_price'] = int(c.price - origin.price) if (c.price and origin.price) else None
+            d['diff_area'] = round((c.area or 0) - (origin.area or 0), 1)
+            scored.append(d)
+        scored.sort(key=lambda x: x['match_level'], reverse=True)
+        return scored[:limit]
+
     def find_duplicate_properties(self):
         """按 标题+面积+价格 找重复房源组（含Excel批量导入产生的完全重复项）
         
