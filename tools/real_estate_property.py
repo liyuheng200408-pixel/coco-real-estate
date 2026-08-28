@@ -409,3 +409,37 @@ registry.register(
     }},
     handler=lambda args, **kw: price_drop_alerts(**args),
 )
+
+
+def find_alternatives(property_id: int, limit: int = 5, task_id: str = None) -> str:
+    """一键平替：客户看中的房被抢/下架时，按贴近度找替代房源"""
+    db = _get_db()
+    alts = db.find_alternatives(property_id, limit)
+    if not alts:
+        return json.dumps({"success": True, "message": "暂无贴近度足够的替代房源，建议扩大区域或预算范围", "alternatives": []}, ensure_ascii=False)
+    lines = [f"🔁 找到 {len(alts)} 套平替方案（按贴近度排序）"]
+    for a in alts:
+        diff = a.get("diff_price") or 0
+        diff_str = f"{'贵' if diff > 0 else '便宜'}{abs(diff)/10000:.0f}万" if diff else "同价"
+        lines.append(f"\n· {a['title']}（ID:{a['id']}）{a['price']/10000:.0f}万（{diff_str}）{a['area']}㎡ {a['rooms'] or '?'}室")
+        lines.append(f"  贴近度: {a['match_level']}分")
+    return json.dumps({
+        "success": True,
+        "alternatives": alts,
+        "message": "\n".join(lines),
+    }, ensure_ascii=False)
+
+
+registry.register(
+    name="find_alternatives",
+    toolset="real_estate",
+    schema={"name": "find_alternatives", "description": "一键平替：客户看中的房源被抢/下架时，按同小区/同户型/同价位找替代清单", "parameters": {
+        "type": "object",
+        "properties": {
+            "property_id": {"type": "integer", "description": "原房源ID"},
+            "limit": {"type": "integer", "description": "最多返回几套（默认5）"},
+        },
+        "required": ["property_id"],
+    }},
+    handler=lambda args, **kw: find_alternatives(**args),
+)

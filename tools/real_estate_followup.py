@@ -194,3 +194,36 @@ registry.register(
     schema={"name": "stale_check", "description": "流失预警检查：自动降级长期无互动客户（S级>5天→A，A级>10天→B，B级>30天→C）并返回预警列表", "parameters": TOOLS[6]["parameters"]},
     handler=TOOLS[6]["handler"],
 )
+
+
+def churn_warning(min_risk: int = 40, task_id: str = None) -> str:
+    """流失预警：找出"快凉了但还能救"的客户，附挽回建议"""
+    db = _get_db()
+    rows = db.churn_risk_customers(min_risk=min_risk)
+    if not rows:
+        return json.dumps({"success": True, "message": "当前无流失风险客户，保持节奏", "customers": []}, ensure_ascii=False)
+    high = [r for r in rows if r["risk_level"] == "高危"]
+    lines = [f"⚠️ 流失预警：{len(rows)} 位客户有流失风险（高危 {len(high)} 位）"]
+    for r in rows[:10]:
+        lines.append(f"\n· {r['name']}（{r['tier']}级，风险{r['risk_score']}分[{r['risk_level']}]）")
+        lines.append(f"  信号: {'、'.join(r['signals'])}")
+        lines.append(f"  建议: 调用 use_template 模板 {r['winback_script']} 生成挽回话术")
+    return json.dumps({
+        "success": True,
+        "summary": {"total": len(rows), "high_risk": len(high)},
+        "customers": rows,
+        "message": "\n".join(lines),
+    }, ensure_ascii=False)
+
+
+registry.register(
+    name="churn_warning",
+    toolset="real_estate",
+    schema={"name": "churn_warning", "description": "客户流失预警：综合最后跟进时间/带看后沉默/等级加权评分，点名高危客户并给挽回建议", "parameters": {
+        "type": "object",
+        "properties": {
+            "min_risk": {"type": "integer", "description": "最低风险分（默认40，中危起步）"},
+        },
+    }},
+    handler=lambda args, **kw: churn_warning(**args),
+)
