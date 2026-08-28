@@ -396,3 +396,43 @@ registry.register(
     }},
     handler=lambda args, **kw: get_customer_form(**args),
 )
+
+
+def update_customer_stage(customer_id: int, stage: str, task_id: str = None) -> str:
+    """更新客户生命周期阶段，自动写变更历史"""
+    db = _get_db()
+    STAGE_NAMES = {
+        'lead': '潜在', 'interested': '意向', 'strong': '强意向',
+        'viewed': '已看房', 'negotiating': '谈判', 'dealing': '成交中',
+        'maintain': '售后维护', 'lost': '流失',
+    }
+    if stage not in STAGE_NAMES:
+        return json.dumps({"success": False,
+                           "error": f"非法阶段: {stage}，可选: {list(STAGE_NAMES.keys())}"},
+                          ensure_ascii=False)
+    try:
+        updated = db.update_stage(customer_id, stage)
+    except ValueError as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+    if not updated:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    return json.dumps({
+        "success": True,
+        "message": f"{updated['name']} 生命周期阶段已更新为: {STAGE_NAMES[stage]}",
+        "customer": updated,
+    }, ensure_ascii=False)
+
+
+registry.register(
+    name="update_customer_stage",
+    toolset="real_estate",
+    schema={"name": "update_customer_stage", "description": "更新客户生命周期阶段（潜在/意向/强意向/已看房/谈判/成交中/售后维护/流失），自动记录变更历史", "parameters": {
+        "type": "object",
+        "properties": {
+            "customer_id": {"type": "integer", "description": "客户ID"},
+            "stage": {"type": "string", "enum": ["lead", "interested", "strong", "viewed", "negotiating", "dealing", "maintain", "lost"], "description": "目标阶段"},
+        },
+        "required": ["customer_id", "stage"],
+    }},
+    handler=lambda args, **kw: update_customer_stage(**args),
+)
