@@ -193,6 +193,20 @@ else:
     warn("未读取到 DATABASE_URL（.env.db 缺失或未配置）",
          "重跑 install.sh 或检查 $INSTALL_DIR/.env.db")
 
+# ---- 5b. 数据库迁移状态 ----
+print("\n[5b] 数据库迁移")
+if db_url:
+    mig_rc, mig_out = sh(f"{PY} {INSTALL_DIR}/scripts/migrate.py --database-url {__import__('shlex').quote(db_url)} --status", timeout=20)
+    if mig_rc and "待执行: 0" in mig_out:
+        ok("数据库结构已是最新（无待执行迁移）")
+    elif mig_rc:
+        pending_count = [l for l in mig_out.splitlines() if "待执行" in l]
+        bad(f"有未执行的迁移", f"执行 python3 scripts/migrate.py 应用: {pending_count}")
+    else:
+        warn(f"迁移状态查询失败: {mig_out[:100]}", "手动执行 python3 scripts/migrate.py --status 查看")
+else:
+    warn("跳过迁移检查（无 DATABASE_URL）")
+
 # ---- 6. 加密密钥 ----
 print("\n[6] 加密密钥")
 enc_key = env_file_get(env_path, "COCO_ENC_KEY") if os.path.isfile(env_path) else None

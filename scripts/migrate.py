@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""
+Coco 数据库迁移脚本：带版本号的表结构变更管理
+
+用法:
+    python3 scripts/migrate.py                 # 执行 migrations/ 下未跑过的迁移
+    python3 scripts/migrate.py --status        # 只查看迁移状态，不执行
+    python3 scripts/migrate.py --database-url postgresql://...  # 显式指定库
+
+机制:
+- migrations/ 目录下按 001_xxx.sql、002_xxx.sql 序号命名
+- migrations_history 表记录已执行的迁移（序号、文件名、时间、耗时）
+- 只执行序号大于已记录最大序号的迁移；执行过的跳过（幂等）
+- 每个迁移在事务里执行，失败立即中止（生产库不会被半途而废的迁移污染）
+- 安全约束：迁移 SQL 禁止 DROP TABLE / DROP COLUMN（只增不删）
+
+首次执行前建议先跑 backup_db.py backup。
+"""
+import argparse
+import re
+import sys
+import time
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+MIGRATIONS_DIR = REPO_ROOT / "migrations"
+# 安全约束：迁移里禁止出现的破坏性语句（只增不删）
+FORBIDDEN_PATTERNS = [
+    (re.compile(r"\bDROP\s+TABLE\b", re.I), "DROP TABLE"),
+    (re.compile(r"\bDROP\s+COLUMN\b", re.I), "DROP COLUMN"),
+    (re.compile(r"\bTRUNCATE\b", re.I), "TRUNCATE"),
+    (re.compile(r"\bDELETE\s+FROM\b", re.I), "DELETE FROM"),
+]
+
+MIG_FILE_RE = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
+
+
+def get_database_url(cli_url=None):
+    if cli_url:
+        return cli_url
+    url = None
+    # 1) 环境变量
+    url = sys.modules["os"].environ.get("DATABASE_URL")
+    if url:
+        return url
+    # 2) 项目 .env.db（生产机由 install.sh 配置）
+    env_file = REPO_ROOT / ".env.db"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^DATABASE_URL=(.+)$", line.strip())
+            if m:
+                return m.group(1).strip().strip('"').strip("'")
+    print("错误：未找到 DATABASE_URL（环境变量或 .env.db）。", file=sys.stderr)
+    print("测试场景可显式传 --database-url sqlite:///path.db", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_history(conn):
+    """读取已执行迁移记录；表不存在则建表"""
+    from sqlalchemy import text
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS migrations_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            seq INTEGER NOT NULL,
+            filename VARCHAR(200) NOT NULL,
+            executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            duration_ms INTEGER
+        )
+    """))
+    conn.commit()
+    rows = conn.execute(text(
+        "SELECT seq, filename FROM migrations_history ORDER BY seq"
+    )).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def scan_migrations():
+    """扫描 migrations/ 目录，返回 [(seq, path), ...] 按序号排序"""
+    if not MIGRATIONS_DIR.exists():
+        return []
+    result = []
+    for f in sorted(MIGRATIONS_DIR.iterdir()):
+        m = MIG_FILE_RE.match(f.name)
+        if m:
+            result.append((int(m.group(1)), f))
+        elif f.suffix == ".sql":
+            print(f"警告：{f.name} 不符合 001_name.sql 命名规范，已跳过", file=sys.stderr)
+    return result
+
+
+def validate_sql(sql_text, filename):
+    """安全检查：禁止破坏性语句"""
+    for pattern, label in FORBIDDEN_PATTERNS:
+        if pattern.search(sql_text):
+            raise ValueError(f"{filename} 含禁止语句 {label}（迁移只增不删）")
+
+
+def apply_migration(conn, seq, path):
+    from sqlalchemy import text
+    sql_text = path.read_text(encoding="utf-8")
+    validate_sql(sql_text, path.name)
+    start = time.time()
+    conn.rollback()  # 结束 load_history 留下的 autobegin 事务，保证从这里开始的事务边界干净
+    trans = conn.begin()
+    try:
+        for statement in [s.strip() for s in sql_text.split(";") if s.strip()]:
+            conn.execute(text(statement))
+        conn.execute(text(
+            "INSERT INTO migrations_history (seq, filename, duration_ms) "
+            "VALUES (:seq, :fname, :ms)"
+        ), {"seq": seq, "fname": path.name, "ms": int((time.time() - start) * 1000)})
+        trans.commit()
+        return int((time.time() - start) * 1000)
+    except Exception:
+        trans.rollback()
+        raise
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Coco 数据库迁移")
+    parser.add_argument("--database-url", help="显式指定数据库连接")
+    parser.add_argument("--status", action="store_true", help="只查看状态")
+    args = parser.parse_args()
+
+    from sqlalchemy import create_engine, text
+
+    url = get_database_url(args.database_url)
+    # 兼容 postgres:// 前缀（部分平台旧写法）
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+
+    engine = create_engine(url)
+    migrations = scan_migrations()
+
+    with engine.connect() as conn:
+        history = load_history(conn)
+        pending = [(seq, p) for seq, p in migrations if seq not in history]
+
+        print(f"迁移目录: {MIGRATIONS_DIR}")
+        print(f"已执行: {len(history)} 个 | 待执行: {len(pending)} 个")
+        print("----------------------------------------")
+        for seq, p in migrations:
+            status = "已执行 " + str(history[seq]) if seq in history else "待执行"
+            mark = "✓" if seq in history else "→"
+            print(f"  {mark} {p.name}  [{status}]")
+
+        if args.status:
+            return
+
+        if not pending:
+            print("数据库已是最新，无需迁移。")
+            return
+
+        for seq, p in pending:
+            print(f"执行 {p.name} ...", flush=True)
+            try:
+                ms = apply_migration(conn, seq, p)
+                print(f"  完成 {p.name}（{ms}ms）")
+            except Exception as e:
+                print(f"  失败 {p.name}: {e}", file=sys.stderr)
+                print("迁移中止，数据库未受污染。修复后重跑。", file=sys.stderr)
+                sys.exit(2)
+
+    print("全部迁移执行完成。")
+
+
+if __name__ == "__main__":
+    main()
