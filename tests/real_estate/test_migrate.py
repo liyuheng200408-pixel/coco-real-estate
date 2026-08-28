@@ -85,7 +85,14 @@ class TestMigrate:
             hist = conn.execute("SELECT COUNT(*) FROM migrations_history").fetchone()[0]
             conn.close()
             assert "never_col" not in cols   # 后续迁移没有跑
-            assert hist == 0                 # 失败的迁移没有记账
+            # 002_price_history.sql（真实迁移）会先成功执行并记账，
+            # 所以只断言"失败的 903 没有记账"（904 因中止也没跑）
+            conn = sqlite3.connect(sqlite_db.replace("sqlite:///", ""))
+            bad_recorded = conn.execute(
+                "SELECT COUNT(*) FROM migrations_history WHERE seq >= 903"
+            ).fetchone()[0]
+            conn.close()
+            assert bad_recorded == 0
         finally:
             f_bad.unlink(missing_ok=True)
             f_after.unlink(missing_ok=True)
