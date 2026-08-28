@@ -436,3 +436,65 @@ registry.register(
     }},
     handler=lambda args, **kw: update_customer_stage(**args),
 )
+
+
+def add_referral(referrer_customer_id: int, referred_name: str,
+                 referred_phone: str = None, reward_note: str = None,
+                 task_id: str = None) -> str:
+    """登记转介绍：老客户介绍新客，自动建新客户档案并标记来源为转介绍"""
+    db = _get_db()
+    referred_name = (referred_name or '').strip()
+    if not referred_name:
+        return json.dumps({"success": False, "error": "被介绍人姓名不能为空"}, ensure_ascii=False)
+    referrer = db.get_customer(referrer_customer_id)
+    if not referrer:
+        return json.dumps({"success": False, "error": "介绍人客户不存在"}, ensure_ascii=False)
+    r = db.add_referral(referrer_customer_id=referrer_customer_id,
+                        referred_name=referred_name, referred_phone=referred_phone,
+                        reward_note=reward_note)
+    return json.dumps({
+        "success": True,
+        "message": (f"转介绍已登记：{referrer['name']} 介绍了 {referred_name}，"
+                    f"新客户档案已建（来源: 转介绍）。成交后别忘了答谢 {referrer['name']}"),
+        "referral": r,
+    }, ensure_ascii=False)
+
+
+def referral_stats(task_id: str = None) -> str:
+    """转介绍贡献榜：谁介绍了几个客户、几个已成交"""
+    db = _get_db()
+    board = db.referral_stats()
+    if not board:
+        return json.dumps({"success": True, "message": "暂无转介绍记录", "leaderboard": []}, ensure_ascii=False)
+    lines = ["🏆 转介绍贡献榜"]
+    for i, row in enumerate(board, 1):
+        lines.append(f"{i}. {row['referrer_name']}（{row['tier']}级）: "
+                     f"介绍 {row['referrals']} 人，其中 {row['deals_from_referrals']} 人成交")
+    return json.dumps({"success": True, "leaderboard": board, "message": "\n".join(lines)}, ensure_ascii=False)
+
+
+registry.register(
+    name="add_referral",
+    toolset="real_estate",
+    schema={"name": "add_referral", "description": "登记转介绍：老客户介绍新客，自动建新客户档案（来源:转介绍），成交后可答谢介绍人", "parameters": {
+        "type": "object",
+        "properties": {
+            "referrer_customer_id": {"type": "integer", "description": "介绍人（老客户）ID"},
+            "referred_name": {"type": "string", "description": "被介绍人姓名"},
+            "referred_phone": {"type": "string", "description": "被介绍人手机号（加密存储）"},
+            "reward_note": {"type": "string", "description": "酬谢备注"},
+        },
+        "required": ["referrer_customer_id", "referred_name"],
+    }},
+    handler=lambda args, **kw: add_referral(**args),
+)
+
+registry.register(
+    name="referral_stats",
+    toolset="real_estate",
+    schema={"name": "referral_stats", "description": "转介绍贡献榜：按介绍人数排序，含成交数", "parameters": {
+        "type": "object",
+        "properties": {},
+    }},
+    handler=lambda args, **kw: referral_stats(**args),
+)
