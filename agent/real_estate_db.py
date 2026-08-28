@@ -791,7 +791,15 @@ class RealEstateDB:
         if not s:
             return ''
         s = str(s).strip()
-        m = re.search(r'([\u4e00-\u9fa5]{2,3}?)区', s)
+        # 2026-08-28 修：原 {2,3}? 非贪婪遇到城市前缀（"海口美兰区"，真实数据无"市"字）
+        # 会截出"口美兰"。改为两级策略：①"XX市XX区"形式先剥市名取区名；
+        # ②其余取"区"字紧邻前 2 字（国内市辖区名以 2 字为主：美兰/秀英/龙华/琼山/吉阳）。
+        # 已知限制：3 字区名（如重庆沙坪坝区）无市字前缀时会截出"坪坝"，
+        # 但 _match_region 的子串兜底保证端到端匹配仍正确。
+        m = re.search(r'[\u4e00-\u9fa5]{2,3}市([\u4e00-\u9fa5]{2,3})区', s)
+        if m:
+            return m.group(1)
+        m = re.search(r'([\u4e00-\u9fa5]{2})区', s)
         if m:
             return m.group(1)
         return s.split('-')[0].strip()
