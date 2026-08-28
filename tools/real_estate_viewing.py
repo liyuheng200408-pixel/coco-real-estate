@@ -82,8 +82,20 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
         except Exception:
             reminder_added = False
 
+    # 缺陷标签反哺（2026-08-28 功能3）：记录带看结果后自动重扫该房缺陷
+    defect_refreshed = None
+    if updated.get('property_id') and (feedback or updated.get('result') == 'not_interested'):
+        try:
+            defects = db.refresh_defect_tags(updated['property_id'])
+            defect_refreshed = defects
+        except Exception:
+            defect_refreshed = None
+
     response = {"success": True, "viewing": updated}
-    if reminder_added:
+    if defect_refreshed:
+        response["defect_tags_updated"] = defect_refreshed
+        response["message"] = f"带看已记录；检测到共性差评，已更新房源缺陷标签: {','.join(defect_refreshed)}"
+    elif reminder_added:
         response["message"] = "带看已记录，已自动安排 1 小时后回访提醒"
     return json.dumps(response, ensure_ascii=False)
 
@@ -177,4 +189,28 @@ registry.register(
         "properties": {},
     }},
     handler=lambda args, **kw: viewing_stats(),
+)
+
+
+def clear_defect_tag(property_id: int, tag: str, task_id: str = None) -> str:
+    """房东整改后，经纪人手动清除某缺陷标签"""
+    db = _get_db()
+    ok = db.clear_defect_tag(property_id, tag)
+    if ok:
+        return json.dumps({"success": True, "message": f"已清除缺陷标签: {tag}"}, ensure_ascii=False)
+    return json.dumps({"success": False, "error": f"清除失败：该房源没有标签 {tag}"}, ensure_ascii=False)
+
+
+registry.register(
+    name="clear_defect_tag",
+    toolset="real_estate",
+    schema={"name": "clear_defect_tag", "description": "清除房源缺陷标签（房东整改后由经纪人手动操作，不自动清除）", "parameters": {
+        "type": "object",
+        "properties": {
+            "property_id": {"type": "integer", "description": "房源ID"},
+            "tag": {"type": "string", "description": "要清除的标签名（如 采光差）"},
+        },
+        "required": ["property_id", "tag"],
+    }},
+    handler=lambda args, **kw: clear_defect_tag(**args),
 )

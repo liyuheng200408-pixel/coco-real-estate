@@ -18,11 +18,12 @@ def run_migrate(db_url, *extra):
 
 @pytest.fixture
 def sqlite_db(tmp_path):
-    """预建一张 re_customers 表的临时库"""
+    """预建 re_customers + re_properties 表的临时库（003 迁移需要 re_properties）"""
     db_path = tmp_path / "mig_test.db"
     import sqlite3
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE re_customers (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("CREATE TABLE re_properties (id INTEGER PRIMARY KEY, name TEXT)")
     conn.commit()
     conn.close()
     return f"sqlite:///{db_path}"
