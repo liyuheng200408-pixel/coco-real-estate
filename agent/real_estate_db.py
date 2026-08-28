@@ -139,6 +139,7 @@ class Property(Base):
     parking = Column(Integer, default=0)
     tags = Column(Text)
     images = Column(Text)
+    defect_tags = Column(Text)  # 缺陷标签（带看反馈反哺，2026-08-28 功能3）
     status = Column(String(20), default='available')
     agent_id = Column(String(100))
     created_at = Column(DateTime, default=datetime.now)
@@ -167,6 +168,7 @@ class Property(Base):
             'orientation': self.orientation, 'renovation': self.renovation,
             'year_built': self.year_built, 'has_elevator': self.has_elevator, 'property_type': self.property_type,
             'parking': self.parking, 'tags': self.tags, 'images': self.images,
+            'defect_tags': self.defect_tags,
             'status': self.status, 'agent_id': self.agent_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -685,6 +687,64 @@ class RealEstateDB:
         scored.sort(key=lambda x: x['match_level'], reverse=True)
         return scored[:limit]
 
+    # ---------- 缺陷标签（2026-08-28 功能3：带看反馈反哺） ----------
+    DEFECT_KEYWORDS = {
+        '采光差': ['采光差', '采光不好', '采光太差', '光线暗', '不见光', '暗'],
+        '临街吵': ['临街', '吵', '噪音', '车流声'],
+        '漏水': ['漏水', '渗水', '水印'],
+        '物业差': ['物业差', '物业乱', '物业不给力'],
+        '电梯久': ['电梯久', '等电梯', '电梯慢'],
+        '装修旧': ['装修旧', '破旧', '老旧装修'],
+        '异味': ['异味', '味道', '甲醛'],
+        '楼层差': ['楼层差', '腰线层', '设备层'],
+    }
+    DEFECT_THRESHOLD = 2  # 至少2组客户提及才标记
+
+    def refresh_defect_tags(self, property_id):
+        """扫描带看反馈，负面关键词被>=2组客户提及则写入缺陷标签"""
+        from collections import Counter
+        with self.get_session() as s:
+            viewings = s.query(Viewing).filter(
+                Viewing.property_id == property_id,
+                Viewing.status == 'done',
+                Viewing.feedback.isnot(None),
+            ).all()
+            counter = Counter()
+            for v in viewings:
+                fb = v.feedback or ''
+                seen_in_this = set()
+                for tag, kws in self.DEFECT_KEYWORDS.items():
+                    if tag in seen_in_this:
+                        continue
+                    if any(kw in fb for kw in kws):
+                        counter[tag] += 1
+                        seen_in_this.add(tag)
+            defects = sorted([t for t, n in counter.items() if n >= self.DEFECT_THRESHOLD])
+            p = s.query(Property).get(property_id)
+            if not p:
+                return []
+            detail = {t: counter[t] for t in defects}
+            p.defect_tags = json.dumps(detail, ensure_ascii=False) if defects else None
+            s.commit()
+            return defects
+
+    def clear_defect_tag(self, property_id, tag):
+        """房东整改后手动清除某缺陷标签"""
+        with self.get_session() as s:
+            p = s.query(Property).get(property_id)
+            if not p or not p.defect_tags:
+                return False
+            try:
+                detail = json.loads(p.defect_tags)
+            except (ValueError, TypeError):
+                return False
+            if tag not in detail:
+                return False
+            del detail[tag]
+            p.defect_tags = json.dumps(detail, ensure_ascii=False) if detail else None
+            s.commit()
+            return True
+
     def find_duplicate_properties(self):
         """按 标题+面积+价格 找重复房源组（含Excel批量导入产生的完全重复项）
         
@@ -915,6 +975,16 @@ class RealEstateDB:
             if ren_pref and ren_pref == prop.get('renovation'):
                 score += 10; reasons.append("装修匹配")
             
+            # 缺陷降权（2026-08-28 功能3）：有缺陷标签的房源评分×0.8，并在理由里透明标注
+            if prop.get('defect_tags'):
+                try:
+                    defects = json.loads(prop['defect_tags'])
+                except (ValueError, TypeError):
+                    defects = {}
+                if defects:
+                    score = int(score * 0.8)
+                    reasons.append("客户反馈:" + ",".join(f"{k}({v}次)" for k, v in defects.items()))
+
             if score > 0:
                 # perfect_match：预算在区间 + 户型硬性匹配 + 区域匹配（或无区域需求）+ 类型匹配
                 #（2026-08-13 加：判定标准写死在代码里，模型只能引用此字段标"完全匹配"，
