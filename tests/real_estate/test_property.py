@@ -47,3 +47,25 @@ class TestPropertyDedup:
         # force=True → 强制新增
         out2 = json.loads(t.add_property(title="国瑞城 15号楼1单元1703", price=2_600_000, area=138.0, force=True))
         assert out2["success"] is True
+
+    def test_duplicate_detected_title_variation(self, db):
+        """标题格式不同(区名前缀/空格/逗号)也能判重（归一化后一致）"""
+        make_property(db, title="海口美兰区桂林洋海阔天空, 7号楼2单元301", area=88.0)
+        dup = db.find_duplicate_property(title="桂林洋海阔天空 7号楼2单元301", area=88.0)
+        assert dup is not None
+        assert dup["area"] == 88.0
+
+    def test_different_unit_not_duplicate(self, db):
+        """不同单元号 → 按归一化后仍不同，不判重"""
+        make_property(db, title="海口美兰区桂林洋海阔天空, 7号楼2单元301", area=88.0)
+        dup = db.find_duplicate_property(title="桂林洋海阔天空 8号楼2单元302", area=88.0)
+        assert dup is None
+
+    def test_normalize_title_unit(self):
+        from agent.real_estate_db import _normalize_title
+        a = _normalize_title("海口美兰区桂林洋海阔天空, 7号楼2单元301")
+        b = _normalize_title("美兰区桂林洋海阔天空 7号楼2单元301")
+        c = _normalize_title("海口市龙华区XX花园 1号楼1单元101")
+        assert a == b == "海阔天空7号楼2单元301"
+        assert c == "XX花园1号楼1单元101"
+        assert a != _normalize_title("桂林洋海阔天空 8号楼2单元302")
