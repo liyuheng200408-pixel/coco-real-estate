@@ -1,5 +1,6 @@
-"""客户管理测试：敏感字段加密、等级约束、变更历史、生日查询"""
+"""客户管理测试：敏感字段加密、等级约束、变更历史、生日查询、建档去重"""
 import base64
+import json
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -162,3 +163,80 @@ class TestCustomerCRUD:
         make_customer(db, name="买家", customer_type="buy_second_hand")
         renters = db.list_customers(customer_type="rent")
         assert [c["name"] for c in renters] == ["租客"]
+
+
+# ==================== 建档去重（2026-08-29 加） ====================
+
+class TestCustomerDedup:
+    """按 手机号(解密后,主) > 微信(次) > 姓名+类型(兜底) 查重，防重复建档"""
+
+    def test_phone_duplicate_detected_encrypted(self, enc_db):
+        """加密模式下：手机号存密文，读取自动解密后判重（验证'能读加密信息判重'）"""
+        make_customer(enc_db, name="张三", phone="13800008001")
+        dup, warn = enc_db.find_duplicate_customer(phone="13800008001")
+        assert dup is not None
+        assert dup["name"] == "张三"
+        assert warn is None
+
+    def test_phone_different_not_duplicate(self, enc_db):
+        make_customer(enc_db, name="张三", phone="13800008001")
+        dup, warn = enc_db.find_duplicate_customer(phone="13900009999")
+        assert dup is None
+        assert warn is None
+
+    def test_phone_priority_over_wechat(self, enc_db):
+        """手机号优先：手机号不同(微信相同) 判不重复"""
+        make_customer(enc_db, name="张三", phone="13800008001", wechat="wx_zhang")
+        dup, _ = enc_db.find_duplicate_customer(phone="13900009999", wechat="wx_zhang")
+        assert dup is None
+
+    def test_wechat_fallback(self, enc_db):
+        make_customer(enc_db, name="李四", wechat="wx_li")
+        dup, _ = enc_db.find_duplicate_customer(wechat="wx_li")
+        assert dup is not None
+        assert dup["name"] == "李四"
+
+    def test_name_type_fallback(self, enc_db):
+        make_customer(enc_db, name="王五", customer_type="buy")
+        dup, _ = enc_db.find_duplicate_customer(name="王五", customer_type="buy")
+        assert dup is not None
+        # 同名但类型不同——不判重
+        dup2, _ = enc_db.find_duplicate_customer(name="王五", customer_type="rent")
+        assert dup2 is None
+
+    def test_exclude_id(self, db):
+        """更新场景：排除自身 id，不因查重把自己当成重复"""
+        c = make_customer(db, name="测试", phone="13811112222")
+        dup, _ = db.find_duplicate_customer(phone="13811112222", exclude_id=c["id"])
+        assert dup is None
+
+    def test_wrong_key_warns_not_false_positive(self, tmp_path, monkeypatch):
+        """密钥不一致：不误判重复，只提示检查 COCO_ENC_KEY"""
+        from cryptography.fernet import Fernet
+        from agent.real_estate_db import RealEstateDB
+
+        key_a = Fernet.generate_key().decode()     # 合法密钥A
+        key_b = Fernet.generate_key().decode()     # 另一个合法但不同的密钥B
+        while key_b == key_a:
+            key_b = Fernet.generate_key().decode()
+
+        monkeypatch.setenv("COCO_ENC_KEY", key_a)
+        db_a = RealEstateDB(f"sqlite:///{tmp_path}/a.db")
+        make_customer(db_a, name="张三", phone="13800008001")
+        # 换成另一个合法但不同的密钥
+        monkeypatch.setenv("COCO_ENC_KEY", key_b)
+        dup, warn = db_a.find_duplicate_customer(phone="13800008001")
+        assert dup is None            # 不误判为重复（不合并/不误伤）
+        assert warn is not None       # 提示检查密钥
+
+    def test_tool_duplicate_blocks_and_force(self, enc_db, monkeypatch):
+        """工具层：add_customer 命中去重 → duplicate=true 不建档；force=true 强制建档"""
+        import tools.real_estate_customer as t
+        monkeypatch.setattr(t, "_get_db", lambda: enc_db)
+        make_customer(enc_db, name="张三", phone="13800008001")
+        out1 = json.loads(t.add_customer(name="张三", phone="13800008001"))
+        assert out1["success"] is False
+        assert out1["duplicate"] is True
+        assert out1["error"] and "已存在" in out1["error"]
+        out2 = json.loads(t.add_customer(name="张三", phone="13800008001", force=True))
+        assert out2["success"] is True

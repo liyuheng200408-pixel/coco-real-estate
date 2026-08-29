@@ -475,6 +475,64 @@ class RealEstateDB:
         return self.SessionLocal()
     
     # ---------- 客户 ----------
+    def find_duplicate_customer(self, phone=None, wechat=None, name=None, customer_type=None, exclude_id=None):
+        """客户查重：手机号(解密后,主) > 微信(次) > 姓名+客户类型(兜底)。返回 (命中客户dict或None, 警告文本或None)。
+
+        手机号/微信是 EncryptedString，读取时自动解密，此处比较的是明文。
+        防御：若读出的值疑似密文（密钥不一致/错配），不强行判重（避免误报/误合并），
+        返回 warning 提示先检查 COCO_ENC_KEY。
+        """
+        with self.get_session() as s:
+            cands = [c.to_dict() for c in s.query(Customer).all()]
+        warning = None
+
+        def _fk(v, probe):
+            # 疑似密文（密钥不一致/错配）：解密失败返回的是 Fernet base64 串，必含字母且不是正常号码形态
+            if not isinstance(v, str):
+                return False
+            v = v.strip()
+            if not v or v == probe:
+                return False
+            phone_chars = set('0123456789 +-()')
+            if all(ch in phone_chars for ch in v) and len(v) <= 24:
+                return False  # 正常号码形态
+            return True        # 含字母/超长/特殊字符 → 视为疑似密文，不强行匹配
+
+        if phone:
+            probe = str(phone).strip()
+            for c in cands:
+                v = c.get('phone')
+                if v is None:
+                    continue
+                if _fk(v, probe):
+                    warning = "检测到 phone 字段疑为密文、密钥可能不一致，未强行判重，请检查 COCO_ENC_KEY。"
+                    continue
+                if str(v).strip() == probe:
+                    if exclude_id is None or c['id'] != exclude_id:
+                        return (c, warning)
+            return (None, warning)
+
+        if wechat:
+            probe = str(wechat).strip()
+            for c in cands:
+                v = c.get('wechat')
+                if v is None:
+                    continue
+                if _fk(v, probe):
+                    warning = warning or "检测到 wechat 字段疑为密文、密钥可能不一致，未强行判重，请检查 COCO_ENC_KEY。"
+                    continue
+                if str(v).strip() == probe:
+                    if exclude_id is None or c['id'] != exclude_id:
+                        return (c, warning)
+            return (None, warning)
+
+        if name:
+            for c in cands:
+                if c.get('name') == name and c.get('customer_type') == customer_type:
+                    if exclude_id is None or c['id'] != exclude_id:
+                        return (c, warning)
+        return (None, warning)
+
     def add_customer(self, **kwargs):
         with self.get_session() as s:
             c = Customer(**kwargs)

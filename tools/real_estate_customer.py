@@ -25,13 +25,31 @@ def add_customer(
     source: str = None,
     customer_type: str = "buy",
     birthday: str = None,
+    force: bool = False,
     task_id: str = None,
 ) -> str:
     """添加新客户到系统
     
     customer_type: buy_new(买新房) / buy_second_hand(买二手房) / rent(租房)
+    force=True 跳过客户查重强制新增（仅当老板确认要新增重复客户时才用，默认 False）。
     """
     db = _get_db()
+    if not force:
+        dup, warn = db.find_duplicate_customer(
+            phone=phone, wechat=wechat, name=name, customer_type=customer_type)
+        if warn:
+            # 密钥不一致防御：不强行判重，提示先检查 COCO_ENC_KEY
+            return json.dumps({
+                "success": False, "duplicate": False, "warning": warn,
+                "error": "检测到客户字段可能因密钥不一致无法安全判重，请先检查 COCO_ENC_KEY 再操作。",
+            }, ensure_ascii=False)
+        if dup:
+            return json.dumps({
+                "success": False, "duplicate": True, "existing_customer": dup,
+                "error": (f"该客户已存在（id={dup['id']} {dup['name']}，手机 {dup.get('phone') or '未填'}）。"
+                          f"请先向老板确认：合并更新请用 update_customer(customer_id={dup['id']}, ...)；"
+                          f"确实要新增请用 add_customer(..., force=True)。"),
+            }, ensure_ascii=False)
     result = db.add_customer(
         name=name, phone=phone, wechat=wechat, tier=tier,
         budget_min=budget_min, budget_max=budget_max,
@@ -171,6 +189,7 @@ TOOLS = [
             "source": {"type": "string", "description": "客户来源"},
             "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型：buy_new(买新房)/buy_second_hand(买二手房)/rent(租房)"},
             "birthday": {"type": "string", "description": "客户生日 YYYY-MM-DD"},
+            "force": {"type": "boolean", "description": "默认 false。true=跳过客户查重强制新增（仅当老板确认要新增重复客户时才用）"},
         },
         "required": ["name"],
     }, "handler": lambda args, **kw: add_customer(**args)},
