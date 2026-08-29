@@ -1580,7 +1580,7 @@ class RealEstateDB:
         return {
             'overdue_count': len(overdue),
             'overdue_customers': [
-                {'customer_id': f.customer_id, 'content': f.content, 'next_date': f.next_date.isoformat() if f.next_date else None}
+                {'customer_id': f['customer_id'], 'content': f['content'], 'next_date': f['next_date']}
                 for f in overdue[:5]
             ],
             'total_customers': stats.get('total_customers', 0),
