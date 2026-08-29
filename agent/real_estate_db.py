@@ -1019,6 +1019,22 @@ class RealEstateDB:
             result.sort(key=lambda x: x['days_remaining'])
             return result
 
+    def find_duplicate_property(self, title, area, exclude_id=None):
+        """查"小区名称(标题含房号)+面积"完全一致的在售房源，防重复录入。
+
+        判定标准（老板 2026-08-29 定）：已存在 状态=available 的房源中，
+        title（即 小区名称+房号）与 area（面积）完全一致 → 视为同一套，返回该房源 dict；否则 None。
+        价格不算身份（单价会变动/被改价），只认 小区名称(标题)+房号+面积。
+        """
+        key_area = round(float(area or 0), 2)
+        with self.get_session() as s:
+            for p in s.query(Property).filter(
+                    Property.status == 'available', Property.title == title).all():
+                if round(float(p.area or 0), 2) == key_area:
+                    if exclude_id is None or p.id != exclude_id:
+                        return p.to_dict()
+        return None
+
     def find_duplicate_properties(self):
         """按 标题+面积+价格 找重复房源组（含Excel批量导入产生的完全重复项）
         
