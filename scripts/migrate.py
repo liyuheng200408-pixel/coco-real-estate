@@ -49,6 +49,26 @@ _ALTER_RE = re.compile(r"\bALTER\s+TABLE\b", re.I)
 
 MIG_FILE_RE = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 
+# 解析 ALTER TABLE ... ADD COLUMN（用于幂等：列已存在则跳过）
+_ALTER_ADD_COL_RE = re.compile(r"ALTER\s+TABLE\s+([\"\w.]+)\s+ADD\s+COLUMN\s+(\w+)", re.I)
+
+
+def _column_exists(conn, table, column):
+    """检查某表某列是否存在（兼容 SQLite / PostgreSQL）"""
+    from sqlalchemy import text
+    dialect = conn.dialect.name
+    table_clean = table.strip('"').split('.')[-1]
+    try:
+        if dialect == "sqlite":
+            rows = conn.execute(text(f'PRAGMA table_info("{table_clean}")')).fetchall()
+            return any((r[1] if len(r) > 1 else None) == column for r in rows)
+        r = conn.execute(text(
+            "SELECT 1 FROM information_schema.columns WHERE table_name=:t AND column_name=:c"
+        ), {"t": table_clean, "c": column}).fetchone()
+        return r is not None
+    except Exception:
+        return False
+
 
 def get_database_url(cli_url=None):
     if cli_url:
@@ -71,11 +91,13 @@ def get_database_url(cli_url=None):
 
 
 def load_history(conn):
-    """读取已执行迁移记录；表不存在则建表"""
+    """读取已执行迁移记录；表不存在则建表（按方言兼容 SQLite/PostgreSQL）"""
     from sqlalchemy import text
-    conn.execute(text("""
+    dialect = conn.dialect.name
+    id_def = "INTEGER PRIMARY KEY AUTOINCREMENT" if dialect == "sqlite" else "SERIAL PRIMARY KEY"
+    conn.execute(text(f"""
         CREATE TABLE IF NOT EXISTS migrations_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {id_def},
             seq INTEGER NOT NULL,
             filename VARCHAR(200) NOT NULL,
             executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -141,8 +163,23 @@ def apply_migration(conn, seq, path):
     conn.rollback()  # 结束 load_history 留下的 autobegin 事务，保证从这里开始的事务边界干净
     trans = conn.begin()
     try:
-        for statement in [s.strip() for s in sql_text.split(";") if s.strip()]:
-            conn.execute(text(statement))
+        dialect = conn.dialect.name
+        for statement in _split_statements(sql_text):
+            stmt = statement.strip()
+            if not stmt:
+                continue
+            # PostgreSQL 兼容：把 SQLite 的 AUTOINCREMENT 换成 SERIAL
+            if dialect == "postgresql":
+                stmt = re.sub(r"INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT", "SERIAL PRIMARY KEY", stmt, flags=re.I)
+                stmt = re.sub(r"\bAUTOINCREMENT\b", "", stmt, flags=re.I)
+            # ALTER ADD COLUMN 幂等：列已存在则跳过（对已是最新结构的库安全，不报错）
+            m = _ALTER_ADD_COL_RE.search(stmt)
+            if m:
+                table_name, col_name = m.group(1), m.group(2)
+                if _column_exists(conn, table_name, col_name):
+                    print(f"    跳过（列 {table_name}.{col_name} 已存在）")
+                    continue
+            conn.execute(text(stmt))
         conn.execute(text(
             "INSERT INTO migrations_history (seq, filename, duration_ms) "
             "VALUES (:seq, :fname, :ms)"
