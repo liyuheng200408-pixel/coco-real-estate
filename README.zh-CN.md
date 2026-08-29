@@ -124,12 +124,12 @@ hermes gateway restart
 一键无损更新（备份 → 拉码 → 装依赖 → 跑迁移 → 自检 → 重启服务）：
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && bash scripts/update.sh
+cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
 ```
 
-> update.sh 已把"备份 + 拉代码 + 装依赖 + 跑数据库迁移 + 健康自检 + 重启"打包成一条命令。无论本次更新是纯代码改动还是动了表结构（新增表/列），都无损升级，客户数据全程保留。数据库更新前会自动备份（可回滚）；迁移只增不删、事务内失败回滚，绝不删改已有数据。
->
-> 注意：本脚本绝不运行 `git clean -fd`（会删 .env.db 与加密密钥，导致旧客户数据无法解密）。实际运行服务是 `hermes-gateway.service`（用户服务），脚本自动识别，兼容旧 `hermes-agent` 系统服务。
+> 固定更新命令：前面的 `git pull` 会把 `update.sh` 拉下来（老版本也能用），`bash update.sh` 一次完成 备份→拉码→装依赖→跑迁移→健康自检→重启（自动识别真实服务 hermes-gateway/ hermes-agent）。无论本次更新是纯代码改动还是动了表结构，都无损升级，客户数据全程保留——迁移只增不删、事务内失败回滚，绝不删改已有数据。
+
+> 注意：脚本绝不运行 `git clean -fd`（会删 .env.db 与加密密钥，导致旧客户数据无法解密）。重启自动识别正在运行的服务（hermes-gateway 优先，兼容 hermes-agent）。
 
 ### 部署健康自检
 
