@@ -160,27 +160,27 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
 
 **启动服务：**
 ```bash
-sudo systemctl start hermes-agent
+sudo systemctl start hermes-gateway
 ```
 
 **停止服务：**
 ```bash
-sudo systemctl stop hermes-agent
+sudo systemctl stop hermes-gateway
 ```
 
 **重启服务：**
 ```bash
-sudo systemctl restart hermes-agent
+sudo systemctl restart hermes-gateway
 ```
 
 **查看状态：**
 ```bash
-sudo systemctl status hermes-agent
+sudo systemctl status hermes-gateway
 ```
 
 **查看日志（最近 50 行）：**
 ```bash
-sudo journalctl -u hermes-agent -n 50 --no-pager
+sudo journalctl -u hermes-gateway -n 50 --no-pager
 ```
 
 ### 数据库备份
@@ -222,7 +222,7 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py re
 
 **重启服务（发"你好"即完成迁移）：**
 ```bash
-sudo systemctl restart hermes-agent
+sudo systemctl restart hermes-gateway
 ```
 
 > 顺序说明：自动恢复数据库 → 图片 → 加密密钥（enc_key.txt 合并进 .env.db），任一步失败即中止并提示。密钥必须先于服务启动恢复，否则旧数据无法解密。
@@ -377,12 +377,12 @@ sudo systemctl start postgresql
 
 **查看服务状态：**
 ```bash
-sudo systemctl status hermes-agent
+sudo systemctl status hermes-gateway
 ```
 
 **查看日志（最近 50 行）：**
 ```bash
-journalctl -u hermes-agent -n 50 --no-pager
+journalctl -u hermes-gateway -n 50 --no-pager
 ```
 
 ### 飞书消息收不到
