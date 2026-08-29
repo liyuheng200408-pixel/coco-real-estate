@@ -30,9 +30,22 @@ MIGRATIONS_DIR = REPO_ROOT / "migrations"
 FORBIDDEN_PATTERNS = [
     (re.compile(r"\bDROP\s+TABLE\b", re.I), "DROP TABLE"),
     (re.compile(r"\bDROP\s+COLUMN\b", re.I), "DROP COLUMN"),
+    (re.compile(r"\bDROP\s+VIEW\b", re.I), "DROP VIEW"),
+    (re.compile(r"\bDROP\s+SCHEMA\b", re.I), "DROP SCHEMA"),
+    (re.compile(r"\bDROP\s+DATABASE\b", re.I), "DROP DATABASE"),
+    (re.compile(r"\bDROP\s+FUNCTION\b", re.I), "DROP FUNCTION"),
+    (re.compile(r"\bDROP\s+MATERIALIZED\s+VIEW\b", re.I), "DROP MATERIALIZED VIEW"),
+    (re.compile(r"\bDROP\s+TRIGGER\b", re.I), "DROP TRIGGER"),
+    (re.compile(r"\bDROP\s+SEQUENCE\b", re.I), "DROP SEQUENCE"),
+    (re.compile(r"\bALTER\s+TABLE\b[^;]*\bDROP\b", re.I), "ALTER ... DROP"),
     (re.compile(r"\bTRUNCATE\b", re.I), "TRUNCATE"),
     (re.compile(r"\bDELETE\s+FROM\b", re.I), "DELETE FROM"),
 ]
+
+# 无损更新红线：给已有表 ADD COLUMN 且带 NOT NULL 但无 DEFAULT，会破坏已有数据行
+_ADD_COL_NOT_NULL_RE = re.compile(r"\bADD\s+(COLUMN\s+)?\w+\b.*?\bNOT\s+NULL\b", re.I)
+_DEFAULT_RE = re.compile(r"\bDEFAULT\b", re.I)
+_ALTER_RE = re.compile(r"\bALTER\s+TABLE\b", re.I)
 
 MIG_FILE_RE = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 
@@ -90,11 +103,34 @@ def scan_migrations():
     return result
 
 
+def _split_statements(sql_text):
+    """按分号切分 SQL 语句，忽略空串与纯注释"""
+    stmts = []
+    for raw in sql_text.split(";"):
+        s = raw.strip()
+        if not s:
+            continue
+        body = "\n".join(line for line in s.splitlines() if not line.strip().startswith("--"))
+        if not body.strip():
+            continue
+        stmts.append(s)
+    return stmts
+
+
 def validate_sql(sql_text, filename):
-    """安全检查：禁止破坏性语句"""
+    """安全检查：禁止破坏性语句 + 禁止'给已有表加 NOT NULL 无默认值列'（无损更新红线）"""
     for pattern, label in FORBIDDEN_PATTERNS:
         if pattern.search(sql_text):
-            raise ValueError(f"{filename} 含禁止语句 {label}（迁移只增不删）")
+            raise ValueError(f"{filename} 含禁止语句 {label}（迁移只增不删，不允许删改数据）")
+    # 逐句检查：对已有表 ALTER ADD COLUMN 且带 NOT NULL 但无 DEFAULT，会把已有数据行写坏
+    for stmt in _split_statements(sql_text):
+        if _ALTER_RE.search(stmt) and _ADD_COL_NOT_NULL_RE.search(stmt):
+            if not _DEFAULT_RE.search(stmt):
+                raise ValueError(
+                    f"{filename} 含危险加列：给已有表加 NOT NULL 列却无 DEFAULT，"
+                    f"会导致已有数据行写入失败/损坏（无损更新红线）。"
+                    f"请改为可空列，或加 NOT NULL 同时提供 DEFAULT。语句: {stmt[:80]}"
+                )
 
 
 def apply_migration(conn, seq, path):
@@ -118,11 +154,36 @@ def apply_migration(conn, seq, path):
         raise
 
 
+def run_check_only():
+    """静态校验所有迁移文件合法性（不连库、不执行）。供 update.sh / CI 使用。"""
+    migrations = scan_migrations()
+    if not migrations:
+        print("迁移目录为空或无可识别迁移文件。")
+        return True
+    bad = 0
+    for seq, p in migrations:
+        try:
+            content = p.read_text(encoding="utf-8")
+            validate_sql(content, p.name)
+        except ValueError as e:
+            bad += 1
+            print(f"  FAIL {p.name}: {e}", file=sys.stderr)
+    if bad:
+        print(f"迁移安全校验失败：{bad} 个文件含不安全操作。", file=sys.stderr)
+        return False
+    print(f"迁移安全校验通过：{len(migrations)} 个文件均为只增不删。")
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="Coco 数据库迁移")
     parser.add_argument("--database-url", help="显式指定数据库连接")
     parser.add_argument("--status", action="store_true", help="只查看状态")
+    parser.add_argument("--check", action="store_true", help="只静态校验迁移文件合法性，不执行")
     args = parser.parse_args()
+
+    if args.check:
+        sys.exit(0 if run_check_only() else 1)
 
     from sqlalchemy import create_engine, text
 

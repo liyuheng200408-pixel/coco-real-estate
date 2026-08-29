@@ -121,15 +121,19 @@ hermes gateway restart
 
 ## 🔧 常用命令
 
-### 更新版本
+### Update
+
+One-command lossless update (backup → pull → install deps → run migrations → healthcheck → restart):
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent
+cd ~/hermes-agent && source venv/bin/activate && bash scripts/update.sh
 ```
 
-> 注意：此命令只更新代码与依赖。若更新涉及已有表结构/数据单位变更（如 2026-08 价格单位改元），需先执行 `bash scripts/migrate_price_to_yuan.sh` 迁移旧数据，再重启服务。新增表启动时自动创建，无需处理。
+> update.sh bundles backup + pull + install deps + database migration + healthcheck + restart into a single command. Whether this update is code-only or changes the schema (new tables/columns), it upgrades losslessly and customer data is preserved. The database is backed up automatically before any change (rollback-able); migrations are add-only and transactional (rollback on failure), so existing data is never dropped or modified.
+>
+> Note: this script NEVER runs `git clean -fd` (which would delete .env.db and the encryption key, making old customer data undecryptable). The actual service is `hermes-gateway.service` (user service); the script auto-detects it and stays compatible with the legacy `hermes-agent` system service.
 
-### 部署健康自检
+### Deployment Health Check
 
 安装或更新后，一条命令体检（依赖 / 服务 / 联网搜索后端 / 数据库 / 密钥 / 定时任务）：
 
