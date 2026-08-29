@@ -48,13 +48,16 @@ sudo apt install -y nodejs
 node -v # 应该 v22.x
 ```
 
-然后执行一键安装：
+然后执行一键安装（按服务器所在地区选一种，每条命令可单独复制）：
 
+**国内服务器（Gitee 源，推荐）：**
 ```bash
-# 国内服务器（Gitee 源，推荐）
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
-# 海外服务器（GitHub 源）
-# curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
+```
+
+**海外服务器（GitHub 源）：**
+```bash
+curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
 
 这个脚本会自动完成所有安装步骤（检测系统环境、安装依赖、克隆代码、创建数据库、注册服务并启动）。
@@ -206,11 +209,16 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 
 **第 3 步：全新安装**（装完不要手动改任何环境，验证 install.sh 补丁是否生效）
 
+按服务器所在地区选一种命令安装（每条可单独复制）：
 ```bash
-# 国内服务器（Gitee 源，推荐）
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
-# 海外服务器（GitHub 源）
-# curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
+```
+或（海外服务器 GitHub 源）：
+```bash
+curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
+```
+装好后按顺序配置：
+```bash
 cd ~/hermes-agent && source venv/bin/activate
 hermes model        # 配置模型 API Key
 hermes setup        # 配置飞书机器人
