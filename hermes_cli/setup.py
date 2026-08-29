@@ -1659,7 +1659,7 @@ def setup_terminal_backend(config: dict):
 
 def _apply_default_agent_settings(config: dict):
     """Apply recommended defaults for all agent settings without prompting."""
-    config.setdefault("agent", {})["max_turns"] = 150
+    config.setdefault("agent", {})["max_turns"] = 500
     # config.yaml is the authoritative source for max_turns; the gateway
     # bridges it into HERMES_MAX_ITERATIONS at startup. We no longer write
     # to .env to avoid the dual-source inconsistency that caused the
@@ -1669,7 +1669,9 @@ def _apply_default_agent_settings(config: dict):
     config.setdefault("display", {})["tool_progress"] = "all"
 
     config.setdefault("compression", {})["enabled"] = True
-    config["compression"]["threshold"] = 0.50
+    config["compression"]["threshold"] = 0.8
+    config.setdefault("compression", {})["protect_last_n"] = 40
+    config.setdefault("compression", {})["hygiene_hard_message_limit"] = 5000
 
     # Default: never auto-reset sessions. This matches the gateway's own
     # default (SessionResetPolicy.mode = "none"); we still write it
@@ -1678,9 +1680,11 @@ def _apply_default_agent_settings(config: dict):
 
     save_config(config)
     print_success("Applied recommended defaults:")
-    print_info("  Max iterations: 150")
+    print_info("  Max iterations: 500")
     print_info("  Tool progress: all")
-    print_info("  Compression threshold: 0.50")
+    print_info("  Compression threshold: 0.8")
+    print_info("  Compression protect_last_n: 40")
+    print_info("  Compression hygiene_hard_message_limit: 5000")
     print_info("  Session reset: never (use /reset or compression)")
     print_info("  Run `hermes setup agent` later to customize.")
 
