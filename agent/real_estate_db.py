@@ -62,6 +62,20 @@ class EncryptedString(TypeDecorator):
     def _coerce_compared_value(self, op, value):
         return Text()
 
+
+# ==================== 房源标题归一化（防重复录入漏判） ====================
+# 去掉 城市/区/开发区 等地理前缀 + 空白/常见标点，让同一套房两次录入但标题格式不同（如"海口美兰区桂林洋海阔天空, 7号楼2单元301" vs "桂林洋海阔天空 7号楼2单元301"）也能判重
+_GEO_TOKENS = ["海口市", "海口", "美兰区", "龙华区", "秀英区", "琼山区", "桂林洋开发区", "桂林洋"]
+
+
+def _normalize_title(t):
+    if not t:
+        return ""
+    s = t
+    for tok in _GEO_TOKENS:
+        s = s.replace(tok, "")
+    return re.sub(r"[\s,，、.。;；:：\-_]+", "", s)
+
 # ==================== 数据模型 ====================
 
 class Customer(Base):
@@ -1023,14 +1037,14 @@ class RealEstateDB:
         """查"小区名称(标题含房号)+面积"完全一致的在售房源，防重复录入。
 
         判定标准（老板 2026-08-29 定）：已存在 状态=available 的房源中，
-        title（即 小区名称+房号）与 area（面积）完全一致 → 视为同一套，返回该房源 dict；否则 None。
+        标题归一化后（去区名前缀/空白/标点）与 面积 完全一致 → 视为同一套，返回该房源 dict；否则 None。
         价格不算身份（单价会变动/被改价），只认 小区名称(标题)+房号+面积。
         """
         key_area = round(float(area or 0), 2)
+        norm_title = _normalize_title(title)
         with self.get_session() as s:
-            for p in s.query(Property).filter(
-                    Property.status == 'available', Property.title == title).all():
-                if round(float(p.area or 0), 2) == key_area:
+            for p in s.query(Property).filter(Property.status == 'available').all():
+                if _normalize_title(p.title or '') == norm_title and round(float(p.area or 0), 2) == key_area:
                     if exclude_id is None or p.id != exclude_id:
                         return p.to_dict()
         return None
