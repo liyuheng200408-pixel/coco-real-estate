@@ -603,7 +603,7 @@ DEFAULT_CONFIG = {
                                       # surfaces (server-side logging only). Failure
                                       # notices and manual /compress feedback are
                                       # always visible regardless of this setting.
-        "threshold": 0.50,            # compress when context usage exceeds this ratio.
+        "threshold": 0.8,              # compress when context usage exceeds this ratio.（2026-08-29 设为 0.8，替代官方 0.50；Ava 与生产 Coco 统一）
                                       # Models with context windows below 512K are
                                       # floored at 0.75 (raise-only) so compaction
                                       # doesn't fire with half the window still free;
@@ -613,7 +613,7 @@ DEFAULT_CONFIG = {
                                       # threshold and this token count. Clamped to
                                       # the model's context length at apply-time.
         "target_ratio": 0.20,         # fraction of threshold to preserve as recent tail
-        "protect_last_n": 20,         # minimum recent messages to keep uncompressed
+        "protect_last_n": 40,          # minimum recent messages to keep uncompressed（2026-08-29 设为 40，替代官方 20）
         "min_tail_user_messages": 1,  # REAL (actionable) user messages guaranteed to
                                       # survive in the uncompressed tail. 1 = existing
                                       # single last-user anchor (default, behavior-
