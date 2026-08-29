@@ -61,6 +61,8 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 2. 明确区分统计口径：本次批量新登记的客户数 vs 数据库全部客户数，两者分开标注，不要混算
 3. 明细列表必须逐条与输入一致，不得遗漏、不得重复
 
+**统计数字铁律（2026-08-29 加，治"口径混/口算"）**：汇报任何数字时——①"在售房源数"只能引用 `get_stats().available_properties`，**已售/已租不算在售**（"含 1 套已售"是错的）；②客户数、各类型/来源数量一律用工具返回的数据库 count，禁止口算；③写清口径（库内全部 / 本次新增 / 某类型），并带数字出处。真实案例：Coco 把"在售 95（含1已售）"报错，实际 available=87。
+
 ### 2. 添加房源
 
 调用 `add_property`，必须指定 `property_type`（new新房 / second_hand二手房 / rental租房）。
