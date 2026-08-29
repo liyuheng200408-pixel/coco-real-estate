@@ -126,12 +126,12 @@ hermes gateway restart
 One-command lossless update (backup → pull → install deps → run migrations → healthcheck → restart):
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && bash scripts/update.sh
+cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
 ```
 
-> update.sh bundles backup + pull + install deps + database migration + healthcheck + restart into a single command. Whether this update is code-only or changes the schema (new tables/columns), it upgrades losslessly and customer data is preserved. The database is backed up automatically before any change (rollback-able); migrations are add-only and transactional (rollback on failure), so existing data is never dropped or modified.
+> Fixed update command: the leading `git pull` fetches `update.sh` (so it works even on older installs), then `bash update.sh` completes  backup → pull → install deps → run migrations → healthcheck → restart (auto-detects the real service: hermes-gateway first, then hermes-agent). Whether this update is code-only or changes the schema, it upgrades losslessly and customer data is preserved — migrations are add-only and transactional (rollback on failure), so existing data is never dropped or modified.
 >
-> Note: this script NEVER runs `git clean -fd` (which would delete .env.db and the encryption key, making old customer data undecryptable). The actual service is `hermes-gateway.service` (user service); the script auto-detects it and stays compatible with the legacy `hermes-agent` system service.
+> Note: the script NEVER runs `git clean -fd` (would delete .env.db and the encryption key, making old customer data undecryptable). The restart auto-detects the running service (prefers hermes-gateway, compatible with hermes-agent).
 
 ### Deployment Health Check
 
