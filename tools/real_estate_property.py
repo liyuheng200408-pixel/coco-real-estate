@@ -19,15 +19,27 @@ def add_property(
     has_elevator: int = 1, parking: int = 0,
     property_type: str = "second_hand",
     tags: str = None, images: str = None,
-    image_paths: str = None, agent_id: str = None, task_id: str = None,
+    image_paths: str = None, agent_id: str = None,
+    force: bool = False, task_id: str = None,
 ) -> str:
     """添加新房源
     
     property_type: new(新房) / second_hand(二手房) / rental(租房)
     images: 图片链接或标识（逗号分隔）
     image_paths: 本地图片文件路径（逗号分隔），优先于 images 合并存储
+    force=True 跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用，默认 False）。
     """
     db = _get_db()
+    # 录入前查重（2026-08-29 老板要求：跟客户一致，重复就不录入）：按 小区名称(标题)+房号 与 面积 完全一致判定
+    if not force:
+        dup = db.find_duplicate_property(title=title, area=area)
+        if dup:
+            return json.dumps({
+                "success": False, "duplicate": True, "existing_property": dup,
+                "error": (f"该房源已存在（id={dup['id']} {dup['title']}，{dup.get('price')}元 {dup.get('area')}平）。"
+                          f"请先向老板确认：合并/更新请用 update_property(property_id={dup['id']}, ...)；"
+                          f"确实要新增请用 add_property(..., force=true)。"),
+            }, ensure_ascii=False)
     unit_price = int(price / area) if area > 0 else None  # 元/㎡
     # 合并 images 和 image_paths
     img_list = []
@@ -187,6 +199,7 @@ TOOLS = [
             "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型：new(新房)/second_hand(二手房)/rental(租房)"},
             "images": {"type": "string", "description": "房源图片，多个用逗号分隔（URL或本地路径）"},
             "image_paths": {"type": "string", "description": "经纪人消息中附带的图片本地路径，多个用逗号分隔，与 images 合并存入房源"},
+            "force": {"type": "boolean", "description": "默认 false。true=跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用）"},
         }, "required": ["title", "price", "area"],
     }, "handler": lambda args, **kw: add_property(**args)},
     {"name": "update_property", "description": "更新房源信息", "parameters": {

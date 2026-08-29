@@ -67,7 +67,7 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 
 调用 `add_property`，必须指定 `property_type`（new新房 / second_hand二手房 / rental租房）。
 添加成功后检查返回的 `matched_customers`，主动告知用户哪些 S/A 级客户可能感兴趣。
-返回含 `duplicate_warning`（库内已有同名在售房源）时，必须先把同名情况告知用户并确认是不同期数还是重复录入，再决定是否保留。
+**房源建档去重（2026-08-29 加，录入前先拦）**：add_property 按 小区名称(标题含房号)+面积 完全一致 判重在**录入前**拦截——返回 `duplicate=true`（已存在）时不落库、不静默重复建档，必须先向用户确认"合并/更新（update_property）还是确实新增（add_property 且 force=true）"，默认引导合并/更新。判定标准：小区名称(标题含房号)+面积 一致才算重复；同名但不同面积/价格为不同期数/楼栋，不判重、正常录入。
 
 ### 3. 房源匹配
 
