@@ -40,12 +40,19 @@
 
 SSH 重新连接后，先安装 Node.js 22（如果还没装）：
 
+**安装 Node.js 22 源（如果还没装）：**
 ```bash
-# 1. 安装 Node.js 22（如果还没装）
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+```
+
+**安装 Node.js 22：**
+```bash
 sudo apt install -y nodejs
-# 2. 验证 Node 版本
-node -v # 应该 v22.x
+```
+
+**验证 Node 版本（应显示 v22.x）：**
+```bash
+node -v
 ```
 
 然后执行一键安装（按服务器所在地区选一种，每条命令可单独复制）：
@@ -96,10 +103,13 @@ hermes setup
 
 1. 设置 Hermes 后台运行，最常用的是 Gateway（网关服务）：
 
+**安装为后台服务：**
 ```bash
-# 1. 安装为后台服务
 hermes gateway install
-# 2. 启动服务
+```
+
+**启动服务：**
+```bash
 hermes gateway start
 ```
 
@@ -146,12 +156,29 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
 
 ### 服务管理
 
+**启动服务：**
 ```bash
-sudo systemctl start hermes-agent    # 启动
-sudo systemctl stop hermes-agent     # 停止
-sudo systemctl restart hermes-agent  # 重启
-sudo systemctl status hermes-agent   # 状态
-sudo journalctl -u hermes-agent -n 50 --no-pager  # 日志
+sudo systemctl start hermes-agent
+```
+
+**停止服务：**
+```bash
+sudo systemctl stop hermes-agent
+```
+
+**重启服务：**
+```bash
+sudo systemctl restart hermes-agent
+```
+
+**查看状态：**
+```bash
+sudo systemctl status hermes-agent
+```
+
+**查看日志（最近 50 行）：**
+```bash
+sudo journalctl -u hermes-agent -n 50 --no-pager
 ```
 
 ### 数据库备份
@@ -160,14 +187,18 @@ sudo journalctl -u hermes-agent -n 50 --no-pager  # 日志
 
 > 重要：请把 `enc_key.txt` 密钥文件保存到安全的地方（电脑/U盘/网盘）。密钥丢失将导致客户数据永久无法解密。首次使用机器人时 Coco 也会提醒您备份。
 
+**手动备份：**
 ```bash
-# 手动备份
 cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py backup
+```
 
-# 查看备份列表
+**查看备份列表：**
+```bash
 cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py list
+```
 
-# 恢复备份
+**恢复备份：**
+```bash
 cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
 ```
 
@@ -175,14 +206,18 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py re
 
 迁移到新服务器时，一条命令完成数据库 + 图片 + 加密密钥恢复：
 
+**旧服务器打包（含数据库/图片/加密密钥）：**
 ```bash
-# 旧服务器打包（含数据库备份、图片备份、加密密钥）
 cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
+```
 
-# 拷贝到新服务器后，一条命令恢复
+**拷贝到新服务器后一键恢复：**
+```bash
 cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+```
 
-# 重启服务，给机器人发"你好"即完成迁移
+**重启服务（发"你好"即完成迁移）：**
+```bash
 sudo systemctl restart hermes-agent
 ```
 
@@ -194,14 +229,23 @@ sudo systemctl restart hermes-agent
 
 **第 1 步：旧服务器备份并打包下载（重装前必做）**
 
+**备份数据库（强制）：**
 ```bash
 cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py backup --force
-cd ~/backups/real_estate && ls -la          # 确认 .dump 备份、real_estate_images_*.tar.gz、enc_key.txt 都在
+```
+
+**确认备份文件齐全：**
+```bash
+cd ~/backups/real_estate && ls -la
+```
+
+**打包迁移文件：**
+```bash
 cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
 ```
 
+**下载迁移包到本地电脑（重装后服务器没数据了，务必下载）：**
 ```bash
-# 在本地电脑执行：下载迁移包（重装后服务器上什么都没了，必须下载到电脑）
 scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 ```
 
@@ -218,22 +262,45 @@ curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.
 curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
 装好后按顺序配置：
+**激活项目环境：**
 ```bash
 cd ~/hermes-agent && source venv/bin/activate
-hermes model        # 配置模型 API Key
-hermes setup        # 配置飞书机器人
+```
+
+**配置模型 API Key：**
+```bash
+hermes model
+```
+
+**配置飞书机器人：**
+```bash
+hermes setup
+```
+
+**安装并启动后台服务：**
+```bash
 hermes gateway install && hermes gateway start
 ```
 
 **第 4 步：恢复数据**
 
+**把迁移包传回服务器（本地电脑执行）：**
 ```bash
-# 把迁移包传回服务器（本地电脑执行）
 scp ~/Desktop/coco_migration.tar.gz root@服务器IP:/root/
+```
 
-# 服务器执行恢复
+**在服务器激活环境：**
+```bash
 cd ~/hermes-agent && source venv/bin/activate
+```
+
+**执行数据恢复：**
+```bash
 python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+```
+
+**重启网关服务：**
+```bash
 systemctl --user restart hermes-gateway.service
 ```
 
@@ -299,10 +366,19 @@ Coco: 每日早报
 
 ### 数据库连接失败
 
+**启动 PostgreSQL 数据库：**
 ```bash
 sudo systemctl start postgresql
-sudo systemctl status hermes-agent  # 查看服务状态
-journalctl -u hermes-agent -n 50 --no-pager  # 查看日志
+```
+
+**查看服务状态：**
+```bash
+sudo systemctl status hermes-agent
+```
+
+**查看日志（最近 50 行）：**
+```bash
+journalctl -u hermes-agent -n 50 --no-pager
 ```
 
 ### 飞书消息收不到
