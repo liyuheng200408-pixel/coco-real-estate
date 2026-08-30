@@ -100,3 +100,58 @@ class TestMatchBroadened:
                     area_pref="90-120", layout_pref="3室2厅", location="美兰区")
         matched = db.match_customers_for_property(prop["id"])
         assert any(c["customer_name"] == "王五" for c in matched), "B 级客户也应被反匹配到"
+
+
+class TestOwnerAndTenant:
+    def test_add_property_links_owner_dedup(self, db, monkeypatch):
+        """录入房源带业主信息 → 自动登记房东并关联；同电话复用不新建（2026-08-29）"""
+        import tools.real_estate_property as t
+        monkeypatch.setattr(t, "_get_db", lambda: db)
+        out1 = json.loads(t.add_property(title="某小区 1号楼101", price=2_000_000, area=90.0,
+                                         owner_name="王房东", owner_phone="13900001111"))
+        assert out1["success"] is True
+        assert out1["owner"]["name"] == "王房东"
+        oid1 = out1["owner"]["id"]
+        # 房源已关联该房东
+        prop1 = db.search_properties(title="某小区 1号楼101")[0]
+        assert prop1["owner_id"] == oid1
+        # 同电话再录入 → 复用同一房东，不新建
+        out2 = json.loads(t.add_property(title="某小区 2号楼102", price=2_100_000, area=100.0,
+                                         owner_name="王房东", owner_phone="13900001111"))
+        assert out2["owner"]["id"] == oid1
+        assert out2["success"] is True
+
+    def test_update_property_links_owner(self, db, monkeypatch):
+        """update_property 补业主联系方式 → 自动关联房东"""
+        import tools.real_estate_property as t
+        monkeypatch.setattr(t, "_get_db", lambda: db)
+        p = json.loads(t.add_property(title="某小区 3号楼103", price=2_000_000, area=90.0) )
+        out = json.loads(t.update_property(p["property"]["id"], owner_name="李房东", owner_phone="13900002222"))
+        assert out["success"] is True
+        assert out["owner"]["name"] == "李房东"
+        prop = db.search_properties(title="某小区 3号楼103")[0]
+        assert prop["owner_id"] == out["owner"]["id"]
+
+    def test_add_property_stores_tenant_requirements(self, db, monkeypatch):
+        """出租房源租客要求正式入库（2026-08-29）"""
+        import tools.real_estate_property as t
+        monkeypatch.setattr(t, "_get_db", lambda: db)
+        out = json.loads(t.add_property(title="某公寓 5号楼501", price=3000, area=60.0, property_type="rental",
+                                        tenant_requirements="不吸烟，办居住证，学生优先"))
+        assert out["success"] is True
+        prop = db.search_properties(title="某公寓 5号楼501")[0]
+        assert prop["tenant_requirements"] == "不吸烟，办居住证，学生优先"
+
+    def test_tenant_req_conflict_filters_rent_customer(self):
+        """租客要求过滤：客户资料明确冲突 → 不匹配；无冲突/否定句 → 匹配（2026-08-29）"""
+        import os, tempfile
+        from agent.real_estate_db import RealEstateDB
+        d = RealEstateDB(f"sqlite:///{tempfile.mkdtemp()}/t.db")
+        # 冲突：客户备注"本人吸烟" vs 要求"不吸烟"
+        assert d._tenant_req_ok("不吸烟，办居住证", {"notes": "本人吸烟，可办居住证", "tags": ""}) is False
+        # 无冲突：客户备注"不吸烟"
+        assert d._tenant_req_ok("不吸烟", {"notes": "不吸烟，学生", "tags": ""}) is True
+        # 无要求
+        assert d._tenant_req_ok(None, {"notes": "吸烟", "tags": ""}) is True
+        # 无客户资料
+        assert d._tenant_req_ok("不吸烟", {"notes": "", "tags": ""}) is True

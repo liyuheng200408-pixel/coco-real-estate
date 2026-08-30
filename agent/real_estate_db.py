@@ -159,6 +159,7 @@ class Property(Base):
     commission_rate = Column(Float)          # 佣金率（如 0.02 = 2%）
     exclusive_until = Column(DateTime)       # 独家委托到期日
     viewing_note = Column(String(200))       # 看房方式（钥匙/需预约等）
+    tenant_requirements = Column(Text)       # 出租房源的租客要求（不吸烟/办居住证/学生优先等，2026-08-29 加）
     status = Column(String(20), default='available')
     agent_id = Column(String(100))
     created_at = Column(DateTime, default=datetime.now)
@@ -188,6 +189,7 @@ class Property(Base):
             'year_built': self.year_built, 'has_elevator': self.has_elevator, 'property_type': self.property_type,
             'parking': self.parking, 'tags': self.tags, 'images': self.images,
             'defect_tags': self.defect_tags,
+            'tenant_requirements': self.tenant_requirements,
             'owner_id': self.owner_id, 'commission_rate': self.commission_rate,
             'exclusive_until': self.exclusive_until.isoformat() if self.exclusive_until else None,
             'viewing_note': self.viewing_note,
@@ -1013,6 +1015,52 @@ class RealEstateDB:
                 },
             }
 
+    def link_owner_to_property(self, property_id, name=None, phone=None, wechat=None):
+        """找到或新建房东并关联到房源（设 owner_id）。电话/微信加密存（EncryptedString）。
+
+        防重复：优先按 手机号(读出即解密明文) 匹配；其次按 姓名（未提供电话时）；都无则新建。
+        若读出的值疑似密文（密钥不一致），不强行匹配同名/同号（避免误合）。返回房东 dict。
+        """
+        name = (name or '').strip()
+        phone = str(phone).strip() if phone else None
+        if not name and not phone:
+            return None
+        with self.get_session() as s:
+            prop = s.query(Property).get(property_id)
+            if not prop:
+                return None
+            owners = [o.to_dict() for o in s.query(Owner).all()]
+
+            def _fk(v, probe):
+                if not isinstance(v, str):
+                    return False
+                v = v.strip()
+                if not v or v == probe:
+                    return False
+                phone_chars = set('0123456789 +-()')
+                if all(ch in phone_chars for ch in v) and len(v) <= 24:
+                    return False
+                return True
+
+            owner = None
+            if phone:
+                for o in owners:
+                    v = o.get('phone')
+                    if v is None or _fk(v, phone):
+                        continue
+                    if v == phone:
+                        owner = s.query(Owner).get(o['id']); break
+            if not owner and name:
+                for o in owners:
+                    if o.get('name') == name:
+                        owner = s.query(Owner).get(o['id']); break
+            if not owner:
+                owner = Owner(name=name or phone, phone=phone, wechat=wechat)
+                s.add(owner); s.flush()
+            prop.owner_id = owner.id
+            s.commit()
+            return owner.to_dict()
+
     def exclusive_expiring(self, days=30):
         """独家委托 N 天内到期清单（重新谈委托/降价的时机）"""
         from datetime import datetime, timedelta
@@ -1120,6 +1168,9 @@ class RealEstateDB:
                 if prop.property_type == 'rental' and c.customer_type != 'rent':
                     continue
                 if prop.property_type in ('new', 'second_hand') and c.customer_type == 'rent':
+                    continue
+                # 租客要求过滤（2026-08-29 加）：出租房源租客要求与客户资料冲突 → 排除
+                if prop.property_type == 'rental' and not self._tenant_req_ok(prop.tenant_requirements, c):
                     continue
                 # 户型硬性要求：客户明确 N 室/N 厅而房源不满足 → 跳过
                 #（与 match_property 对称，防止"2 室房源推给要 3 室的客户"）
@@ -1240,6 +1291,9 @@ class RealEstateDB:
             if prop_type == 'rental' and ctype != 'rent':
                 continue
             if prop_type in ('new', 'second_hand') and ctype == 'rent':
+                continue
+            # 租客要求过滤（2026-08-29 加）：出租房源租客要求与客户资料冲突 → 排除
+            if prop_type == 'rental' and not self._tenant_req_ok(prop.get('tenant_requirements'), customer):
                 continue
             
             price = prop.get('price', 0)
@@ -1441,7 +1495,31 @@ class RealEstateDB:
         if not want:
             return True
         return want == prop_type
-    
+
+    def _tenant_req_ok(self, tenant_requirements, customer):
+        """租客要求过滤（2026-08-29 加，功能：出租房源租客要求真实用于匹配）。
+
+        租客要求（如"不吸烟/办居住证/学生优先"）不支持直接结构化匹配，
+        此处做关键词级置信过滤：对否定要求（"不X"），若客户资料(备注/标签)含"X"→ 冲突→False；
+        否则不排除（归 True，交由评分）。无要求或客户无资料 → True。
+        """
+        if not tenant_requirements:
+            return True
+        text = ''
+        if isinstance(customer, dict):
+            text = (customer.get('notes') or '') + ' ' + (customer.get('tags') or '')
+        else:
+            text = (getattr(customer, 'notes', '') or '') + ' ' + (getattr(customer, 'tags', '') or '')
+        if not text:
+            return True
+        import re as _re
+        negs = _re.findall(r'不([\u4e00-\u9fa5]{1,4})', str(tenant_requirements))
+        for neg in negs:
+            # 负向断言：客户资料里该词"前面不是'不'"才算冲突（"不吸烟"不算，独立"吸烟"才算）
+            if _re.search(r'(?<!不)' + _re.escape(neg), text):
+                return False
+        return True
+
     # ---------- 经纪人配置 ----------
     def get_setting(self, key: str) -> str:
         """读取配置；不存在返回 None"""
