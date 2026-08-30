@@ -96,4 +96,7 @@ else
 fi
 
 echo ""
+# 版本号直接读仓库根 VERSION 文件（2026-08-29 加，与 install.sh 保持一致）：以后只改 VERSION，更新终端自动同步
+COCO_VER=$(cat "$REPO_ROOT/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "未知")
+echo -e "版本: \033[1;34mv${COCO_VER}\033[0m"
 ok "无损更新完成。若本次更新涉及表结构，数据库已通过迁移升级，旧数据全部保留。"
