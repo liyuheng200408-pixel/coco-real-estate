@@ -80,6 +80,45 @@ def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
     }, ensure_ascii=False)
 
 
+def find_person_by_name(name: str = None, task_id: str = None) -> str:
+    """按姓名同时查客户和业主（两边都给），电话/微信脱敏展示。
+
+    老板实测：问"某人详细信息"（如"欧阳先生"），Coco 默认只查客户，找不到就报"库内无此客户"，
+    实际对方可能是业主（房东）。本工具一次覆盖 客户(买家/租客) + 业主(房源主人)两类，
+    按姓名模糊匹配，找到哪类报哪类；同名两边都有则分别列出。
+    """
+    db = _get_db()
+    if not (name or '').strip():
+        return json.dumps({"success": False, "error": "请提供要查询的姓名（name）"},
+                          ensure_ascii=False)
+    result = db.find_person_by_name(name)
+    customers = result.get('customers', [])
+    owners = result.get('owners', [])
+    lines = [f"按姓名「{name}」检索到 客户 {len(customers)} 人 / 业主 {len(owners)} 人："]
+    for c in customers:
+        masked = _mask_phone(c.get('phone'))
+        lines.append(f"\n【客户】{c.get('name')}（ID:{c.get('id')}）"
+                     f"电话 {masked or '未录'} | 等级 {c.get('tier') or '-'} | "
+                     f"类型 {c.get('customer_type') or '-'} | 预算 {'-'.join(filter(None,[str(c.get('budget_min') or ''),str(c.get('budget_max') or '')])) or '-'}万 | "
+                     f"意向 {c.get('location') or '-'} {c.get('layout_pref') or ''}")
+    for o in owners:
+        masked = _mask_phone(o.get('phone'))
+        lines.append(f"\n【业主】{o.get('name')}（ID:{o.get('id')}）"
+                     f"电话 {masked or '未录'} | 微信 {o.get('wechat') or '未录'} | "
+                     f"脱敏证件 {o.get('id_masked') or '-'} | 信任度 {o.get('trust_note') or '-'}")
+    if not customers and not owners:
+        lines.append("\n客户表和业主表均无此人。可能未登记；如需新建客户请提供电话及需求，业主可先登记。")
+    return json.dumps({
+        "success": True,
+        "name": name,
+        "customers": customers,
+        "owners": owners,
+        "count_customers": len(customers),
+        "count_owners": len(owners),
+        "message": "\n".join(lines),
+    }, ensure_ascii=False)
+
+
 def add_owner(name: str, phone: str = None, wechat: str = None,
               id_number: str = None, trust_note: str = None,
               notes: str = None, task_id: str = None) -> str:
@@ -212,6 +251,16 @@ TOOLS = [
             "required": ["property_ids"],
         },
         "handler": lambda args, **kw: get_property_owners(**args),
+    },
+    {
+        "name": "find_person_by_name",
+        "description": "按姓名同时查客户和业主（两边都给），电话/微信脱敏展示。用于经纪人问'某人/某先生/某女士的详细信息'（对方可能是客户=买家租客，也可能是业主=房东），按姓名模糊匹配，找到哪类报哪类，同名两边都有则分别列出；两表都无则如实说明。严禁用psql直接连库",
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "姓名（支持模糊匹配，子串命中即返回）"}},
+            "required": ["name"],
+        },
+        "handler": lambda args, **kw: find_person_by_name(**args),
     },
     {
         "name": "exclusive_expiring",
