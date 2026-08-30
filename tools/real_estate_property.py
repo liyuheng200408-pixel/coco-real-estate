@@ -212,7 +212,7 @@ def property_stats(task_id: str = None) -> str:
 
 
 TOOLS = [
-    {"name": "add_property", "description": "添加新房源", "parameters": {
+    {"name": "add_property", "description": "添加新房源（支持业主信息：owner_name/owner_phone/owner_wechat 会自动登记房东并关联此房源、电话加密；出租房源可传 tenant_requirements 租客要求，匹配租客时用于筛选）", "parameters": {
         "type": "object", "properties": {
             "title": {"type": "string", "description": "房源标题"},
             "price": {"type": "integer", "description": "价格（元）：二手房/新房总价如 4000000=400万；出租月租如 1000=1000元/月"},
@@ -305,7 +305,7 @@ registry.register(
 registry.register(
     name="add_property",
     toolset="real_estate",
-    schema={"name": "add_property", "description": "添加新房源", "parameters": TOOLS[0]["parameters"]},
+    schema={"name": "add_property", "description": "添加新房源（支持业主信息：owner_name/owner_phone/owner_wechat 会自动登记房东并关联此房源、电话加密；出租房源可传 tenant_requirements 租客要求，匹配租客时用于筛选）", "parameters": TOOLS[0]["parameters"]},
     handler=TOOLS[0]["handler"],
 )
 registry.register(
