@@ -58,7 +58,17 @@ def add_customer(
         notes=notes, source=source, customer_type=customer_type,
         birthday=birthday,
     )
-    return json.dumps({"success": True, "customer": result}, ensure_ascii=False)
+    # 录入后自动匹配（2026-08-29 加）：新客户 → 自动找匹配房源，随返回主动报告
+    matched_properties = []
+    try:
+        matched_properties = db.match_property(result['id'], top_n=5)
+    except Exception:
+        matched_properties = []
+    response = {"success": True, "customer": result}
+    if matched_properties:
+        response["matched_properties"] = matched_properties
+        response["message"] = f"客户已添加，有 {len(matched_properties)} 套房源可能符合需求"
+    return json.dumps(response, ensure_ascii=False)
 
 
 def update_customer(

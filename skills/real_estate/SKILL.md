@@ -52,7 +52,7 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 - 备注：
 ```
 
-**第三步**：用户提供信息后，调用 `add_customer` 录入，录入成功后自动设置跟进提醒。
+**第三步**：用户提供信息后，调用 `add_customer` 录入，录入成功后自动设置跟进提醒，并检查返回的 `matched_properties` 直接报告匹配房源（2026-08-29 起自动匹配，禁止问"要不要匹配"，只有用户明确要求才额外跑全量匹配）。
 
 **客户查重规则（2026-08-29 加，防重复建档）**：`add_customer` 会按 手机号(解密后,主)>微信(次)>姓名+客户类型(兜底) 自动查重。若返回 duplicate=true（该客户已存在），**不得静默重复建档**，必须先向用户确认"合并更新（update_customer 改已存在 id）还是确实新增（add_customer 且 force=true）"，默认引导合并更新。若返回 warning=密钥不一致，先提示检查 COCO_ENC_KEY 再操作。
 
@@ -66,7 +66,7 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 ### 2. 添加房源
 
 调用 `add_property`，必须指定 `property_type`（new新房 / second_hand二手房 / rental租房）。
-添加成功后检查返回的 `matched_customers`，主动告知用户哪些 S/A 级客户可能感兴趣。
+添加成功后检查返回的 `matched_customers`，主动告知用户匹配到的客户（2026-08-29 起不限 S/A，匹配到就报；录入后**直接报告匹配结果，禁止问"要不要重新跑一轮匹配"**，只有用户明确要求才额外跑全量匹配）。
 **房源建档去重（2026-08-29 加，录入前先拦）**：add_property 按 小区名称(标题含房号)+面积 完全一致 判重在**录入前**拦截——返回 `duplicate=true`（已存在）时不落库、不静默重复建档，必须先向用户确认"合并/更新（update_property）还是确实新增（add_property 且 force=true）"，默认引导合并/更新。判定标准：小区名称(标题含房号)+面积 一致才算重复；同名但不同面积/价格为不同期数/楼栋，不判重、正常录入。
 
 ### 3. 房源匹配

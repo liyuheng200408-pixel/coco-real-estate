@@ -89,3 +89,14 @@ class TestDuplicateWarning:
         assert out["success"] is True
         assert "duplicate_warning" in out
         assert "1 条" in out["duplicate_warning"]
+
+
+class TestMatchBroadened:
+    def test_match_customers_includes_non_sa(self, db):
+        """反匹配放宽到所有客户（2026-08-29）：B 级客户也应被匹配到（原来只 S/A）"""
+        from conftest import make_customer as mk_customer
+        prop = make_property(db, title="海甸岛某小区 3号楼101", price=3_500_000, area=100.0, district="美兰-海甸岛")
+        mk_customer(db, name="王五", tier="B", budget_min=3_000_000, budget_max=5_000_000,
+                    area_pref="90-120", layout_pref="3室2厅", location="美兰区")
+        matched = db.match_customers_for_property(prop["id"])
+        assert any(c["customer_name"] == "王五" for c in matched), "B 级客户也应被反匹配到"
