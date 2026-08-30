@@ -240,3 +240,28 @@ class TestCustomerDedup:
         assert out1["error"] and "已存在" in out1["error"]
         out2 = json.loads(t.add_customer(name="张三", phone="13800008001", force=True))
         assert out2["success"] is True
+
+
+class TestAutoMatch:
+    def test_add_customer_returns_matched_properties(self, db, monkeypatch):
+        """录入新客户自动匹配房源(2026-08-29)：返回 matched_properties"""
+        import tools.real_estate_customer as t
+        monkeypatch.setattr(t, "_get_db", lambda: db)
+        make_property(db, title="海甸岛某小区 3号楼101", price=3_500_000, area=100.0, district="美兰-海甸岛")
+        out = json.loads(t.add_customer(
+            name="李四", budget_min=3_000_000, budget_max=5_000_000,
+            area_pref="90-120", layout_pref="3室2厅", location="美兰区",
+            customer_type="buy_second_hand"))
+        assert out["success"] is True
+        assert out.get("matched_properties"), "新客户应自动返回匹配房源"
+
+    def test_add_customer_no_match_still_success(self, db, monkeypatch):
+        """客户无匹配房源时仍成功，且无 matched_properties"""
+        import tools.real_estate_customer as t
+        monkeypatch.setattr(t, "_get_db", lambda: db)
+        out = json.loads(t.add_customer(
+            name="赵六", budget_min=100_000, budget_max=200_000,
+            area_pref="30-40", layout_pref="1室1厅", location="琼山区",
+            customer_type="buy_second_hand"))
+        assert out["success"] is True
+        assert "matched_properties" not in out

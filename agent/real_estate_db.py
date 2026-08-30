@@ -1093,7 +1093,7 @@ class RealEstateDB:
         }
 
     def match_customers_for_property(self, property_id, top_n=5):
-        """房源反匹配：新房源 → 扫描 S/A 级客户，按需求匹配推荐
+        """房源反匹配：新房源 → 扫描活跃客户，按需求匹配推荐（2026-08-29 起放宽到所有活跃客户，不再只 S/A）
 
         返回命中客户列表（按匹配度排序），用于 add_property 后主动推送。
         """
@@ -1106,7 +1106,6 @@ class RealEstateDB:
                 return []
             candidates = s.query(Customer).filter(
                 Customer.status == 'active',
-                Customer.tier.in_(['S', 'A']),
             ).all()
             if not candidates:
                 return []
