@@ -1172,6 +1172,9 @@ class RealEstateDB:
                 # 租客要求过滤（2026-08-29 加）：出租房源租客要求与客户资料冲突 → 排除
                 if prop.property_type == 'rental' and not self._tenant_req_ok(prop.tenant_requirements, c):
                     continue
+                # 类型硬匹配（2026-08-30 加）：客户类型明确(买新/买二手)时，类型不符即排除——买二手不推新房、买新房不推二手
+                if c.customer_type in ('buy_new', 'buy_second_hand') and not self._match_type(c.customer_type, prop.property_type):
+                    continue
                 # 户型硬性要求：客户明确 N 室/N 厅而房源不满足 → 跳过
                 #（与 match_property 对称，防止"2 室房源推给要 3 室的客户"）
                 if c.layout_pref and not self._match_layout(c.layout_pref, prop.rooms, prop.halls):
@@ -1294,6 +1297,9 @@ class RealEstateDB:
                 continue
             # 租客要求过滤（2026-08-29 加）：出租房源租客要求与客户资料冲突 → 排除
             if prop_type == 'rental' and not self._tenant_req_ok(prop.get('tenant_requirements'), customer):
+                continue
+            # 类型硬匹配（2026-08-30 加）：客户类型明确(买新/买二手)时，类型不符即排除——买二手不推新房、买新房不推二手
+            if ctype in ('buy_new', 'buy_second_hand') and not self._match_type(ctype, prop_type):
                 continue
             
             price = prop.get('price', 0)

@@ -102,6 +102,43 @@ class TestMatchBroadened:
         assert any(c["customer_name"] == "王五" for c in matched), "B 级客户也应被反匹配到"
 
 
+class TestMatchTypeHardExclude:
+    """2026-08-30: 类型硬排除——买二手不推新房、买新不推二手（原只做租买互斥，新房/二手混推）"""
+
+    def test_buy_second_hand_excludes_new_property(self, db):
+        """买二手客户不应匹配到新房"""
+        newp = db.add_property(title="某新房 1号楼101", community="新盘", price=3_000_000, area=100.0,
+                               rooms=3, halls=2, property_type="new")
+        c = db.add_customer(name="买二手客", customer_type="buy_second_hand",
+                            budget_min=2_000_000, budget_max=4_000_000,
+                            layout_pref="3室2厅", location="美兰区")
+        matched = db.match_property(c["id"])
+        assert all(m["id"] != newp["id"] for m in matched), "买二手客户不应匹配到新房"
+
+    def test_buy_new_excludes_second_hand(self, db):
+        """买新客户不应匹配到二手房"""
+        sec = db.add_property(title="某二手 1号楼101", community="老盘", price=3_000_000, area=100.0,
+                              rooms=3, halls=2, property_type="second_hand")
+        c = db.add_customer(name="买新客", customer_type="buy_new",
+                            budget_min=2_000_000, budget_max=4_000_000,
+                            layout_pref="3室2厅", location="美兰区")
+        matched = db.match_property(c["id"])
+        assert all(m["id"] != sec["id"] for m in matched), "买新客户不应匹配到二手房"
+
+    def test_unspecified_buy_matches_both(self, db):
+        """买(类型未细分)客户应能匹配到新房和二手"""
+        db.add_property(title="某新房 1号楼101", community="新盘", price=3_000_000, area=100.0,
+                        rooms=3, halls=2, property_type="new")
+        db.add_property(title="某二手 1号楼101", community="老盘", price=3_000_000, area=100.0,
+                        rooms=3, halls=2, property_type="second_hand")
+        c = db.add_customer(name="不限客", customer_type="buy",
+                            budget_min=2_000_000, budget_max=4_000_000,
+                            layout_pref="3室2厅", location="美兰区")
+        matched = db.match_property(c["id"])
+        types = {m.get("property_type") for m in matched}
+        assert "new" in types and "second_hand" in types, "买(未细分)客户应能匹配到新房和二手"
+
+
 class TestOwnerAndTenant:
     def test_add_property_links_owner_dedup(self, db, monkeypatch):
         """录入房源带业主信息 → 自动登记房东并关联；同电话复用不新建（2026-08-29）"""

@@ -44,11 +44,23 @@ def add_customer(
                 "error": "检测到客户字段可能因密钥不一致无法安全判重，请先检查 COCO_ENC_KEY 再操作。",
             }, ensure_ascii=False)
         if dup:
+            # 判断本次录入与已存在客户的关键字段是否完全一致（2026-08-30 加）
+            identical = True
+            for k, new_v in [('name', name), ('phone', phone), ('budget_min', budget_min),
+                             ('budget_max', budget_max), ('area_pref', area_pref),
+                             ('layout_pref', layout_pref), ('location', location),
+                             ('customer_type', customer_type), ('source', source)]:
+                if new_v is None:
+                    continue  # 本次未提供的字段不参与一致判断
+                if str(dup.get(k)) != str(new_v):
+                    identical = False
+                    break
+            msg = ("信息完全一致，无需重复登记。" if identical else
+                   f"信息有差异，请先向老板确认：合并更新请用 update_customer(customer_id={dup['id']}, ...)；"
+                   f"确实要新增请用 add_customer(..., force=True)。")
             return json.dumps({
-                "success": False, "duplicate": True, "existing_customer": dup,
-                "error": (f"该客户已存在（id={dup['id']} {dup['name']}，手机 {dup.get('phone') or '未填'}）。"
-                          f"请先向老板确认：合并更新请用 update_customer(customer_id={dup['id']}, ...)；"
-                          f"确实要新增请用 add_customer(..., force=True)。"),
+                "success": False, "duplicate": True, "identical": identical, "existing_customer": dup,
+                "error": (f"该客户已存在（id={dup['id']} {dup['name']}，手机 {dup.get('phone') or '未填'}）。" + msg),
             }, ensure_ascii=False)
     result = db.add_customer(
         name=name, phone=phone, wechat=wechat, tier=tier,

@@ -242,6 +242,32 @@ class TestCustomerDedup:
         assert out2["success"] is True
 
 
+class TestCustomerDupIdentical:
+    """2026-08-30: 客户去重区分'完全一致 vs 有差异' → identical 标志"""
+
+    def test_identical_fields_returns_identical_true(self, enc_db, monkeypatch):
+        """完全一致 → identical=true，提示无需重复登记"""
+        import tools.real_estate_customer as t
+        monkeypatch.setattr(t, "_get_db", lambda: enc_db)
+        make_customer(enc_db, name="赵六", phone="13700007003", budget_min=2_000_000, budget_max=3_000_000,
+                      layout_pref="3室", location="龙华区", customer_type="buy_second_hand")
+        out = json.loads(t.add_customer(name="赵六", phone="13700007003", budget_min=2_000_000, budget_max=3_000_000,
+                                        layout_pref="3室", location="龙华区", customer_type="buy_second_hand"))
+        assert out["success"] is False and out["duplicate"] is True
+        assert out["identical"] is True, "字段全一致应 identical=true"
+        assert "无需重复登记" in out["error"]
+
+    def test_different_budget_returns_identical_false(self, enc_db, monkeypatch):
+        """预算不同 → identical=false，提示信息有差异、需确认合并/新增"""
+        import tools.real_estate_customer as t
+        monkeypatch.setattr(t, "_get_db", lambda: enc_db)
+        make_customer(enc_db, name="赵六", phone="13700007003", budget_min=2_000_000, budget_max=3_000_000)
+        out = json.loads(t.add_customer(name="赵六", phone="13700007003", budget_min=4_000_000, budget_max=5_000_000))
+        assert out["success"] is False and out["duplicate"] is True
+        assert out["identical"] is False, "预算不同应 identical=false"
+        assert "信息有差异" in out["error"]
+
+
 class TestAutoMatch:
     def test_add_customer_returns_matched_properties(self, db, monkeypatch):
         """录入新客户自动匹配房源(2026-08-29)：返回 matched_properties"""
