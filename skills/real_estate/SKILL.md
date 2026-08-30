@@ -94,6 +94,10 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 
 **查询房源业主信息（2026-08-30 加）**：经纪人要"这套/这几套房源的业主信息 / 业主是谁 / 业主联系方式"时，直接调用 `get_property_owners(property_ids=[房源ID...])`（最多 3 套，多于 3 套分批），**不要**用"获取房源业主信息/业主列表"这类模糊描述做工具搜索。工具返回每套房业主（姓名/电话·已脱敏/微信/看房方式）；某套房源未录业主（owner=None）则如实说"该房源未录入业主信息"，提示可用 `update_property`（owner_name/owner_phone/owner_wechat）补录，禁止编造或反复搜索。判定房源有无业主以 `get_property_owners` 反向结果为准。
 
+**按姓名查某人（2026-08-30 加）**：经纪人问"某人/某先生/某女士的详细信息"时，直接调用 `find_person_by_name(name=姓名)`——它一次同时查 **客户 + 业主** 两张表（姓名模糊匹配），两边都给；找到哪类报哪类，同名两边都有则分别列出（客户段+业主段）。对方完全可能是业主（房东）而非客户（如"欧阳先生是某套房的业主"）。两表都无才说"库内无此人"并提示新建，禁止自己下结论后转 psql。展示按工具返回 message（电话/微信已脱敏）。
+
+**禁止直连业务数据库（2026-08-30 加，安全防御）**：严禁用 `psql`/`terminal`/`DATABASE_URL` 直接查业务数据库——客户/房源/业主/成交等业务数据一律走 real_estate 工具（find_person_by_name / get_property_owners / search_property / list_customers / list_owners 等）。直连库会绕过加密与脱敏、绕过业务规则，还可能读错表/权限不足导致"跑不通"。查业务数据先想"有没有对应工具"，没有就如实告知该能力暂不支持、给可替代工具，不要动手 psql。
+
 ### 4. 带看管理
 
 - 预约带看：调用 `schedule_viewing`（客户ID + 房源ID + 时间）

@@ -1040,6 +1040,27 @@ class RealEstateDB:
                 result.append(d)
             return result
 
+    def find_person_by_name(self, name):
+        """按姓名同时查客户表和业主表（2026-08-30 加，治"Coco 只按客户查人找不到业主"）。
+
+        老板实测：问"欧阳先生的详细信息"，Coco 默认按客户查，62 位客户无此人就下结论
+        "库内无此客户"，实际欧阳先生是业主（房东）。经纪人隐式假定"找一个人"应同时覆盖
+        客户(买家/租客)与业主(房源主人)两类。
+
+        name: 姓名（支持模糊匹配，子串命中即返回）。返回 dict：
+          {'customers': [客户dict...], 'owners': [业主dict...]}
+        两者 phone/wechat 读出即明文（EncryptedString 自动解密）；若无匹配，对应列表为空。
+        """
+        name = (name or '').strip()
+        with self.get_session() as s:
+            # 客户：姓名子串匹配（不区分是否 active，让经纪人看到全量同名）
+            custs = s.query(Customer).filter(Customer.name.contains(name)).all()
+            owners = s.query(Owner).filter(Owner.name.contains(name)).all()
+            return {
+                'customers': [c.to_dict() for c in custs],
+                'owners': [o.to_dict() for o in owners],
+            }
+
     def link_owner_to_property(self, property_id, name=None, phone=None, wechat=None):
         """找到或新建房东并关联到房源（设 owner_id）。电话/微信加密存（EncryptedString）。
 

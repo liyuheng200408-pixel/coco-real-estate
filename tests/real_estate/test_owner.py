@@ -147,3 +147,65 @@ class TestPropertyOwnerLookup:
         monkeypatch.setattr(omod, "_get_db", lambda: db)
         assert omod._mask_phone("13800138000") == "138****8000"
         assert omod._mask_phone(None) is None
+
+
+# ==================== 按姓名跨表查人（2026-08-30 加） ====================
+
+class TestFindPersonByName:
+    def _make_owner(self, db, name, phone=None):
+        o = db.add_owner(name=name, phone=phone)
+        return o["id"]
+
+    def test_finds_owner_only(self, db):
+        """'欧阳先生'是业主非客户：find_person_by_name 应命中业主表（2026-08-30 老板案例）"""
+        self._make_owner(db, "欧阳先生", "13700137000")
+        db.add_customer(name="王五", phone="13800138000", customer_type="buy_second_hand")
+        r = db.find_person_by_name("欧阳")
+        assert len(r["owners"]) == 1
+        assert r["owners"][0]["name"] == "欧阳先生"
+        assert r["owners"][0]["phone"] == "13700137000"
+        assert len(r["customers"]) == 0  # 客户表无此人
+
+    def test_finds_customer_only(self, db):
+        """'王五'是客户：find_person_by_name 应命中客户表"""
+        db.add_customer(name="王五", phone="13800138000", customer_type="buy_second_hand")
+        r = db.find_person_by_name("王五")
+        assert len(r["customers"]) == 1
+        assert r["customers"][0]["name"] == "王五"
+        assert len(r["owners"]) == 0
+
+    def test_finds_same_name_both_tables(self, db):
+        """同名客户+业主两边都有 -> 分别列出（2026-08-30 老板定：两边都给）"""
+        db.add_customer(name="李先生", phone="13800138000", customer_type="buy_second_hand")
+        self._make_owner(db, "李先生", "13900139000")
+        r = db.find_person_by_name("李先生")
+        assert len(r["customers"]) == 1
+        assert len(r["owners"]) == 1
+
+    def test_no_match(self, db):
+        """两表都无此人 -> 两个列表都为空（不报错不编造）"""
+        r = db.find_person_by_name("不存在的人")
+        assert r["customers"] == []
+        assert r["owners"] == []
+
+    def test_fuzzy_match_substring(self, db):
+        """模糊匹配：输'欧阳'应命中'欧阳先生'（子串）"""
+        self._make_owner(db, "欧阳先生", "13700137000")
+        r = db.find_person_by_name("欧阳")
+        assert len(r["owners"]) == 1
+
+    def test_tool_layer_masks_phone(self, db, monkeypatch):
+        """工具层 find_person_by_name：电话脱敏展示 + 客户/业主分区"""
+        import tools.real_estate_owner as omod
+        monkeypatch.setattr(omod, "_get_db", lambda: db)
+        db.add_customer(name="欧阳客户", phone="13500000001", customer_type="buy_second_hand")
+        self._make_owner(db, "欧阳业主", "13500000002")
+        raw = omod.find_person_by_name(name="欧阳")
+        data = json.loads(raw)
+        assert data["success"] is True
+        assert data["count_customers"] == 1
+        assert data["count_owners"] == 1
+        assert "135****0001" in data["message"]  # 客户电话已脱敏
+        assert "135****0002" in data["message"]  # 业主电话已脱敏
+        assert "【客户】" in data["message"]
+        assert "【业主】" in data["message"]

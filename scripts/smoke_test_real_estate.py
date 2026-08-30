@@ -53,7 +53,7 @@ STATIC_TOOLS = [
     "generate_property_poster","generate_poster_grid",
     "save_agent_brand","get_agent_brand",
     "enable_cron","disable_cron",
-    "add_owner","get_owner","list_owners","owner_portfolio","exclusive_expiring","get_property_owners",
+    "add_owner","get_owner","list_owners","owner_portfolio","exclusive_expiring","get_property_owners","find_person_by_name",
 ]
 
 # ---------- 造一张测试图片 ----------
@@ -194,6 +194,9 @@ CASES = [
     ("exclusive_expiring", {"days":30}),
     ("get_property_owners", {"property_ids":[pid2]}),
     ("get_property_owners", {"property_ids":[pid]}),   # 该房源未录业主 => owner=None 不崩
+    ("find_person_by_name", {"name":"测试房东"}),
+    ("find_person_by_name", {"name":"测试客户张先生"}),
+    ("find_person_by_name", {"name":"查无此人"}),
 ]
 
 for name, args in CASES:
