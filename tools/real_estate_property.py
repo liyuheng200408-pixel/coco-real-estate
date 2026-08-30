@@ -20,6 +20,8 @@ def add_property(
     property_type: str = "second_hand",
     tags: str = None, images: str = None,
     image_paths: str = None, agent_id: str = None,
+    tenant_requirements: str = None,
+    owner_name: str = None, owner_phone: str = None, owner_wechat: str = None,
     force: bool = False, task_id: str = None,
 ) -> str:
     """添加新房源
@@ -54,8 +56,19 @@ def add_property(
         orientation=orientation, renovation=renovation, year_built=year_built,
         has_elevator=has_elevator, parking=parking, property_type=property_type,
         tags=tags, images=merged_images, agent_id=agent_id,
+        tenant_requirements=tenant_requirements,
     )
-    # 房源反匹配：自动扫描 S/A 级客户
+    # 租客要求入库后同步到返回结果
+    if tenant_requirements:
+        result['tenant_requirements'] = tenant_requirements
+    # 业主信息一步关联：找到/新建房东(电话加密)并挂到房源 owner_id
+    owner = None
+    if owner_name or owner_phone:
+        try:
+            owner = db.link_owner_to_property(result['id'], name=owner_name, phone=owner_phone, wechat=owner_wechat)
+        except Exception:
+            owner = None
+    # 房源反匹配：自动扫描匹配到的客户
     try:
         matched = db.match_customers_for_property(result['id'])
     except Exception:
@@ -77,11 +90,13 @@ def add_property(
     except Exception:
         duplicate_warning = None
     response = {"success": True, "property": result}
+    if owner:
+        response["owner"] = owner
     if duplicate_warning:
         response["duplicate_warning"] = duplicate_warning
     if matched:
         response["matched_customers"] = matched
-        response["message"] = f"房源已添加，有 {len(matched)} 位 S/A 级客户可能感兴趣"
+        response["message"] = f"房源已添加，有 {len(matched)} 位客户可能感兴趣"
     return json.dumps(response, ensure_ascii=False)
 
 
@@ -89,18 +104,28 @@ def update_property(
     property_id: int, title: str = None, price: int = None,
     area: float = None, status: str = None,
     community: str = None, district: str = None, renovation: str = None,
+    owner_name: str = None, owner_phone: str = None, owner_wechat: str = None,
     task_id: str = None,
 ) -> str:
-    """更新房源信息"""
+    """更新房源信息（可同时补充业主联系方式：owner_name/owner_phone/owner_wechat，自动登记房东并关联）"""
     db = _get_db()
     kwargs = {k: v for k, v in {
         'title': title, 'price': price, 'area': area, 'status': status,
         'community': community, 'district': district, 'renovation': renovation,
     }.items() if v is not None}
     result = db.update_property(property_id, **kwargs)
-    if result:
-        return json.dumps({"success": True, "property": result}, ensure_ascii=False)
-    return json.dumps({"success": False, "error": "房源不存在"}, ensure_ascii=False)
+    if not result:
+        return json.dumps({"success": False, "error": "房源不存在"}, ensure_ascii=False)
+    owner = None
+    if owner_name or owner_phone:
+        try:
+            owner = db.link_owner_to_property(property_id, name=owner_name, phone=owner_phone, wechat=owner_wechat)
+        except Exception:
+            owner = None
+    response = {"success": True, "property": result}
+    if owner:
+        response["owner"] = owner
+    return json.dumps(response, ensure_ascii=False)
 
 
 def search_property(
@@ -200,14 +225,21 @@ TOOLS = [
             "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型：new(新房)/second_hand(二手房)/rental(租房)"},
             "images": {"type": "string", "description": "房源图片，多个用逗号分隔（URL或本地路径）"},
             "image_paths": {"type": "string", "description": "经纪人消息中附带的图片本地路径，多个用逗号分隔，与 images 合并存入房源"},
+            "tenant_requirements": {"type": "string", "description": "出租房源的租客要求（如不吸烟/办居住证/学生优先），多个用逗号或顿号分隔，匹配租客时会用于过滤"},
+            "owner_name": {"type": "string", "description": "业主（房东）姓名。填了即自动登记房东并关联此房源"},
+            "owner_phone": {"type": "string", "description": "业主（房东）手机号，加密存储"},
+            "owner_wechat": {"type": "string", "description": "业主（房东）微信号，加密存储"},
             "force": {"type": "boolean", "description": "默认 false。true=跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用）"},
         }, "required": ["title", "price", "area"],
     }, "handler": lambda args, **kw: add_property(**args)},
-    {"name": "update_property", "description": "更新房源信息", "parameters": {
+    {"name": "update_property", "description": "更新房源信息（可补充业主联系方式：owner_name/owner_phone/owner_wechat，自动登记房东并关联）", "parameters": {
         "type": "object", "properties": {
             "property_id": {"type": "integer"}, "title": {"type": "string"},
             "price": {"type": "integer"}, "area": {"type": "number"},
             "status": {"type": "string", "enum": ["available", "sold", "rented"]},
+            "owner_name": {"type": "string", "description": "业主姓名。填了即自动登记房东并关联此房源"},
+            "owner_phone": {"type": "string", "description": "业主手机号，加密存储"},
+            "owner_wechat": {"type": "string", "description": "业主微信号，加密存储"},
         }, "required": ["property_id"],
     }, "handler": lambda args, **kw: update_property(**args)},
     {"name": "search_property", "description": "搜索房源（支持按标题关键词/价格/面积/户型/区域/类型筛选）", "parameters": {
