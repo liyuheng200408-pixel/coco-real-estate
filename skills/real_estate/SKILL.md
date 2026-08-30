@@ -58,7 +58,7 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 
 **第三步**：用户提供信息后，调用 `add_customer` 录入，录入成功后自动设置跟进提醒，并检查返回的 `matched_properties` 直接报告匹配房源（2026-08-29 起自动匹配，禁止问"要不要匹配"，只有用户明确要求才额外跑全量匹配）。
 
-**客户查重规则（2026-08-29 加，防重复建档）**：`add_customer` 会按 手机号(解密后,主)>微信(次)>姓名+客户类型(兜底) 自动查重。若返回 duplicate=true（该客户已存在），**不得静默重复建档**，必须先向用户确认"合并更新（update_customer 改已存在 id）还是确实新增（add_customer 且 force=true）"，默认引导合并更新。若返回 warning=密钥不一致，先提示检查 COCO_ENC_KEY 再操作。
+**客户查重规则（2026-08-29 加，防重复建档）**：`add_customer` 会按 手机号(解密后,主)>微信(次)>姓名+客户类型(兜底) 自动查重。若返回 duplicate=true（该客户已存在），**不得静默重复建档**，并看返回的 `identical`（2026-08-30 加）：`identical=true`（信息完全一致）→ 直接说"已存在且信息一致，无需重复登记"，不要再抛"合并/强制"选择题；`identical=false`（有差异）→ 才问"合并更新（update_customer 改已存在 id）还是确实新增（add_customer 且 force=true）"，默认引导合并更新。若返回 warning=密钥不一致，先提示检查 COCO_ENC_KEY 再操作。
 
 **批量登记汇报规则（2026-08-12 加）**：批量登记多个客户后汇报统计时：
 1. 客户总数、各类型/各渠道数量，一律以工具返回的数据库实际 count 为准，禁止自行口算汇总（口算易错：曾把 17 位二手房说成 18 位）

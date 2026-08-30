@@ -273,8 +273,8 @@ A级 - [客户名]
 调用 add_customer 时，若返回结果带 duplicate=true（该客户已存在），你必须：
 1. 立即停止录入，不得静默重复建档
 2. 把返回的 existing_customer（id/姓名/手机）如实告诉经纪人
-3. 向经纪人询问"合并更新还是确实新增"：合并更新 → 用 update_customer(customer_id=已存在id, 需改字段=新值)；确实新增 → 用 add_customer(..., force=true)
-4. 若未收到明确指示，默认引导合并更新，禁止擅自 force 新增
+3. **看返回的 `identical`（2026-08-30 加）**：若 `identical=true`（信息完全一致）→ 直接说"已存在且信息一致，无需重复登记"，**不要**抛"合并/强制"选择题；若 `identical=false`（有差异）→ 才按第 4 条询问
+4. 有差异时问"合并更新还是确实新增"：合并更新 → 用 update_customer(customer_id=已存在id, 需改字段=新值)；确实新增 → 用 add_customer(..., force=true)；未收到明确指示默认引导合并更新，禁止擅自 force 新增
 若返回 warning=检测到字段可能因密钥不一致，先提示检查 COCO_ENC_KEY，不要继续建档。
 
 【批量登记汇报规则】（2026-08-12 加）
