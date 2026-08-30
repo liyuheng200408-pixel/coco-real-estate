@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Coco 房产助理 - 数据库备份脚本（PostgreSQL 版）
+Coco 房产智能体 - 数据库备份脚本（PostgreSQL 版）
 支持定时自动备份、保留30天、数据变化检查、备份日志
 使用 pg_dump 导出，恢复用 pg_restore
 """
@@ -419,7 +419,7 @@ class DatabaseBackup:
         print("============================================")
         print("迁移恢复完成！请执行以下步骤：")
         print("  1. sudo systemctl restart hermes-agent")
-        print("  2. 给机器人发送\"你好\"，定时任务会自动注册")
+        print("  2. 给智能体发送\"你好\"，定时任务会自动注册")
         print("============================================")
         return True
 
@@ -451,7 +451,7 @@ def main():
     """主函数"""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Coco 房产助理 - PostgreSQL 数据库备份工具")
+    parser = argparse.ArgumentParser(description="Coco 房产智能体 - PostgreSQL 数据库备份工具")
     parser.add_argument("action", choices=["backup", "restore", "restore_migration", "list", "status"], help="操作类型")
     parser.add_argument("--db-url", default=None, help="PostgreSQL 连接串（默认读 .env.db）")
     parser.add_argument("--backup-dir", default=None, help="备份目录")
