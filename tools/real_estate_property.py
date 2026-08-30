@@ -64,8 +64,9 @@ def add_property(
     #（真实案例：雅居乐金沙湾/保利中央海岸/恒大美丽沙均录入两条价格、区域冲突的记录）
     duplicate_warning = None
     try:
+        # 排除刚插入的这套房源自身 id（避免"每套房都提示同名1条"的误报——2026-08-29 修复）
         same_title = [d for d in db.search_properties(title=title, limit=10)
-                      if d.get('title') == title]
+                      if d.get('title') == title and d.get('id') != result.get('id')]
         if same_title:
             d0 = same_title[0]
             duplicate_warning = (

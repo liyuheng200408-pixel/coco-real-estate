@@ -69,3 +69,23 @@ class TestPropertyDedup:
         assert a == b == "海阔天空7号楼2单元301"
         assert c == "XX花园1号楼1单元101"
         assert a != _normalize_title("桂林洋海阔天空 8号楼2单元302")
+
+
+class TestDuplicateWarning:
+    def test_unique_title_no_duplicate_warning(self, db, monkeypatch):
+        """修复回归：唯一标题房源 → 插入后不再误报'同名 1 条'（2026-08-29）"""
+        import tools.real_estate_property as t
+        monkeypatch.setattr(t, "_get_db", lambda: db)
+        out = json.loads(t.add_property(title="唯一标题小区XYZ 9号楼901", price=2_000_000, area=90.0))
+        assert out["success"] is True
+        assert "duplicate_warning" not in out, "唯一标题不应触发同名提示"
+
+    def test_same_title_different_area_warns(self, db, monkeypatch):
+        """同名不同面积（不同期数/楼栋）→ 放行 + 提示（排除自身后仍能提示另一条）"""
+        import tools.real_estate_property as t
+        monkeypatch.setattr(t, "_get_db", lambda: db)
+        t.add_property(title="国瑞城 1号楼1单元101", price=2_000_000, area=100.0)
+        out = json.loads(t.add_property(title="国瑞城 1号楼1单元101", price=2_100_000, area=120.0))
+        assert out["success"] is True
+        assert "duplicate_warning" in out
+        assert "1 条" in out["duplicate_warning"]
