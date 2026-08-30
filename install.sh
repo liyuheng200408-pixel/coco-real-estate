@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Coco（可可）房产助理 - 一键安装脚本
+# Coco（可可）房产智能体 - 一键安装脚本
 # 基于 Hermes Agent 定制版
 # 用法(国内): curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 # 用法(海外): curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
@@ -111,7 +111,7 @@ probe_source() {
 }
 
 clone_project() {
-    info "下载 Coco 房产助理..."
+    info "下载 Coco 房产智能体..."
     if [[ -d "$INSTALL_DIR" ]]; then
         warn "目录已存在，删除后重新下载..."
         rm -rf "$INSTALL_DIR"
@@ -203,10 +203,10 @@ EOF
 
 # ==================== 交互式配置 ====================
 setup_config() {
-    info "配置 Coco 房产助理..."
+    info "配置 Coco 房产智能体..."
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  Coco（可可）房产助理 - 配置说明${NC}"
+    echo -e "${BLUE}  Coco（可可）房产智能体 - 配置说明${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     echo -e "${YELLOW}安装完成后的配置步骤：${NC}"
@@ -226,7 +226,7 @@ setup_config() {
     echo "5. 启动服务:"
     echo "   sudo systemctl start hermes-agent"
     echo ""
-    echo -e "${GREEN}配置完成后，机器人会自动连接飞书。${NC}"
+    echo -e "${GREEN}配置完成后，智能体会自动连接飞书。${NC}"
     echo ""
     
     # 复制 SOUL.md 身份文件（确保 ~/.hermes 存在）
@@ -299,7 +299,7 @@ EOF
 
 # ==================== 启动服务 ====================
 start_service() {
-    info "启动 Coco 房产助理..."
+    info "启动 Coco 房产智能体..."
     if [[ "$OS" == "linux" ]] && command -v systemctl &> /dev/null; then
         # 修复权限（数据库/密钥文件仅所有者可读写，含 WAL/SHM 伴随文件）
         # 数据库可能落在 HERMES_HOME 或默认 ~/.hermes，两个位置都覆盖
@@ -351,7 +351,7 @@ start_service() {
 print_result() {
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}  ✅ Coco（可可）房产助理安装完成！${NC}"
+    echo -e "${GREEN}  ✅ Coco（可可）房产智能体安装完成！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
     # 版本号直接读仓库根 VERSION 文件（2026-08-29 加）：以后只改 VERSION，安装终端自动同步，无需再改这里
@@ -369,8 +369,8 @@ print_result() {
     echo ""
     echo -e "${YELLOW}下一步:${NC}"
     echo -e "  1. 在飞书开放平台配置事件订阅 URL"
-    echo -e "  2. 测试飞书机器人消息"
-    echo -e "  3. 开始使用 Coco 房产助理！"
+    echo -e "  2. 测试飞书智能体消息"
+    echo -e "  3. 开始使用 Coco 房产智能体！"
     echo ""
     echo -e "${RED}========================================${NC}"
     echo -e "${RED}  🔐 重要！请立即备份数据加密密钥！${NC}"
@@ -404,7 +404,7 @@ print_result() {
 main() {
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  🏠 Coco（可可）房产助理 - 一键安装${NC}"
+    echo -e "${BLUE}  🏠 Coco（可可）房产智能体 - 一键安装${NC}"
     echo -e "${BLUE}  基于 Hermes Agent 定制版${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""

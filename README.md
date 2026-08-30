@@ -1,6 +1,6 @@
-# Coco（可可）房产助理
+# Coco（可可）房产智能体
 
-> 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问 AI 助手，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
+> 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
 [![Coco v1.0.0](https://img.shields.io/badge/Coco%20AI-v1.0.0-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v1.0.0)
 
@@ -10,7 +10,7 @@
 
 ## ⚠️ 免责声明
 
-**本项目的定位是个人学习与技术交流**，非商业产品。作者开源本项目仅为分享基于 Hermes Agent 定制行业 AI 助手的思路与实现，不提供任何形式的担保或技术支持。
+**本项目的定位是个人学习与技术交流**，非商业产品。作者开源本项目仅为分享基于 Hermes Agent 定制行业智能体的思路与实现，不提供任何形式的担保或技术支持。
 
 1. **学习用途定位**：本项目默认面向个人学习、技术研究、功能演示场景。若你希望将其用于生产环境（真实客户、真实业务数据），请务必先自行评估风险、完整测试、并做好以下准备，**因使用本软件产生的一切后果由使用者自行承担**。
 
@@ -129,12 +129,12 @@ hermes gateway start
 hermes gateway restart
 ```
 
-### 第四步：测试机器人
+### 第四步：测试智能体
 
-1. 打开飞书 App，搜索你的机器人名称
+1. 打开飞书 App，搜索你的智能体名称
 2. 发送一条消息（如"你好"）
-3. 机器人会回复配对码，在终端执行批准：`hermes pairing approve feishu <配对码>`
-4. 批准后再发消息，机器人应该正常回复
+3. 智能体会回复配对码，在终端执行批准：`hermes pairing approve feishu <配对码>`
+4. 批准后再发消息，智能体应该正常回复
 
 ## 🔧 常用命令
 
@@ -191,7 +191,7 @@ sudo journalctl -u hermes-gateway -n 50 --no-pager
 
 每日凌晨 2 点自动备份至 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。
 
-> 重要：请把 `enc_key.txt` 密钥文件保存到安全的地方（电脑/U盘/网盘）。密钥丢失将导致客户数据永久无法解密。首次使用机器人时 Coco 也会提醒您备份。
+> 重要：请把 `enc_key.txt` 密钥文件保存到安全的地方（电脑/U盘/网盘）。密钥丢失将导致客户数据永久无法解密。首次使用智能体时 Coco 也会提醒您备份。
 
 **手动备份：**
 ```bash
@@ -280,7 +280,7 @@ cd ~/hermes-agent && source venv/bin/activate
 hermes model
 ```
 
-**配置飞书机器人：**
+**配置飞书智能体：**
 ```bash
 hermes setup
 ```
