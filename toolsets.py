@@ -652,6 +652,7 @@ TOOLSETS = {
             "schedule_viewing", "record_viewing", "get_viewing", "list_viewings", "viewing_stats",
             "start_deal", "advance_deal", "get_deal", "list_deals", "deal_stats",
             "birthday_check", "update_birthday",
+            "add_owner", "get_owner", "list_owners", "owner_portfolio", "exclusive_expiring", "get_property_owners",
             "generate_listing_copy", "generate_short_video_script",
             "add_property_images", "list_property_images",
             "compare_property", "intent_score", "list_intent_scores",

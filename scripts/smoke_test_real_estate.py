@@ -53,6 +53,7 @@ STATIC_TOOLS = [
     "generate_property_poster","generate_poster_grid",
     "save_agent_brand","get_agent_brand",
     "enable_cron","disable_cron",
+    "add_owner","get_owner","list_owners","owner_portfolio","exclusive_expiring","get_property_owners",
 ]
 
 # ---------- 造一张测试图片 ----------
@@ -100,6 +101,12 @@ rental_pid = r[1]['property']['id']; results['add_property_rental'] = r
 r = call('add_property', {"title":"在售房源二号","price":2000000,"area":120.0,"community":"和风家园","district":"琼山",
     "rooms":3,"halls":2,"bathrooms":2,"property_type":"second_hand","tags":"南北通透"})
 pid2 = r[1]['property']['id']; results['add_property_second'] = r
+
+# 登记业主并关联房源（2026-08-30 补 owner 工具冒烟种子）
+r = call('add_owner', {"name":"测试房东","phone":"13900139000","wechat":"owner_wx","id_number":"460005199001011234"})
+oid = r[1]['owner']['id']; results['add_owner'] = r
+r = call('update_property', {"property_id":pid2,"owner_id":oid,"viewing_note":"钥匙在门店"})
+results['update_property_owner'] = r
 
 r = call('save_script', {"name":"议价话术","content":"理解您的预算考虑，这套房可以谈","scenario":"objection_handling"})
 sid = r[1]['script']['id']; results['save_script'] = r
@@ -181,6 +188,12 @@ CASES = [
     ("get_agent_brand", {}),
     ("enable_cron", {"chat_id":"oc_test"}),
     ("disable_cron", {}),
+    ("get_owner", {"owner_id":oid}),
+    ("list_owners", {}),
+    ("owner_portfolio", {"owner_id":oid}),
+    ("exclusive_expiring", {"days":30}),
+    ("get_property_owners", {"property_ids":[pid2]}),
+    ("get_property_owners", {"property_ids":[pid]}),   # 该房源未录业主 => owner=None 不崩
 ]
 
 for name, args in CASES:

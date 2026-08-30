@@ -108,3 +108,42 @@ class TestOwnerTools:
         r = json.loads(omod.owner_portfolio(owner_id=o["id"]))
         assert r["success"] is True
         assert "钥匙在门店" in r["message"]
+
+
+# ==================== 按房源反查业主（2026-08-30 加） ====================
+
+class TestPropertyOwnerLookup:
+    def test_property_owner_linked(self, db):
+        """房源关联业主后，get_property_owners 反向查得业主姓名/电话/微信"""
+        o = _add_owner(db, name="房东张三", phone="13800138000", wechat="zs_wx")
+        p = make_property(db, price=3_000_000, area=100.0)
+        db.update_property(p["id"], owner_id=o["id"])
+        rows = db.get_property_owners([p["id"]])
+        assert len(rows) == 1
+        assert rows[0]["id"] == p["id"]
+        assert rows[0]["owner"]["name"] == "房东张三"
+        assert rows[0]["owner"]["phone"] == "13800138000"  # EncryptedString 读出即明文
+
+    def test_property_owner_not_linked(self, db):
+        """房源未关联业主时，get_property_owners 返回 owner=None（不报错不编造）"""
+        p = make_property(db, price=3_000_000, area=100.0)  # 无 owner
+        rows = db.get_property_owners([p["id"]])
+        assert len(rows) == 1
+        assert rows[0]["owner"] is None
+
+    def test_property_owner_multiple_truncated(self, db):
+        """一次传超过 3 套，db 层截断只返回前 3 套（工具层另有 3 套上限提示）"""
+        o = _add_owner(db, name="房东A")
+        ps = [make_property(db, title=f"房{i}", price=2_000_000 + i, area=80.0 + i)
+              for i in range(5)]
+        for p in ps:
+            db.update_property(p["id"], owner_id=o["id"])
+        rows = db.get_property_owners([p["id"] for p in ps])
+        assert len(rows) == 3  # 截断到 3
+
+    def test_property_owner_tool_masks_phone(self, db, monkeypatch):
+        """工具层：业主电话按老板要求脱敏展示（前3后4打星）"""
+        import tools.real_estate_owner as omod
+        monkeypatch.setattr(omod, "_get_db", lambda: db)
+        assert omod._mask_phone("13800138000") == "138****8000"
+        assert omod._mask_phone(None) is None
