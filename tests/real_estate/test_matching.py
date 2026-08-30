@@ -183,3 +183,43 @@ class TestMatchProperty:
 
     def test_nonexistent_customer(self, db):
         assert db.match_property(99999) == []
+
+
+# ==================== 区域硬优先级（2026-08-30 加） ====================
+
+class TestRegionPriority:
+    def test_region_mismatch_labeled(self, db):
+        """客户指定秀英区，美兰区房源必须带'区域不符'标注（2026-08-30 周女士案例）"""
+        c = make_customer(db, customer_type="buy_second_hand", location="秀英区")
+        make_property(db, title="无本区", district="美兰区")
+        matches = db.match_property(c["id"])
+        assert matches
+        assert "区域不符" in matches[0]["match_reasons"]
+
+    def test_region_preferred_sort(self, db):
+        """客户指定秀英区，秀英区超预算(138万)房源应排在其他区在预算内(95万)房源【前面】。
+
+        2026-08-30 周女士案例：客户要秀英区，引擎却把美兰区 95 万(75分)排在真秀英区
+        138 万超预算(60分)前面。区域硬优先级 tier 应把秀英区顶到最前。
+        """
+        c = make_customer(db, customer_type="buy_second_hand", location="秀英区",
+                          budget_min=900000, budget_max=1300000, area_pref=None,
+                          layout_pref="2室")
+        make_property(db, title="错区在预算", district="美兰区", price=950000,
+                      area=75.0, rooms=2, halls=1)
+        make_property(db, title="本区超预算", district="秀英区", price=1380000,
+                      area=89.0, rooms=2, halls=2)
+        matches = db.match_property(c["id"])
+        assert [m["title"] for m in matches] == ["本区超预算", "错区在预算"]
+        assert "超预算" in matches[0]["match_reasons"]
+        assert "区域不符" in matches[1]["match_reasons"]
+
+    def test_region_tier_no_location_unchanged(self, db):
+        """客户没填区域时，排序仍纯按分数降序（回归，确认改动不误伤存量行为）"""
+        c = make_customer(db, location="")  # 无区域需求
+        make_property(db, title="高分房")                        # 全命中 400万 3室2厅 美兰-海甸岛
+        make_property(db, title="低分房", district="龙华区")       # 少区域分
+        matches = db.match_property(c["id"])
+        scores = [m["score"] for m in matches]
+        assert scores == sorted(scores, reverse=True)
+        assert matches[0]["title"] == "高分房"

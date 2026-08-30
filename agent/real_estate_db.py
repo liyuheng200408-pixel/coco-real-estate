@@ -1015,6 +1015,31 @@ class RealEstateDB:
                 },
             }
 
+    def get_property_owners(self, property_ids):
+        """按房源 ID 批量查业主信息（"房源→业主"反向查询，2026-08-30 加）。
+
+        老板实测现象：经纪人要求"把这套/几套房源的业主信息给我"，Coco 只能做模糊工具搜索
+        （无"按房源查业主"工具），找不到就兜底报"均未录入业主信息"。本方法补上反向能力。
+
+        property_ids: 房源 ID 列表（最多 3，超出截断）。返回每套房源 dict + 其关联业主 dict，
+        业主未关联则 owner=None。业主 phone/wechat 读出即明文（EncryptedString 自动解密）。
+        """
+        if not property_ids:
+            return []
+        ids = [int(i) for i in list(property_ids)[:3]]
+        with self.get_session() as s:
+            owners_by_id = {o.id: o for o in s.query(Owner).all()}
+            props = s.query(Property).filter(Property.id.in_(ids)).all()
+            result = []
+            for p in props:
+                d = p.to_dict()
+                if p.owner_id and p.owner_id in owners_by_id:
+                    d['owner'] = owners_by_id[p.owner_id].to_dict()
+                else:
+                    d['owner'] = None
+                result.append(d)
+            return result
+
     def link_owner_to_property(self, property_id, name=None, phone=None, wechat=None):
         """找到或新建房东并关联到房源（设 owner_id）。电话/微信加密存（EncryptedString）。
 
@@ -1214,6 +1239,9 @@ class RealEstateDB:
                 region_ok = self._match_region(c.location, prop.district, prop.community, reasons)
                 if region_ok and c.location:
                     score += 15
+                elif c.location and not region_ok:
+                    # 客户明确指定区域但房源不在该区：显式标注（2026-08-30 与正向 match_property 对称）
+                    reasons.append("区域不符")
 
                 # 类型匹配（新房/二手房/租房）：不匹配不加分但标注，且不算完全匹配
                 type_ok = self._match_type(c.customer_type, prop.property_type)
@@ -1240,9 +1268,14 @@ class RealEstateDB:
                         'area_pref': c.area_pref, 'layout_pref': c.layout_pref,
                         'location': c.location,
                         'perfect_match': perfect_match,
+                        '_region_ok': region_ok,
                     })
 
-            results.sort(key=lambda x: x['score'], reverse=True)
+            # 区域硬优先级 tier（2026-08-30 与正向 match_property 对称）：客户 location 非空时，
+            # 区域匹配的客户排在区域不符的前面，同 tier 内按 score 降序。（治：本区客户被其他区客户顶到后面）
+            results.sort(key=lambda x: (x['_region_ok'] if x['location'] else True, x['score']), reverse=True)
+            for _r in results:
+                _r.pop('_region_ok', None)
             return results[:top_n]
 
     def search_properties(self, **filters):
@@ -1328,6 +1361,10 @@ class RealEstateDB:
             region_ok = self._match_region(loc, prop.get('district'), prop.get('community'), reasons)
             if region_ok and loc:
                 score += 15
+            elif loc and not region_ok:
+                # 客户明确指定区域但房源不在该区：显式标注，给模型信号，防把错区误标"完全匹配"
+                #（2026-08-30 真实案例：周女士要秀英区，4 套其他区被排前面且被误判完全匹配）
+                reasons.append("区域不符")
             
             # 类型匹配（新房/二手房/租房）：不匹配不加分但标注，且不算完全匹配
             #（2026-08-13 真实案例：要买新房的客户被推二手房并标完全匹配）
@@ -1359,9 +1396,18 @@ class RealEstateDB:
                     and type_ok
                 )
                 scores.append({**prop, 'score': score, 'match_reasons': reasons,
-                               'perfect_match': perfect_match})
-        
-        scores.sort(key=lambda x: x['score'], reverse=True)
+                               'perfect_match': perfect_match, '_region_ok': region_ok})
+
+        # 区域硬优先级 tier（2026-08-30 加，治"客户明确要某区但其他区房源排在前面"）：
+        # 客户 location 非空时，区域匹配(region_ok)的房源一律排在区域不符的前面，同 tier 内再按 score 降序。
+        # 真实案例：周女士要秀英区，4 套其他区(各75分)排唯一真秀英区(138万,60分)前面。
+        if loc:
+            scores.sort(key=lambda x: (x['_region_ok'], x['score']), reverse=True)
+        else:
+            scores.sort(key=lambda x: x['score'], reverse=True)
+        # 排序用完即剥临时键，不污染返回给模型的结果
+        for _s in scores:
+            _s.pop('_region_ok', None)
         return scores[:top_n]
     
     def match_all_customers(self, top_n=1, customer_type=None, tier=None, district=None):

@@ -26,6 +26,60 @@ def _mask_id(id_number: str) -> str:
     return id_number[:4] + '*' * (len(id_number) - 8) + id_number[-4:]
 
 
+def _mask_phone(phone) -> str:
+    """手机号脱敏（2026-08-30 老板定：业主电话脱敏展示）：保留前3后4，中间打星。
+
+    老板决策：对外/经纪人展示业主联系方式要脱敏，与"房源公开营销、联系方式敏感"的口径一致。
+    仅对展示层做脱敏，库内仍存密文（EncryptedString），不影响比对/关联。
+    """
+    if not phone:
+        return None
+    phone = str(phone).strip()
+    if len(phone) < 7:
+        return phone
+    return phone[:3] + '*' * (len(phone) - 7) + phone[-4:]
+
+
+def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
+    """按房源 ID 批量查询业主信息（房源→业主反向查询，最多 3 套）。
+
+    老板实测现象：让 Coco "把这套/几套房源的业主信息给我"，Coco 只能做模糊工具搜索，
+    找不到就兜底报"均未录入业主信息"。本工具补上反向能力：给房源ID → 返回该房源关联业主
+    的姓名/电话(脱敏)/微信/看房方式；房源未关联业主则 owner=None，如实说明。
+    """
+    db = _get_db()
+    if not property_ids:
+        return json.dumps({"success": False, "error": "请提供房源 ID 列表（property_ids）"},
+                          ensure_ascii=False)
+    if not isinstance(property_ids, list):
+        property_ids = [property_ids]
+    if len(property_ids) > 3:
+        return json.dumps({"success": False,
+                           "error": "一次最多查询 3 套房源，请分批查询"},
+                          ensure_ascii=False)
+    rows = db.get_property_owners(property_ids)
+    lines = []
+    for r in rows:
+        o = r.get('owner')
+        if not o:
+            lines.append(f"· {r['title']}（ID:{r['id']}）：未录入业主信息")
+            continue
+        masked_phone = _mask_phone(o.get('phone'))
+        wechat = o.get('wechat')
+        view = f"，看房方式: {r.get('viewing_note')}" if r.get('viewing_note') else ""
+        lines.append(
+            f"· {r['title']}（ID:{r['id']}）：业主 {o.get('name')}，"
+            f"电话 {masked_phone or '未录'}"
+            + (f"，微信 {wechat}" if wechat else "")
+            + view)
+    return json.dumps({
+        "success": True,
+        "count": len(rows),
+        "properties": rows,
+        "message": "\n".join(lines),
+    }, ensure_ascii=False)
+
+
 def add_owner(name: str, phone: str = None, wechat: str = None,
               id_number: str = None, trust_note: str = None,
               notes: str = None, task_id: str = None) -> str:
@@ -147,6 +201,17 @@ TOOLS = [
             "required": ["owner_id"],
         },
         "handler": lambda args, **kw: owner_portfolio(**args),
+    },
+    {
+        "name": "get_property_owners",
+        "description": "按房源ID批量查业主信息（房源→业主反向查询，最多3套）。返回每套房源关联业主的姓名/电话(脱敏)/微信/看房方式；房源未关联业主则如实说明。用于经纪人问'这套/这几套房源的业主是谁/业主联系方式'",
+        "parameters": {
+            "type": "object",
+            "properties": {"property_ids": {"type": "array", "items": {"type": "integer"},
+                                            "description": "房源ID列表（最多3个）"}},
+            "required": ["property_ids"],
+        },
+        "handler": lambda args, **kw: get_property_owners(**args),
     },
     {
         "name": "exclusive_expiring",
