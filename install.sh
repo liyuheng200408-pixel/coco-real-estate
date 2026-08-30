@@ -354,6 +354,9 @@ print_result() {
     echo -e "${GREEN}  ✅ Coco（可可）房产助理安装完成！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
+    # 版本号直接读仓库根 VERSION 文件（2026-08-29 加）：以后只改 VERSION，安装终端自动同步，无需再改这里
+    COCO_VER=$(cat "$INSTALL_DIR/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "未知")
+    echo -e "版本: ${BLUE}v${COCO_VER}${NC}"
     echo -e "安装目录: ${BLUE}$INSTALL_DIR${NC}"
     echo -e "配置文件: ${BLUE}$INSTALL_DIR/.env${NC}"
     echo ""
