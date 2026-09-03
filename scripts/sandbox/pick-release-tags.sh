@@ -68,7 +68,7 @@ fi
 # lexicographic sort gets wrong.
 mapfile -t tags < <(
   git -C "$REPO" tag --list 'v*' \
-    | grep -E '^v[0-9]{4}\.[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+    | grep -E '^(v[0-9]{4}\.[0-9]+\.[0-9]+(\.[0-9]+)?|v[0-9]+\.[0-9]+\.[0-9]+)$' \
     | sort -V
 )
 
