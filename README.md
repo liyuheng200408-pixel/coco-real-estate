@@ -105,28 +105,20 @@ hermes model
 hermes setup
 ```
 
-### 第三步：设置后台运行并重启服务
+### 第三步：确认服务已运行
 
-1. 设置 Hermes 后台运行，最常用的是 Gateway（网关服务）：
+一键安装脚本已自动把 Coco 注册为系统服务（`hermes-agent`）并启动，无需手动安装。关掉终端后它仍在后台运行，飞书消息正常收发。
 
-**安装为后台服务：**
+> **部署提示**：一键安装脚本已自动配置数据库环境（PostgreSQL），服务通过 `EnvironmentFile` 加载安装目录下的 `.env.db`。若 Coco 回复"添加成功"但查库无数据，说明服务未加载数据库环境——代码已内置防护：未配置 DATABASE_URL 时工具会直接报错而不是静默写入临时文件，按报错提示补环境即可。
+
+**查看服务状态（应显示 active (running)）：**
 ```bash
-hermes gateway install
+sudo systemctl status hermes-agent
 ```
 
-**启动服务：**
+**修改配置后，重启服务使配置生效：**
 ```bash
-hermes gateway start
-```
-
-这样即使关掉终端，Hermes 也会在后台持续运行，飞书消息也能正常收发。
-
-> **部署提示**：一键安装脚本已自动配置网关数据库环境（PostgreSQL）。若手动执行 `hermes gateway install` 后 Coco 回复"添加成功"但查库无数据，说明服务未加载数据库环境——代码已内置防护：未配置 DATABASE_URL 时工具会直接报错而不是静默写入临时文件，按报错提示补环境即可。
-
-2. 重启服务使配置生效：
-
-```bash
-hermes gateway restart
+sudo systemctl restart hermes-agent
 ```
 
 ### 第四步：测试智能体
@@ -146,9 +138,9 @@ hermes gateway restart
 cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
 ```
 
-> Fixed update command: the leading `git pull` fetches `update.sh` (so it works even on older installs), then `bash update.sh` completes  backup → pull → install deps → run migrations → healthcheck → restart (auto-detects the real service: hermes-gateway first, then hermes-agent). Whether this update is code-only or changes the schema, it upgrades losslessly and customer data is preserved — migrations are add-only and transactional (rollback on failure), so existing data is never dropped or modified.
+> Fixed update command: the leading `git pull` fetches `update.sh` (so it works even on older installs), then `bash update.sh` completes  backup → pull → install deps → run migrations → healthcheck → restart (auto-detects the running service: hermes-agent first, then hermes-gateway). Whether this update is code-only or changes the schema, it upgrades losslessly and customer data is preserved — migrations are add-only and transactional (rollback on failure), so existing data is never dropped or modified.
 >
-> Note: the script NEVER runs `git clean -fd` (would delete .env.db and the encryption key, making old customer data undecryptable). The restart auto-detects the running service (prefers hermes-gateway, compatible with hermes-agent).
+> Note: the script NEVER runs `git clean -fd` (would delete .env.db and the encryption key, making old customer data undecryptable). The restart auto-detects the running service (prefers hermes-agent, compatible with hermes-gateway).
 
 ### 部署健康自检
 
@@ -164,27 +156,27 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
 
 **启动服务：**
 ```bash
-sudo systemctl start hermes-gateway
+sudo systemctl start hermes-agent
 ```
 
 **停止服务：**
 ```bash
-sudo systemctl stop hermes-gateway
+sudo systemctl stop hermes-agent
 ```
 
 **重启服务：**
 ```bash
-sudo systemctl restart hermes-gateway
+sudo systemctl restart hermes-agent
 ```
 
 **查看状态：**
 ```bash
-sudo systemctl status hermes-gateway
+sudo systemctl status hermes-agent
 ```
 
 **查看日志（最近 50 行）：**
 ```bash
-sudo journalctl -u hermes-gateway -n 50 --no-pager
+sudo journalctl -u hermes-agent -n 50 --no-pager
 ```
 
 ### 数据库备份
@@ -226,7 +218,7 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py re
 
 **重启服务（发"你好"即完成迁移）：**
 ```bash
-sudo systemctl restart hermes-gateway
+sudo systemctl restart hermes-agent
 ```
 
 > 顺序说明：自动恢复数据库 → 图片 → 加密密钥（enc_key.txt 合并进 .env.db），任一步失败即中止并提示。密钥必须先于服务启动恢复，否则旧数据无法解密。
@@ -285,9 +277,9 @@ hermes model
 hermes setup
 ```
 
-**安装并启动后台服务：**
+**确认后台服务已运行：**
 ```bash
-hermes gateway install && hermes gateway start
+sudo systemctl status hermes-agent
 ```
 
 **第 4 步：恢复数据**
@@ -307,9 +299,9 @@ cd ~/hermes-agent && source venv/bin/activate
 python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
 ```
 
-**重启网关服务：**
+**重启服务：**
 ```bash
-systemctl --user restart hermes-gateway.service
+sudo systemctl restart hermes-agent
 ```
 
 **第 5 步：验证**
@@ -381,12 +373,12 @@ sudo systemctl start postgresql
 
 **查看服务状态：**
 ```bash
-sudo systemctl status hermes-gateway
+sudo systemctl status hermes-agent
 ```
 
 **查看日志（最近 50 行）：**
 ```bash
-journalctl -u hermes-gateway -n 50 --no-pager
+journalctl -u hermes-agent -n 50 --no-pager
 ```
 
 ### 飞书消息收不到
