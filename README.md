@@ -63,12 +63,12 @@ node -v
 
 然后执行一键安装（按服务器所在地区选一条，每条命令可单独复制）：
 
-**Gitee 源：**
+**国内服务器（Gitee 源）：**
 ```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 ```
 
-**GitHub 源：**
+**海外服务器（GitHub 源）：**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
@@ -265,7 +265,7 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 ```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 ```
-或（GitHub 源）：
+或（海外服务器 GitHub 源）：
 ```bash
 curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
