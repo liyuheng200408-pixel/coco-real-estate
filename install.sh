@@ -211,16 +211,22 @@ setup_config() {
     echo ""
     echo -e "${YELLOW}安装完成后的配置步骤：${NC}"
     echo ""
-    echo "1. 配置模型（选择厂商和输入API Key）:"
+    echo "1. 重新加载 shell（让 hermes 命令立即可用）:"
+    echo "   source ~/.bashrc"
+    echo ""
+    echo "2. 配置模型（选择厂商并输入 API Key）:"
     echo "   hermes model"
     echo ""
-    echo "2. 配置飞书（输入 App ID 和 App Secret）:"
+    echo "3. 配置飞书（输入 App ID 和 App Secret）:"
     echo "   hermes setup"
     echo ""
     echo -e "${GREEN}服务已由安装脚本自动注册并启动，配置完成后智能体会自动连接飞书。${NC}"
     echo ""
-    echo "首次在飞书给智能体发消息会收到配对码，在服务器执行以下命令完成配对:"
+    echo "4. 首次在飞书给智能体发消息会收到配对码，在服务器执行以下命令完成配对:"
     echo "   hermes pairing approve feishu <配对码>"
+    echo ""
+    echo "提示: 若执行第 1 步后仍提示 hermes: command not found，手动补一次命令入口:"
+    echo "   sudo ln -sf $INSTALL_DIR/venv/bin/hermes /usr/local/bin/hermes"
     echo ""
     
     # 复制 SOUL.md 身份文件（确保 ~/.hermes 存在）
@@ -316,9 +322,35 @@ start_service() {
         ok "服务已在后台启动"
     fi
     
-    # 创建 hermes 命令软链接
-    ln -sf "$INSTALL_DIR/venv/bin/hermes" /usr/local/bin/hermes 2>/dev/null || true
-    ok "hermes 命令已添加到系统路径"
+    # 创建 hermes 命令入口（2026-09-16 修：原来缺 sudo 且静默吞错，普通用户装完 hermes 不可用）
+    # 照官方的思路：能写 /usr/local/bin 就放那儿；不行退回 ~/.local/bin 并补 PATH；都失败才告警
+    HERMES_BIN="$INSTALL_DIR/venv/bin/hermes"
+    if [[ -x "$HERMES_BIN" ]]; then
+        LINKED=0
+        if [[ -w /usr/local/bin ]] && ln -sf "$HERMES_BIN" /usr/local/bin/hermes 2>/dev/null; then
+            ok "hermes 命令已就绪：/usr/local/bin/hermes"
+            LINKED=1
+        elif command -v sudo >/dev/null 2>&1 && sudo ln -sf "$HERMES_BIN" /usr/local/bin/hermes 2>/dev/null; then
+            ok "hermes 命令已就绪：/usr/local/bin/hermes"
+            LINKED=1
+        fi
+        if [[ $LINKED == 0 ]]; then
+            mkdir -p "$HOME/.local/bin"
+            if ln -sf "$HERMES_BIN" "$HOME/.local/bin/hermes" 2>/dev/null; then
+                ok "hermes 命令已就绪：$HOME/.local/bin/hermes"
+                LINKED=1
+                if ! grep -qs '\.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+                    printf '\n# Coco: hermes 命令所在目录\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"
+                    ok "已写入 PATH 到 ~/.bashrc（source ~/.bashrc 后生效）"
+                fi
+            fi
+        fi
+        if [[ $LINKED == 0 ]]; then
+            warn "hermes 命令未能创建，请手动执行: sudo ln -sf $HERMES_BIN /usr/local/bin/hermes"
+        fi
+    else
+        warn "未找到 $HERMES_BIN —— hermes 命令不可用（安装可能未完成）"
+    fi
     
     # 创建备份目录并设置定时备份
     mkdir -p ~/backups/real_estate
