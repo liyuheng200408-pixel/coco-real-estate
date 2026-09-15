@@ -61,7 +61,7 @@ sudo apt install -y nodejs
 node -v
 ```
 
-然后执行一键安装（自动选源：国内走 Gitee，海外自动切 GitHub，一条命令通用）：
+然后执行一键安装（自动选源：Gitee 优先，失败自动切 GitHub）：
 
 ```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh || curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh; bash install.sh
@@ -255,7 +255,7 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 
 **第 3 步：全新安装**（装完不要手动改任何环境，验证 install.sh 补丁是否生效）
 
-一键安装（自动选源：国内走 Gitee，海外自动切 GitHub）：
+一键安装（自动选源：Gitee 优先，失败自动切 GitHub）：
 ```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh || curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh; bash install.sh
 ```
