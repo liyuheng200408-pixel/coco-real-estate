@@ -356,7 +356,9 @@ print_result() {
     echo ""
     # 版本号直接读仓库根 VERSION 文件（2026-08-29 加）：以后只改 VERSION，安装终端自动同步，无需再改这里
     COCO_VER=$(cat "$INSTALL_DIR/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "未知")
-    echo -e "版本: ${BLUE}v${COCO_VER}${NC}"
+    # 版本号形如 0.21.3-1：前半段是官方底座，后半段是 Coco 自己的第 N 次发行
+    COCO_BASE="${COCO_VER%%-*}"
+    echo -e "版本: ${BLUE}v${COCO_VER}${NC}  （底座官方 Hermes ${COCO_BASE}）"
     echo -e "安装目录: ${BLUE}$INSTALL_DIR${NC}"
     echo -e "配置文件: ${BLUE}$INSTALL_DIR/.env${NC}"
     echo ""

@@ -79,6 +79,15 @@ python3 scripts/check_coco_hooks.py    # 24 项应全 PASS
      `systemctl show -p MainPID --value hermes-gateway | xargs -I{} sudo cat /proc/{}/environ | tr '\0' '\n' | grep DATABASE_URL`
 3. 确认无误后，再通知其他经纪人更新。
 
+### 版本号规则（派生版本号）
+Coco 版本号格式：`<官方底座版本>-<Coco 第几次发行>`，例如 **`0.21.3-1`**。
+
+- 同步到官方 0.22.0 后 → `0.22.0-1`；同一底座下再发一版 → `0.21.3-2`
+- **不出现裸的 `0.21.3`**（避免与官方原版混淆）
+- 改版本号只需改仓库根 `VERSION` 一个文件（install.sh / update.sh 自动读取并显示底座）
+- `UPSTREAM_VERSION` 文件仍保留官方 tag（`v2026.9.14`），供 CI 比对，格式不要改
+- 发版时记得同步：README 中英文徽章 + 博客 id=70 + GitHub Release
+
 ### 第 7 步｜发版与记账
 ```bash
 # 更新 VERSION、打标签、推送双仓库

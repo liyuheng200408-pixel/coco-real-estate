@@ -26,6 +26,7 @@
 | 05 | `hermes_cli/config_defaults.py` | 压缩阈值 `threshold` 0.50→**0.8**、`protect_last_n` 20→**40** |
 | 06 | `plugins/platforms/feishu/adapter.py` | 首次对话三件事：发欢迎语、发加密密钥备份提醒、自动注册定时任务 |
 | 07 | `gateway/run_turn.py`（官方 v0.21 起从 `gateway/run.py` 拆到这里） | 首次对话开场白换成 Coco 自我介绍；关闭官方 profile-build 引导 |
+| 08 | `scripts/sandbox/pick-release-tags.sh` | 标签过滤正则放宽：同时认「日期式 `vYYYY.M.D`」和「语义化 `vX.Y.Z`（含 `-N` 后缀）」 |
 
 另有 2 个**自有文档**（不属于官方代码，同步时直接保留即可）：
 `README.md`、`README.zh-CN.md`。
@@ -85,6 +86,14 @@
   否则问"你是谁"会得到官方默认回答。
 - **上游变了怎么办**：gateway/run.py 是官方改动最频繁的文件之一（同期 2,000+
   提交）。定位新版"首次对话/开场白"的逻辑点重新挂钩，不要试图保留旧代码块。
+
+### 08 scripts/sandbox/pick-release-tags.sh —— CI 挑标签的正则
+- **改什么**：把只认日期式 `vYYYY.M.D` 的 grep 正则，放宽为同时认语义化版本
+  （`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$`）。
+- **为什么**：Coco 的发布标签是 `v0.21.3-1` 这种语义化格式，不是官方的日期式。
+  不改这条，继承自官方的 install-e2e 工作流会报 `no release tags found`。
+- **上游变了怎么办**：只要 Coco 还用语义化标签，这个放宽就必须保留；
+  官方若改了该脚本的挑标签方式，按新方式重新放宽。
 
 ## 使用方法（同步时）
 
