@@ -4,7 +4,7 @@
 
 [![Coco v0.21.3-1](https://img.shields.io/badge/Coco%20AI-v0.21.3--1-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-1)
 
-> 🏷️ **当前版本：v0.21.3-1**（基于官方 Hermes v0.21.3 的第 1 次发行） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-1)
+> 🏷️ **当前版本：v0.21.3-1**（基于官方 Hermes v0.21.3） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-1)
 
 ## ⚠️ 免责声明
 
