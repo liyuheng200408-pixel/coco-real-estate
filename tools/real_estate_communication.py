@@ -95,7 +95,6 @@ def use_template(
     return json.dumps({"success": True, "template": template_name, "message": message}, ensure_ascii=False)
 
 
-# 注册工具
 registry.register(
     name="get_script",
     toolset="real_estate",

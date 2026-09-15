@@ -103,7 +103,6 @@ def list_policy_cities(task_id: str = None) -> str:
     }, ensure_ascii=False)
 
 
-# 注册工具
 registry.register(
     name="get_loan_policy",
     toolset="real_estate",
