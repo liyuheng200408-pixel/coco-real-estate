@@ -104,6 +104,15 @@ CONTENT_CHECKS = [
         "处理：放宽 grep 正则为 '^v[0-9]{4}...|^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9]+)?$'，\n"
         "      否则继承自官方的 install-e2e 会报 no release tags found。",
     ),
+    (
+        "09",
+        "核心依赖 ddgs",
+        "pyproject.toml",
+        [r'"ddgs'],
+        "ddgs 被官方快照覆盖后，pip install -e . 不会装它 → web_search 注册时的\n"
+        "check_fn 检测不到后端、工具被隐藏，Coco 联网查政策会退化成「建议咨询当地」。\n"
+        "处理：在 dependencies 里补回 \"ddgs==<版本>\"，并确认 install.sh 里也有它。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示

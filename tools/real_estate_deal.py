@@ -98,7 +98,6 @@ def deal_stats(task_id: str = None) -> str:
     return json.dumps({"success": True, "stats": stats}, ensure_ascii=False)
 
 
-# 注册工具
 registry.register(
     name="start_deal",
     toolset="real_estate",

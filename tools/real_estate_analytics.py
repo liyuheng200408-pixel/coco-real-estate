@@ -125,7 +125,6 @@ def weekly_market_report(
     return json.dumps({"success": True, "report": result}, ensure_ascii=False)
 
 
-# 注册工具
 registry.register(
     name="performance_dashboard",
     toolset="real_estate",

@@ -192,7 +192,6 @@ def customer_stats(task_id: str = None) -> str:
     return json.dumps({"success": True, "stats": stats}, ensure_ascii=False)
 
 
-# 注册工具
 TOOLS = [
     {"name": "add_customer", "description": "添加新客户到系统", "parameters": {
         "type": "object",
@@ -364,7 +363,6 @@ def list_customer_tags(
     return json.dumps({"success": True, "customer_id": customer_id, "tags": tag_list}, ensure_ascii=False)
 
 
-# 注册新工具
 registry.register(
     name="add_customer_tag",
     toolset="real_estate",

@@ -138,7 +138,7 @@ hermes gateway restart
 
 ## 🔧 常用命令
 
-### Update
+### 更新版本
 
 一键无损更新（备份 → 拉码 → 装依赖 → 跑迁移 → 自检 → 重启服务）：
 
@@ -150,7 +150,7 @@ cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update
 >
 > Note: the script NEVER runs `git clean -fd` (would delete .env.db and the encryption key, making old customer data undecryptable). The restart auto-detects the running service (prefers hermes-gateway, compatible with hermes-agent).
 
-### Deployment Health Check
+### 部署健康自检
 
 安装或更新后，一条命令体检（依赖 / 服务 / 联网搜索后端 / 数据库 / 密钥 / 定时任务）：
 
