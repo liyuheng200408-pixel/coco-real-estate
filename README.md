@@ -111,6 +111,12 @@ hermes model
 hermes setup
 ```
 
+5. 重启服务，让刚写入的配置生效（**网关只在启动时读取一次配置，配完不重启机器人不会响应**）：
+
+```bash
+sudo systemctl restart hermes-agent
+```
+
 ### 第三步：确认服务已运行
 
 一键安装脚本已自动把 Coco 注册为系统服务（`hermes-agent`）并启动，无需手动安装。关掉终端后它仍在后台运行，飞书消息正常收发。
