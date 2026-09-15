@@ -44,15 +44,17 @@ bash scripts/sync_upstream.sh v2026.9.14   # 换成实际的官方版本 tag
 | 04 | `agent/agent_init.py` | CLI 初始化入口位置 |
 | 05 | `hermes_cli/config_defaults.py` | 压缩阈值 0.8 / protect_last_n 40 |
 | 06 | `plugins/platforms/feishu/adapter.py` | 欢迎语 + 密钥提醒 + 注册定时任务，三件都要 |
-| 07 | `gateway/run.py` | 开场白 + 关闭官方 profile-build 引导 |
+| 07 | `gateway/run_turn.py` | 开场白 + 关闭官方 profile-build 引导 |
 
 ### 第 4 步｜自检 + 处理部署体系
 ```bash
 python3 scripts/check_coco_hooks.py    # 24 项应全 PASS
 ```
 再检查官方是否改动了这些**我们自建**的东西所依赖的机制：
-- [ ] `install.sh` 的网关环境补丁（`setup_gateway_env_patch`）：官方若改了
-      `hermes gateway install` 的机制，补丁可能失效 → **幽灵库事故会重现**
+- [ ] `install.sh` 的网关环境补丁（`setup_gateway_env_patch`）：该补丁给
+      `hermes gateway install` 生成的用户服务补 EnvironmentFile；新装实例跑的是系统服务
+      （自带 EnvironmentFile），补丁仅作老实例兼容。官方若改了 gateway install 机制，
+      补丁可能失效 → **幽灵库事故会重现**
       （症状：机器人回复"登记成功"，库里却没有数据）
 - [ ] `scripts/update.sh` 的 7 步流程是否仍然适用
 - [ ] `scripts/migrate.py` 的迁移执行器与官方数据库结构是否冲突
@@ -76,7 +78,7 @@ python3 scripts/check_coco_hooks.py    # 24 项应全 PASS
    - [ ] 飞书里 Coco 自我介绍正确（不是官方默认文案）
    - [ ] 房产工具可用（例如"看下房源统计"）
    - [ ] **网关进程环境里有 DATABASE_URL**（防幽灵库）：
-     `systemctl show -p MainPID --value hermes-gateway | xargs -I{} sudo cat /proc/{}/environ | tr '\0' '\n' | grep DATABASE_URL`
+     `systemctl show -p MainPID --value hermes-agent | xargs -I{} sudo cat /proc/{}/environ | tr '\0' '\n' | grep DATABASE_URL`
 3. 确认无误后，再通知其他经纪人更新。
 
 ### 版本号规则（派生版本号）
