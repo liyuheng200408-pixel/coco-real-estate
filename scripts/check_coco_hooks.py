@@ -94,6 +94,16 @@ CONTENT_CHECKS = [
         "首次对话开场白变回官方文案（并可能带回官方 profile-build 引导）。"
         "处理：按 patches/07-gateway-run-greeting.patch 恢复。",
     ),
+    (
+        "08",
+        "CI 挑标签正则",
+        "scripts/sandbox/pick-release-tags.sh",
+        # 只在「放宽后」才存在的特征串；被官方版覆盖后会立刻 FAIL
+        [r"\(-\[0-9\]\+\)\?"],
+        "Coco 用语义化标签（v0.21.3-1），正则应同时认日期式与语义化。\n"
+        "处理：放宽 grep 正则为 '^v[0-9]{4}...|^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9]+)?$'，\n"
+        "      否则继承自官方的 install-e2e 会报 no release tags found。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示

@@ -48,6 +48,8 @@ HOOK_FILES=(
   "hermes_cli/config_defaults.py"
   "plugins/platforms/feishu/adapter.py"
   "gateway/run.py"
+  # 第 8 处：CI 挑标签的正则（2026-09-15 同步时被官方版冲掉，实测教训）
+  "scripts/sandbox/pick-release-tags.sh"
 )
 
 # Coco 重写过、但官方也有同名文件：**跳过替换**，保住我们自己的版本。
