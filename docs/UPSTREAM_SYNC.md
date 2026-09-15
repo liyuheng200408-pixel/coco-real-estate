@@ -100,6 +100,24 @@ bash scripts/push_all.sh
 
 ## 二、每次必查清单（对应过去的真实事故）
 
+**第一件事：全量扫一遍「被静默覆盖」的内容**（2026-09-15 靠这招抓出 SOUL.md 与 pyproject 的 ddgs 依赖被冲）：
+
+```bash
+# 同步前含中文的文件 vs 现在含中文的文件，差集 ≈ 被官方版替换掉的我们的内容
+git grep -l -P '[\x{4e00}-\x{9fff}]' <同步前的 tag> | sed 's/^[^:]*://' | sort > /tmp/old_zh.txt
+git grep -l -P '[\x{4e00}-\x{9fff}]' HEAD | sed 's/^[^:]*://' | sort > /tmp/new_zh.txt
+comm -23 /tmp/old_zh.txt /tmp/new_zh.txt    # 逐个确认：是「我们被覆盖」还是「官方自身演进」
+```
+
+判断口径：官方自身演进常见于 i18n、钉钉/企微/编辑器类适配器；**与我们相关的（身份文案、依赖、README、脚本注释）中文消失就是被覆盖**。
+
+**第二件事：逐项核对依赖**——官方同步会整体替换 `pyproject.toml`，我们加的依赖会被冲掉：
+
+```bash
+grep -c '"ddgs' pyproject.toml    # 应为 1；为 0 说明被冲（ddgs 没了 web_search 会失效）
+```
+
+
 - [ ] **配置版本号**：官方 `_config_version` 变了没？（对照
       `hermes_cli/config_defaults.py` 的 `"_config_version"` 值）
       变了就确认 `scripts/update.sh` 里有跑 `hermes config migrate`。
