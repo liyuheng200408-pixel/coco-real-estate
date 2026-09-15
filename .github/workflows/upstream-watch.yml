@@ -25,7 +25,7 @@ jobs:
   watch-upstream:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 读取当前已同步的官方版本
         id: current
