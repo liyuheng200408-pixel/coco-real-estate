@@ -74,8 +74,11 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 ### 第 3 步：在新服务器上一键安装
 
 ```bash
-# 一键安装（自动选源：Gitee 优先，失败自动切 GitHub）
-curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh || curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh; bash install.sh
+# 按服务器所在地区选一条
+# Gitee 源：
+curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
+# GitHub 源：
+# curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
 
 安装完成后按提示做两件配置（安装脚本会打印说明）：
@@ -177,8 +180,11 @@ cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_esta
 scp root@旧IP:/root/coco_migration.tar.gz ~/Desktop/
 
 # 新服务器一键安装
-# 一键安装（自动选源：Gitee 优先，失败自动切 GitHub）
-curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh || curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh; bash install.sh
+# 按服务器所在地区选一条
+# Gitee 源：
+curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
+# GitHub 源：
+# curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 
 # 新服务器配置（装完提示时做）
 cd ~/hermes-agent && source venv/bin/activate

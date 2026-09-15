@@ -61,10 +61,16 @@ sudo apt install -y nodejs
 node -v
 ```
 
-然后执行一键安装（自动选源：Gitee 优先，失败自动切 GitHub）：
+然后执行一键安装（按服务器所在地区选一条，每条命令可单独复制）：
 
+**Gitee 源：**
 ```bash
-curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh || curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh; bash install.sh
+curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
+```
+
+**GitHub 源：**
+```bash
+curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
 
 这个脚本会自动完成所有安装步骤（检测系统环境、安装依赖、克隆代码、创建数据库、注册服务并启动）。
@@ -255,9 +261,13 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 
 **第 3 步：全新安装**（装完不要手动改任何环境，验证 install.sh 补丁是否生效）
 
-一键安装（自动选源：Gitee 优先，失败自动切 GitHub）：
+按服务器所在地区选一条安装：
 ```bash
-curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh || curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh; bash install.sh
+curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
+```
+或（GitHub 源）：
+```bash
+curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
 装好后按顺序配置：
 **激活项目环境：**
