@@ -11,6 +11,10 @@
 # 不做什么（安全边界）：
 #   · 不动未跟踪的运行时文件（.env.db / 加密密钥 / 缓存）
 #   · 不自动删除文件（官方删掉的文件只列出来，由人确认）
+#     实现方式：每次同步把「官方文件清单」存进 .sync-baseline/upstream_files.txt；
+#     下次同步与它对比，即可精确算出「官方这次删了/改名了哪些文件」、「其中本地还留着几个」，
+#     避免官方已删的旧文件在本地越堆越多（堆积会让构建/导入读到过时版本）。
+#       · 只增不减的 rsync 无法发现这类残留，靠这份基线才能发现
 #   · 不自动 git commit / push（验收通过后由人/上级流程提交）
 #
 # 用法：
@@ -125,7 +129,21 @@ LOCAL_ONLY=$(wc -l < "$SNAP/local_only.txt")
 
 echo "  内容有变化 : $CHANGED 个文件"
 echo "  官方新增   : $NEW 个文件"
-echo "  本地独有   : $LOCAL_ONLY 个（Coco 自有文件，将被完整保留）"
+echo "  本地独有   : $LOCAL_ONLY 个（Coco 自有文件 + 官方已删的历史残留，下面会分开报告）"
+
+# ---- 2b. 官方删除清单（与上次同步记录的官方文件清单对比）--------------------
+BASELINE_FILE="$REPO_ROOT/.sync-baseline/upstream_files.txt"
+UP_DELETED=0; STALE_LOCAL=0
+if [[ -f "$BASELINE_FILE" ]]; then
+  comm -23 <(sort "$BASELINE_FILE") "$SNAP/up_all.txt" > "$SNAP/upstream_deleted.txt"
+  UP_DELETED=$(wc -l < "$SNAP/upstream_deleted.txt")
+  comm -12 <(sort "$SNAP/upstream_deleted.txt") <(cd "$REPO_ROOT" && git ls-files | sort) \
+    > "$SNAP/stale_in_local.txt"
+  STALE_LOCAL=$(wc -l < "$SNAP/stale_in_local.txt")
+  echo "  官方删/改名: $UP_DELETED 个（其中本地仍留着 $STALE_LOCAL 个旧文件）"
+else
+  echo "  官方删/改名: 未计算（尚无 .sync-baseline/upstream_files.txt，本次同步会建立基线）"
+fi
 
 echo
 echo "  --- 需要重新应用 Coco 改动的挂钩点（本次会被换成官方新版）---"
@@ -143,6 +161,10 @@ if [[ $DRY_RUN == 1 ]]; then
   echo "  变化文件清单: $SNAP/changed.txt"
   echo "  新增文件清单: $SNAP/new.txt"
   echo "  自有文件清单: $SNAP/local_only.txt"
+  if [[ $UP_DELETED -gt 0 ]]; then
+    echo "  官方删除清单: $SNAP/upstream_deleted.txt"
+    echo "  本地残留清单: $SNAP/stale_in_local.txt（$STALE_LOCAL 个，需人工确认后删）"
+  fi
   echo
   echo "确认无误后去掉 --dry-run 执行真实同步。"
   exit 0
@@ -156,6 +178,7 @@ for f in "${HOOK_FILES[@]}"; do
   [[ -f "$f" ]] && { mkdir -p "$BACKUP/$(dirname "$f")"; cp -a "$f" "$BACKUP/$f"; }
 done
 cp -a "$SNAP/local_only.txt" "$BACKUP/local_only_files.txt" 2>/dev/null || true
+cp -a "$SNAP/stale_in_local.txt" "$BACKUP/stale_in_local.txt" 2>/dev/null || true
 ok "挂钩点文件已备份到 .sync-backup/$STAMP/"
 
 if git rev-parse -q --verify "refs/tags/pre-sync-$STAMP" >/dev/null 2>&1; then
@@ -188,6 +211,11 @@ else
 fi
 ok "官方层已替换（Coco 自有文件与自有文档均未受影响）"
 
+# ---- 4b. 更新官方文件清单基线（供下次同步做删除对比）------------------------
+mkdir -p "$REPO_ROOT/.sync-baseline"
+cp -a "$SNAP/up_all.txt" "$BASELINE_FILE"
+ok "官方文件清单基线已更新（.sync-baseline/upstream_files.txt：$UP_FILES 条）"
+
 # ---- 5. 报告 ---------------------------------------------------------------
 git add -A >/dev/null 2>&1 || true
 ADDED=$(git diff --cached --numstat --diff-filter=A | wc -l)
@@ -217,8 +245,15 @@ echo
 echo "  ④ 验收通过后再提交推送（脚本不替你决定）："
 echo "       git commit -m 'chore: 同步官方 $TAG'"
 echo
-echo "  官方这次删掉的、但本地还在的文件（需人工确认是否保留）："
-comm -13 "$SNAP/up_all.txt" <(cd "$REPO_ROOT" && git ls-files) 2>/dev/null | head -5
-echo "      （完整清单：$SNAP/up_all.txt 与 git ls-files 的差集）"
+if [[ $UP_DELETED -gt 0 ]]; then
+  echo "  官方这次删掉/改名、本地还留着的旧文件：$STALE_LOCAL 个（需人工确认后删除）"
+  if [[ $STALE_LOCAL -gt 0 ]]; then
+    head -8 "$SNAP/stale_in_local.txt" | sed 's|^|      · |'
+    [[ $STALE_LOCAL -gt 8 ]] && echo "      …（完整清单：$BACKUP/stale_in_local.txt）"
+    echo "      核对无误后删除：git rm --pathspec-from-file=$SNAP/stale_in_local.txt"
+  fi
+else
+  echo "  官方这次没有删除/改名文件（或基线文件尚未建立）"
+fi
 echo
 warn "回滚方式：git reset --hard pre-sync-$STAMP"
