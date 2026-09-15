@@ -61,14 +61,14 @@ sudo apt install -y nodejs
 node -v
 ```
 
-Then run one-click install (pick one for your region; each command can be copied separately):
+然后执行一键安装（按服务器所在地区选一种，每条命令可单独复制）：
 
-**Domestic server (Gitee source, recommended):**
+**国内服务器（Gitee 源，推荐）：**
 ```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 ```
 
-**Overseas server (GitHub source):**
+**海外服务器（GitHub 源）：**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
@@ -140,7 +140,7 @@ hermes gateway restart
 
 ### Update
 
-One-command lossless update (backup → pull → install deps → run migrations → healthcheck → restart):
+一键无损更新（备份 → 拉码 → 装依赖 → 跑迁移 → 自检 → 重启服务）：
 
 ```bash
 cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
@@ -261,15 +261,15 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 
 **第 3 步：全新安装**（装完不要手动改任何环境，验证 install.sh 补丁是否生效）
 
-Pick one install command for your region (each can be copied separately):
+按服务器所在地区选一种命令安装（每条可单独复制）：
 ```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 ```
-Or (overseas GitHub source):
+或（海外服务器 GitHub 源）：
 ```bash
 curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
-Then configure in order:
+装好后按顺序配置：
 **激活项目环境：**
 ```bash
 cd ~/hermes-agent && source venv/bin/activate
