@@ -40,7 +40,7 @@ if [[ ! -x "$VENV_PY" ]]; then
   exit 1
 fi
 
-info "[1/7] 前置检查：git 工作区"
+info "[1/8] 前置检查：git 工作区"
 if [[ -n "$(git status --porcelain)" ]]; then
   # 允许"未跟踪"运行时文件（.env.db / 缓存等）；但"已跟踪文件被改动"则拒绝，避免覆盖
   if [[ -n "$(git status --porcelain | grep -vE '^\?\?')" ]]; then
@@ -51,7 +51,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 ok "工作区干净；本脚本绝不运行 git clean（不删 .env.db / 加密密钥等未跟踪文件）"
 
-info "[2/7] 备份数据库（安全网，可回滚到更新前）"
+info "[2/8] 备份数据库（安全网，可回滚到更新前）"
 if [[ "$SKIP_BACKUP" == "1" ]]; then
   echo "  已跳过备份（--skip-backup）"
 else
@@ -59,22 +59,28 @@ else
   ok "已生成恢复点（~/backups/real_estate/）"
 fi
 
-info "[3/7] 拉取最新代码（git pull --ff-only）"
+info "[3/8] 拉取最新代码（git pull --ff-only）"
 git pull --ff-only
 ok "代码已更新"
 
-info "[4/7] 安装 / 更新 Python 依赖（pip install -e .）"
+info "[4/8] 安装 / 更新 Python 依赖（pip install -e .）"
 "$VENV_PY" -m pip install -e . -q
 ok "依赖已就绪"
 
-info "[5/7] 应用数据库迁移（只增不删、事务、失败回滚）"
+info "[5/8] 应用数据库迁移（只增不删、事务、失败回滚）"
 "$VENV_PY" scripts/migrate.py
 ok "数据库迁移检查完成（若提示'数据库已是最新'即无表结构变更）"
 
-info "[6/7] 部署健康自检"
+info "[6/8] 迁移配置文件（官方底座升级后需要，非交互式）"
+# 官方配置带版本号（_config_version）；底座升级后旧配置会落后（实测 33 → 44）。
+# 官方命令 hermes config migrate 是交互式的，在无人值守更新里会卡住，故走本脚本。
+"$VENV_PY" scripts/migrate_config.py || echo "  警告：配置迁移步骤异常，不阻断更新"
+ok "配置迁移步骤完成"
+
+info "[7/8] 部署健康自检"
 "$VENV_PY" scripts/healthcheck.py || echo "  警告：健康自检存在 FAIL 项，请查看上方提示"
 
-info "[7/7] 重启服务（以 hermes-gateway 用户服务为准，兼容 hermes-agent）"
+info "[8/8] 重启服务（以 hermes-gateway 用户服务为准，兼容 hermes-agent）"
 if [[ "$NO_RESTART" == "1" ]]; then
   echo "  已跳过重启（--no-restart），请稍后手动重启。"
 else

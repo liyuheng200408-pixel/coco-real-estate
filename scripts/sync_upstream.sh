@@ -50,6 +50,17 @@ HOOK_FILES=(
   "gateway/run.py"
 )
 
+# Coco 重写过、但官方也有同名文件：**跳过替换**，保住我们自己的版本。
+# （2026-09-15 实测教训：第一次同步时没排除，README 被官方版覆盖，Coco 中文介绍丢失，
+#   只能用 pre-sync tag 找回。）
+COCO_OWNED_KEEP=(
+  "README.md"
+  "README.zh-CN.md"
+  "SOUL.md"
+  "VERSION"
+  "UPSTREAM_VERSION"
+)
+
 info(){ echo -e "\033[1;34m==>\033[0m $*"; }
 ok(){   echo -e "\033[1;32m  OK\033[0m $*"; }
 warn(){ echo -e "\033[1;33m  !!\033[0m $*"; }
@@ -153,17 +164,27 @@ fi
 
 # ---- 4. 替换官方层文件（不动本地独有文件、不删除）-------------------------
 info "替换官方层文件"
+# Coco 自己重写过的同名文件不替换（见上方 COCO_OWNED_KEEP 说明）
+KEEP_ARGS=()
+for keep in "${COCO_OWNED_KEEP[@]}"; do
+  KEEP_ARGS+=("--exclude=/$keep")
+  [[ "$keep" == */* ]] && KEEP_ARGS+=("--exclude=/$keep")
+  echo "  跳过（保留 Coco 自有版本）: $keep"
+done
 if command -v rsync >/dev/null 2>&1; then
-  rsync -a --exclude='.git/' "$SNAP/up/" "$REPO_ROOT/"
+  rsync -a --exclude='.git/' "${KEEP_ARGS[@]}" "$SNAP/up/" "$REPO_ROOT/"
 else
   (cd "$SNAP/up" && find . -type f -exec sh -c '
       for src; do
         rel="${src#./}"
+        case "$rel" in
+          README.md|README.zh-CN.md|SOUL.md|VERSION|UPSTREAM_VERSION) continue ;;
+        esac
         mkdir -p "'"$REPO_ROOT"'/$(dirname "$rel")"
         cp -a "$src" "'"$REPO_ROOT"'/$rel"
       done' _ {} +)
 fi
-ok "官方层已替换（Coco 自有文件未受影响）"
+ok "官方层已替换（Coco 自有文件与自有文档均未受影响）"
 
 # ---- 5. 报告 ---------------------------------------------------------------
 git add -A >/dev/null 2>&1 || true

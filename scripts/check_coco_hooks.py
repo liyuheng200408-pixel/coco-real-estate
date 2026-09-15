@@ -86,8 +86,11 @@ CONTENT_CHECKS = [
     (
         "07",
         "网关首次对话开场白",
-        "gateway/run.py",
-        [r"Coco first-contact|我是 Coco|你是 Coco|Coco（可可）"],
+        # 注意：官方 v0.21 把这段逻辑从 gateway/run.py 拆到了 gateway/run_turn.py
+        # 的 _hmwa_first_contact_notes()。官方将来再拆分时，按同样方式更新这里的路径
+        # （找不到文件即 FAIL，会提醒我们重新定位）。
+        "gateway/run_turn.py",
+        [r"我是 Coco|你是 Coco|Coco（可可）"],
         "首次对话开场白变回官方文案（并可能带回官方 profile-build 引导）。"
         "处理：按 patches/07-gateway-run-greeting.patch 恢复。",
     ),

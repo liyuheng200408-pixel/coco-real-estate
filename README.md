@@ -2,9 +2,9 @@
 
 > 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
-[![Coco v1.0.0](https://img.shields.io/badge/Coco%20AI-v1.0.0-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v1.0.0)
+[![Coco v2.0.0](https://img.shields.io/badge/Coco%20AI-v2.0.0-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v2.0.0)
 
-> 🏷️ **当前版本：v1.0.0**（首个双源稳定版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v1.0.0)
+> 🏷️ **当前版本：v2.0.0**（底座同步到官方 Hermes v0.21.3） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v2.0.0)
 
 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
@@ -91,7 +91,7 @@ source ~/.bashrc
 hermes --version
 ```
 
-如果能看到版本号（例如 hermes v0.20.0），就说明核心程序安装成功了。
+如果能看到版本号（例如 hermes v0.21.3），就说明核心程序安装成功了。
 
 3. 配置模型，这是最关键的一步，用来连接 AI 模型。你需要一个 API Key（DeepSeek API Key 购买：[https://platform.deepseek.com/usage](https://platform.deepseek.com/usage)）：
 
