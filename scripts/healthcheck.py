@@ -26,12 +26,13 @@ import sys
 import time
 
 INSTALL_DIR = os.environ.get("HERMES_AGENT_DIR", os.path.expanduser("~/hermes-agent"))
-# 2026-08-12 真实事故后适配：真正跑 Coco 的是 hermes-gateway（systemd 用户服务，
-# hermes gateway install 生成），install.sh 的 hermes-agent（系统服务）仅作备选。
-# 顺序：先查用户服务 hermes-gateway，再查系统服务 hermes-agent。
-SERVICE = "hermes-gateway"
-SERVICE_USER = True  # 用户服务需 systemctl --user
-SERVICE_FALLBACK = "hermes-agent"  # 系统服务（install.sh 注册，已停用时可作提示）
+# 主服务是 install.sh 注册的 hermes-agent 系统服务（EnvironmentFile 已注入数据库环境、
+# 自带开机自启）；hermes gateway install 生成的 hermes-gateway 用户服务作备选，兼容老部署。
+# 顺序：先查系统服务 hermes-agent，再查用户服务 hermes-gateway。
+SERVICE = "hermes-agent"
+SERVICE_USER = False  # 系统服务用 systemctl（不加 --user）
+SERVICE_FALLBACK = "hermes-gateway"  # 用户服务（hermes gateway install 生成）
+SERVICE_FALLBACK_USER = True  # 备选是用户服务，需 systemctl --user
 HERMES_HOME = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
 
 PASS = FAIL = WARN = 0
@@ -104,7 +105,7 @@ if os.path.isdir(os.path.join(INSTALL_DIR, ".git")):
     rc, behind = sh(f"git -C {INSTALL_DIR} rev-list --count HEAD..origin/master 2>/dev/null")
     if rc and behind.isdigit() and int(behind) > 0:
         warn(f"代码落后远程 {behind} 个提交",
-             "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && systemctl --user restart hermes-gateway.service")
+             "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent.service")
     elif rc:
         ok("代码已是最新")
 else:
@@ -118,22 +119,23 @@ if rc:
     rc2, since = sh(f"systemctl {_user}show -p ActiveEnterTimestamp --value {SERVICE}")
     ok(f"服务 {SERVICE} 运行中" + (f"（自 {since}）" if rc2 and since else ""))
 else:
-    # 主服务未运行，查备选系统服务（老部署只有 hermes-agent）
-    rc3, _ = sh(f"systemctl is-active --quiet {SERVICE_FALLBACK}")
+    # 主服务未运行，查备选用户服务（老部署用 hermes gateway install 生成的那个）
+    _fb_user = "--user " if SERVICE_FALLBACK_USER else ""
+    rc3, _ = sh(f"systemctl {_fb_user}is-active --quiet {SERVICE_FALLBACK}")
     if rc3:
-        rc4, since2 = sh(f"systemctl show -p ActiveEnterTimestamp --value {SERVICE_FALLBACK}")
+        rc4, since2 = sh(f"systemctl {_fb_user}show -p ActiveEnterTimestamp --value {SERVICE_FALLBACK}")
         warn(
-            f"主服务 {SERVICE}（用户服务）未运行，但备选 {SERVICE_FALLBACK} 运行中",
-            f"推荐统一用 {SERVICE}：systemctl --user restart {SERVICE}；"
+            f"主服务 {SERVICE}（系统服务）未运行，但备选 {SERVICE_FALLBACK}（用户服务）运行中",
+            f"推荐统一用 {SERVICE}：sudo systemctl restart {SERVICE}；"
             f"若两者并存会互相冲突（2026-08-12 事故），停掉一个",
         )
         if rc4 and since2:
             print(f"        {SERVICE_FALLBACK} 自 {since2} 运行")
     else:
         bad(
-            f"服务 {SERVICE}（用户服务）与 {SERVICE_FALLBACK}（系统服务）均未运行",
-            f"systemctl --user start {SERVICE} 或 systemctl --user restart {SERVICE}；"
-            f"查看状态: systemctl --user status {SERVICE}",
+            f"服务 {SERVICE}（系统服务）与 {SERVICE_FALLBACK}（用户服务）均未运行",
+            f"sudo systemctl start {SERVICE}；"
+            f"查看状态: sudo systemctl status {SERVICE}",
         )
 
 # ---- 3. Python 依赖 ----
@@ -147,7 +149,7 @@ if not missing:
     ok("依赖齐全（ddgs/Pillow/qrcode/lark-oapi/sqlalchemy/psycopg2 等）")
 else:
     bad(f"缺少依赖: {', '.join(missing)}",
-        "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && systemctl --user restart hermes-gateway.service")
+        "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && sudo systemctl restart hermes-agent.service")
 
 # ---- 4. web_search 可用性 ----
 print("\n[4] web_search 联网搜索后端")

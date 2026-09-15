@@ -7,7 +7,7 @@
 ```bash
 cd ~/hermes-agent && source venv/bin/activate
 git pull && pip install -e . -q
-systemctl --user restart hermes-gateway.service
+sudo systemctl restart hermes-agent
 git log --oneline -1   # 确认版本
 python3 scripts/healthcheck.py        # 预期 PASS 11+ / FAIL 0
 python3 scripts/smoke_test_real_estate.py   # 预期 61 OK + 1 ERR(政策空库)

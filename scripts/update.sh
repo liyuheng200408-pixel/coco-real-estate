@@ -80,24 +80,24 @@ ok "配置迁移步骤完成"
 info "[7/8] 部署健康自检"
 "$VENV_PY" scripts/healthcheck.py || echo "  警告：健康自检存在 FAIL 项，请查看上方提示"
 
-info "[8/8] 重启服务（以 hermes-gateway 用户服务为准，兼容 hermes-agent）"
+info "[8/8] 重启服务（以 hermes-agent 系统服务为准，兼容 hermes-gateway）"
 if [[ "$NO_RESTART" == "1" ]]; then
   echo "  已跳过重启（--no-restart），请稍后手动重启。"
 else
   RESTARTED=0
   if command -v systemctl >/dev/null 2>&1; then
-    if systemctl --user is-active --quiet hermes-gateway.service 2>/dev/null; then
-      systemctl --user restart hermes-gateway.service
-      ok "已重启 hermes-gateway.service（用户服务）"
-      RESTARTED=1
-    elif systemctl is-active --quiet hermes-agent.service 2>/dev/null; then
+    if systemctl is-active --quiet hermes-agent.service 2>/dev/null; then
       sudo systemctl restart hermes-agent.service
       ok "已重启 hermes-agent.service（系统服务）"
+      RESTARTED=1
+    elif systemctl --user is-active --quiet hermes-gateway.service 2>/dev/null; then
+      systemctl --user restart hermes-gateway.service
+      ok "已重启 hermes-gateway.service（用户服务）"
       RESTARTED=1
     fi
   fi
   if [[ "$RESTARTED" == "0" ]]; then
-    err "未检测到在运行的 hermes-gateway / hermes-agent 服务，请手动重启以加载新代码。"
+    err "未检测到在运行的 hermes-agent / hermes-gateway 服务，请手动重启以加载新代码。"
   fi
 fi
 
