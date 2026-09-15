@@ -17,7 +17,10 @@ concurrency:
 jobs:
   e2e:
     name: Playwright E2E (Linux)
-    runs-on: ubuntu-latest
+    # This job builds the renderer and the electron bundle, then drives a real
+    # Electron app under xvfb. vite, tsc and the Playwright workers all scale
+    # with the core count.
+    runs-on: ubuntu-latest-32-core
     timeout-minutes: 20
     outputs:
       review_status: ${{ steps.review-status.outputs.review_status }}
@@ -124,7 +127,7 @@ jobs:
       # ── Save updated baselines to cache (main only) ───────────────────
       - name: Save updated baselines to cache
         if: github.ref_name == 'main' && always()
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: apps/desktop/e2e/*-snapshots
           key: visual-baselines-main

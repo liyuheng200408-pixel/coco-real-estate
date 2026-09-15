@@ -25,7 +25,7 @@
 | 04 | `agent/agent_init.py` | 启动时调用 `init_real_estate_db()` 初始化房产库 |
 | 05 | `hermes_cli/config_defaults.py` | 压缩阈值 `threshold` 0.50→**0.8**、`protect_last_n` 20→**40** |
 | 06 | `plugins/platforms/feishu/adapter.py` | 首次对话三件事：发欢迎语、发加密密钥备份提醒、自动注册定时任务 |
-| 07 | `gateway/run.py` | 首次对话开场白换成 Coco 自我介绍；关闭官方 profile-build 引导 |
+| 07 | `gateway/run_turn.py`（官方 v0.21 起从 `gateway/run.py` 拆到这里） | 首次对话开场白换成 Coco 自我介绍；关闭官方 profile-build 引导 |
 
 另有 2 个**自有文档**（不属于官方代码，同步时直接保留即可）：
 `README.md`、`README.zh-CN.md`。
