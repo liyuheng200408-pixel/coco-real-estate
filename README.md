@@ -75,13 +75,13 @@ curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-esta
 
 安装脚本执行成功后，你需要完成以下配置才能使用 Hermes。
 
-1. 刷新环境变量，为了让 hermes 命令立即生效：
+**1. 刷新环境变量**（让 hermes 命令立即生效）：
 
 ```bash
 source ~/.bashrc
 ```
 
-2. 验证安装，检查 hermes 命令是否可用：
+**2. 验证安装**（检查 hermes 命令是否可用）：
 
 ```bash
 hermes --version
@@ -89,19 +89,19 @@ hermes --version
 
 如果能看到版本号（例如 hermes v0.21.3），就说明核心程序安装成功了。
 
-3. 配置模型，这是最关键的一步，用来连接 AI 模型。你需要一个 API Key（DeepSeek API Key 购买：[https://platform.deepseek.com/usage](https://platform.deepseek.com/usage)）：
+**3. 配置模型**（最关键的一步，用来连接 AI 模型）。你需要一个 API Key（DeepSeek API Key 购买：[https://platform.deepseek.com/usage](https://platform.deepseek.com/usage)）：
 
 ```bash
 hermes model
 ```
 
-4. 运行配置向导（连接飞书，飞书开放平台：[https://open.feishu.cn/?lang=zh-CN](https://open.feishu.cn/?lang=zh-CN)）：
+**4. 配置飞书**（运行配置向导，飞书开放平台：[https://open.feishu.cn/?lang=zh-CN](https://open.feishu.cn/?lang=zh-CN)）：
 
 ```bash
 hermes setup
 ```
 
-5. 重启服务，让刚写入的配置生效（**网关只在启动时读取一次配置，配完不重启机器人不会响应**）：
+**5. 重启服务**，让刚写入的配置生效（网关只在启动时读取一次配置，配完不重启机器人不会响应）：
 
 ```bash
 hermes gateway restart
