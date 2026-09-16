@@ -125,9 +125,7 @@ hermes gateway restart
 cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
 ```
 
-> Fixed update command: the leading `git pull` fetches `update.sh` (so it works even on older installs), then `bash update.sh` completes  backup → pull → install deps → run migrations → healthcheck → restart (auto-detects the running service: hermes-gateway first, then hermes-agent). Whether this update is code-only or changes the schema, it upgrades losslessly and customer data is preserved — migrations are add-only and transactional (rollback on failure), so existing data is never dropped or modified.
->
-> Note: the script NEVER runs `git clean -fd` (would delete .env.db and the encryption key, making old customer data undecryptable). The restart auto-detects the running service (prefers hermes-gateway, compatible with hermes-agent).
+> The update backs up automatically — customer data is preserved and your encryption key is never deleted. Keep the `git pull` in the command (older installs need it to fetch the update script).
 
 ### 服务管理
 

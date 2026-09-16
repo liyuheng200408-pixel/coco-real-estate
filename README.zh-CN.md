@@ -123,9 +123,7 @@ hermes gateway restart
 cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
 ```
 
-> 固定更新命令：前面的 `git pull` 会把 `update.sh` 拉下来（老版本也能用），`bash update.sh` 一次完成 备份→拉码→装依赖→跑迁移→健康自检→重启（自动识别正在运行的服务：hermes-gateway 优先，兼容 hermes-agent）。无论本次更新是纯代码改动还是动了表结构，都无损升级，客户数据全程保留——迁移只增不删、事务内失败回滚，绝不删改已有数据。
-
-> 注意：脚本绝不运行 `git clean -fd`（会删 .env.db 与加密密钥，导致旧客户数据无法解密）。重启自动识别正在运行的服务（hermes-gateway 优先，兼容 hermes-agent）。
+> 更新会自动备份，客户数据全程保留，不会删除你的加密密钥；命令里的 `git pull` 不能省（老版本靠它拉取更新脚本）。
 
 ### 服务管理
 
