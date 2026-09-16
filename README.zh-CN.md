@@ -42,7 +42,7 @@
 
 SSH 重新连接后，按顺序执行：
 
-**1. 安装 Node.js 22**（两条命令一起执行）：
+**1. 安装 Node.js 22**：
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
@@ -123,7 +123,7 @@ hermes gateway restart
 cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
 ```
 
-> 更新会自动备份，客户数据全程保留，不会删除你的加密密钥；命令里的 `git pull` 不能省（老版本靠它拉取更新脚本）。
+> 更新会自动备份，客户数据全程保留，不会删除你的加密密钥。
 
 ### 服务管理
 
@@ -222,36 +222,9 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 
 **第 2 步：重装系统**（云控制台重装 Ubuntu 24.04）
 
-**第 3 步：全新安装**（装完不要手动改任何环境，验证 install.sh 补丁是否生效）
+**第 3 步：全新安装**
 
-按服务器所在地区选一条安装：
-```bash
-curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
-```
-或（海外服务器 GitHub 源）：
-```bash
-curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
-```
-装好后按顺序配置：
-**激活项目环境：**
-```bash
-cd ~/hermes-agent && source venv/bin/activate
-```
-
-**配置模型 API Key：**
-```bash
-hermes model
-```
-
-**配置飞书智能体：**
-```bash
-hermes setup
-```
-
-**确认后台服务已运行：**
-```bash
-hermes gateway status
-```
+按上面「第一步：一键安装」和「第二步：安装后的配置」完成安装与配置。
 
 **第 4 步：恢复数据**
 
