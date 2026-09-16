@@ -87,12 +87,6 @@ hermes --version
 
 如果能看到版本号（例如 hermes v0.21.3），就说明核心程序安装成功了。
 
-如果提示 `hermes: command not found`，说明命令入口没建成功，执行下面这条再重试：
-
-```bash
-sudo ln -sf ~/hermes-agent/venv/bin/hermes /usr/local/bin/hermes && hash -r
-```
-
 3. 配置模型，这是最关键的一步，用来连接 AI 模型。你需要一个 API Key（DeepSeek API Key 购买：[https://platform.deepseek.com/usage](https://platform.deepseek.com/usage)）：
 
 ```bash
