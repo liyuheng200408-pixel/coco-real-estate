@@ -46,13 +46,9 @@
 
 SSH 重新连接后，先安装 Node.js 22（如果还没装）：
 
-**安装 Node.js 22 源（如果还没装）：**
+**安装 Node.js 22（两条命令一起执行）：**
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-```
-
-**安装 Node.js 22：**
-```bash
 sudo apt install -y nodejs
 ```
 
