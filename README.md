@@ -117,9 +117,9 @@ hermes gateway restart
 
 ## 🔧 常用命令
 
-### 更新版本
+### 更新
 
-一键无损更新（备份 → 拉码 → 装依赖 → 跑迁移 → 自检 → 重启服务）：
+使用单条命令更新至最新版本：
 
 ```bash
 cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
