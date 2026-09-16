@@ -16,7 +16,7 @@ GITEE_ZIP_URL="https://gitee.com/liyuheng200408/coco-real-estate/repository/arch
 GITHUB_REPO_URL="https://github.com/liyuheng200408-pixel/coco-real-estate.git"
 GITHUB_ZIP_URL="https://github.com/liyuheng200408-pixel/coco-real-estate/archive/refs/heads/master.zip"
 INSTALL_DIR="$HOME/hermes-agent"
-SERVICE_NAME="hermes-agent"
+SERVICE_NAME="hermes-agent"   # 旧版自建系统服务的名字，仅用于安装时清理残留；现统一用官方用户服务 hermes-gateway
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -267,36 +267,37 @@ EOF
     ok "gateway 环境补丁已预置: $dropin_file"
 }
 
-# ==================== 创建系统服务 ====================
+# ==================== 安装 gateway 服务（官方用户服务） ====================
+# 2026-09-16 改：不再自建系统服务，改用官方 hermes gateway install。
+# 原因（老板重装实测）：自建的系统服务并不工作——重启它机器人无响应，重启官方用户服务才响应；
+#   且两者并存时会互相抢同一个 bot token，表现为"消息不响应/时好时坏"。
+# 官方命令还会一并处理开机自启（loginctl enable-linger）与历史服务清理（幂等，可重复执行）。
 setup_service() {
-    info "配置系统服务..."
-    if [[ "$OS" == "linux" ]] && command -v systemctl &> /dev/null; then
-        sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null << EOF
-[Unit]
-Description=Coco Real Estate Agent (Hermes)
-After=network.target postgresql.service
-Wants=postgresql.service
+    info "安装 gateway 服务..."
+    if [[ "$OS" != "linux" ]] || ! command -v systemctl &> /dev/null; then
+        warn "非 systemd 系统，请手动启动: cd $INSTALL_DIR && venv/bin/python -m hermes_cli.main gateway run"
+        return
+    fi
 
-[Service]
-Type=simple
-User=$(whoami)
-WorkingDirectory=$INSTALL_DIR
-EnvironmentFile=$INSTALL_DIR/.env.db
-ExecStart=$INSTALL_DIR/venv/bin/python -m hermes_cli.main gateway run
-Restart=always
-RestartSec=10
-Environment=PYTHONUNBUFFERED=1
-Environment=GATEWAY_ALLOW_ALL_USERS=true
-UMask=0077
+    # 清理旧版自建的系统服务（与用户服务并存会抢 bot token）
+    if systemctl list-unit-files 2>/dev/null | grep -q '^hermes-agent\.service'; then
+        sudo systemctl stop hermes-agent 2>/dev/null || true
+        sudo systemctl disable hermes-agent 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/hermes-agent.service
+        sudo systemctl daemon-reload 2>/dev/null || true
+        warn "已移除旧版自建系统服务 hermes-agent（统一改用官方用户服务）"
+    fi
 
-[Install]
-WantedBy=multi-user.target
-EOF
-        sudo systemctl daemon-reload
-        sudo systemctl enable $SERVICE_NAME
-        ok "Systemd 服务创建完成"
+    local HERMES_CLI="$INSTALL_DIR/venv/bin/hermes"
+    if [[ ! -x "$HERMES_CLI" ]]; then
+        warn "未找到 $HERMES_CLI，跳过服务安装（可稍后手动执行 hermes gateway install）"
+        return
+    fi
+    # 装用户服务 + 立即启动 + 启用开机自启；失败不阻断安装
+    if "$HERMES_CLI" gateway install --start-now --start-on-login 2>&1 | tail -6; then
+        ok "gateway 用户服务已安装并启动（开机自启已启用）"
     else
-        warn "非 systemd 系统，请手动启动: cd $INSTALL_DIR && python -m hermes_cli.main gateway run"
+        warn "服务安装异常，可稍后手动执行: hermes gateway install"
     fi
 }
 
@@ -309,14 +310,19 @@ start_service() {
         chmod 600 "$INSTALL_DIR"/state.db* "$INSTALL_DIR"/real_estate.db* "$INSTALL_DIR"/kanban.db* "$INSTALL_DIR"/cron/*.db 2>/dev/null || true
         chmod 600 "$HOME/.hermes"/state.db* "$HOME/.hermes"/real_estate.db* "$HOME/.hermes"/kanban.db* "$HOME/.hermes"/cron/*.db 2>/dev/null || true
         chmod 600 "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.db" "$HOME/.hermes/.env" 2>/dev/null || true
-        sudo systemctl start $SERVICE_NAME
-        # 服务启动可能新建数据库文件，再补一次权限（UMask 已兜底 0600）
         sleep 2
+        # 服务已由 hermes gateway install --start-now 启动，这里只做确认（异常时补一次启动）
+        if systemctl --user is-active --quiet hermes-gateway 2>/dev/null; then
+            ok "服务运行中（hermes-gateway）"
+        elif [[ -x "$INSTALL_DIR/venv/bin/hermes" ]]; then
+            warn "服务未在运行，尝试启动..."
+            "$INSTALL_DIR/venv/bin/hermes" gateway start 2>&1 | tail -3 || true
+        fi
+        # 服务启动可能新建数据库文件，再补一次权限（UMask 已兜底 0600）
         chmod 600 "$INSTALL_DIR"/state.db* "$INSTALL_DIR"/real_estate.db* "$HOME/.hermes"/state.db* "$HOME/.hermes"/real_estate.db* 2>/dev/null || true
         # 确保 SOUL.md 身份文件不被覆盖（gateway 首次启动可能生成官方 SOUL.md）
         mkdir -p "$HOME/.hermes"
         cp "$INSTALL_DIR/SOUL.md" "$HOME/.hermes/SOUL.md" 2>/dev/null || true
-        ok "服务已启动"
     else
         cd "$INSTALL_DIR"
         source "venv/bin/activate"
@@ -392,11 +398,11 @@ print_result() {
     echo -e "配置文件: ${BLUE}$INSTALL_DIR/.env${NC}"
     echo ""
     echo -e "${YELLOW}常用命令:${NC}"
-    echo -e "  启动服务: ${BLUE}sudo systemctl start $SERVICE_NAME${NC}"
-    echo -e "  停止服务: ${BLUE}sudo systemctl stop $SERVICE_NAME${NC}"
-    echo -e "  查看状态: ${BLUE}sudo systemctl status $SERVICE_NAME${NC}"
-    echo -e "  查看日志: ${BLUE}sudo journalctl -u $SERVICE_NAME -f${NC}"
-    echo -e "  重启服务: ${BLUE}sudo systemctl restart $SERVICE_NAME${NC}"
+    echo -e "  启动服务: ${BLUE}hermes gateway start${NC}"
+    echo -e "  停止服务: ${BLUE}hermes gateway stop${NC}"
+    echo -e "  查看状态: ${BLUE}hermes gateway status${NC}"
+    echo -e "  重启服务: ${BLUE}hermes gateway restart${NC}"
+    echo -e "  查看日志: ${BLUE}journalctl --user -u hermes-gateway -f${NC}"
     echo ""
     echo -e "${YELLOW}下一步:${NC}"
     echo -e "  1. 在飞书开放平台配置事件订阅 URL"
@@ -448,8 +454,9 @@ main() {
     setup_database
     setup_config
     setup_tables
-    setup_service
+    # 环境补丁必须先于服务安装：用户服务创建时才会带上 EnvironmentFile（防幽灵库）
     setup_gateway_env_patch
+    setup_service
     start_service
     print_result
 }

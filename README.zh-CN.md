@@ -117,18 +117,18 @@ hermes gateway restart
 
 ### 第三步：确认服务已运行
 
-一键安装脚本已自动把 Coco 注册为系统服务（`hermes-agent`）并启动，无需手动安装。关掉终端后它仍在后台运行，飞书消息正常收发。
+一键安装脚本已自动把 Coco 注册为后台服务（`hermes-gateway`）并启动，无需手动安装。关掉终端后它仍在后台运行，飞书消息正常收发。
 
 > **部署提示**：一键安装脚本已自动配置数据库环境（PostgreSQL），服务通过 `EnvironmentFile` 加载安装目录下的 `.env.db`。若 Coco 回复"添加成功"但查库无数据，说明服务未加载数据库环境——代码已内置防护：未配置 DATABASE_URL 时工具会直接报错而不是静默写入临时文件，按报错提示补环境即可。
 
 **查看服务状态（应显示 active (running)）：**
 ```bash
-sudo systemctl status hermes-agent
+hermes gateway status
 ```
 
 **修改配置后，重启服务使配置生效：**
 ```bash
-sudo systemctl restart hermes-agent
+hermes gateway restart
 ```
 
 ### 第四步：测试智能体
@@ -148,9 +148,9 @@ sudo systemctl restart hermes-agent
 cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh
 ```
 
-> 固定更新命令：前面的 `git pull` 会把 `update.sh` 拉下来（老版本也能用），`bash update.sh` 一次完成 备份→拉码→装依赖→跑迁移→健康自检→重启（自动识别正在运行的服务：hermes-agent 优先，兼容 hermes-gateway）。无论本次更新是纯代码改动还是动了表结构，都无损升级，客户数据全程保留——迁移只增不删、事务内失败回滚，绝不删改已有数据。
+> 固定更新命令：前面的 `git pull` 会把 `update.sh` 拉下来（老版本也能用），`bash update.sh` 一次完成 备份→拉码→装依赖→跑迁移→健康自检→重启（自动识别正在运行的服务：hermes-gateway 优先，兼容 hermes-agent）。无论本次更新是纯代码改动还是动了表结构，都无损升级，客户数据全程保留——迁移只增不删、事务内失败回滚，绝不删改已有数据。
 
-> 注意：脚本绝不运行 `git clean -fd`（会删 .env.db 与加密密钥，导致旧客户数据无法解密）。重启自动识别正在运行的服务（hermes-agent 优先，兼容 hermes-gateway）。
+> 注意：脚本绝不运行 `git clean -fd`（会删 .env.db 与加密密钥，导致旧客户数据无法解密）。重启自动识别正在运行的服务（hermes-gateway 优先，兼容 hermes-agent）。
 
 ### 部署健康自检
 
@@ -166,27 +166,27 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
 
 **启动服务：**
 ```bash
-sudo systemctl start hermes-agent
+hermes gateway start
 ```
 
 **停止服务：**
 ```bash
-sudo systemctl stop hermes-agent
+hermes gateway stop
 ```
 
 **重启服务：**
 ```bash
-sudo systemctl restart hermes-agent
+hermes gateway restart
 ```
 
 **查看状态：**
 ```bash
-sudo systemctl status hermes-agent
+hermes gateway status
 ```
 
 **查看日志（最近 50 行）：**
 ```bash
-sudo journalctl -u hermes-agent -n 50 --no-pager
+journalctl --user -u hermes-gateway -n 50 --no-pager
 ```
 
 ### 数据库备份
@@ -226,7 +226,7 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py re
 
 **重启服务（发"你好"即完成迁移）：**
 ```bash
-sudo systemctl restart hermes-agent
+hermes gateway restart
 ```
 
 > 顺序说明：自动恢复数据库 → 图片 → 加密密钥（enc_key.txt 合并进 .env.db），任一步失败即中止并提示。密钥必须先于服务启动恢复，否则旧数据无法解密。
@@ -287,7 +287,7 @@ hermes setup
 
 **确认后台服务已运行：**
 ```bash
-sudo systemctl status hermes-agent
+hermes gateway status
 ```
 
 **第 4 步：恢复数据**
@@ -309,7 +309,7 @@ python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migrat
 
 **重启服务：**
 ```bash
-sudo systemctl restart hermes-agent
+hermes gateway restart
 ```
 
 **第 5 步：验证**
@@ -381,12 +381,12 @@ sudo systemctl start postgresql
 
 **查看服务状态：**
 ```bash
-sudo systemctl status hermes-agent
+hermes gateway status
 ```
 
 **查看日志（最近 50 行）：**
 ```bash
-journalctl -u hermes-agent -n 50 --no-pager
+journalctl --user -u hermes-gateway -n 50 --no-pager
 ```
 
 ### 飞书消息收不到
@@ -397,8 +397,8 @@ journalctl -u hermes-agent -n 50 --no-pager
 
 ### 智能体不回复
 
-1. `sudo systemctl status hermes-agent` 确认服务在运行
-2. `journalctl -u hermes-agent -n 50 --no-pager` 查看报错
+1. `hermes gateway status` 确认服务在运行
+2. `journalctl --user -u hermes-gateway -n 50 --no-pager` 查看报错
 3. 确认模型 API Key 有效（`hermes model` 重新配置）
 
 ## 📄 License
