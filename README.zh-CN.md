@@ -115,23 +115,7 @@ hermes setup
 hermes gateway restart
 ```
 
-### 第三步：确认服务已运行
-
-一键安装脚本已自动把 Coco 注册为后台服务（`hermes-gateway`）并启动，无需手动安装。关掉终端后它仍在后台运行，飞书消息正常收发。
-
-> **部署提示**：一键安装脚本已自动配置数据库环境（PostgreSQL），服务通过 `EnvironmentFile` 加载安装目录下的 `.env.db`。若 Coco 回复"添加成功"但查库无数据，说明服务未加载数据库环境——代码已内置防护：未配置 DATABASE_URL 时工具会直接报错而不是静默写入临时文件，按报错提示补环境即可。
-
-**查看服务状态（应显示 active (running)）：**
-```bash
-hermes gateway status
-```
-
-**修改配置后，重启服务使配置生效：**
-```bash
-hermes gateway restart
-```
-
-### 第四步：测试智能体
+### 第三步：测试智能体
 
 1. 打开飞书 App，搜索你的智能体名称
 2. 发送一条消息（如"你好"）
