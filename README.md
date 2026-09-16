@@ -129,16 +129,6 @@ cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update
 >
 > Note: the script NEVER runs `git clean -fd` (would delete .env.db and the encryption key, making old customer data undecryptable). The restart auto-detects the running service (prefers hermes-gateway, compatible with hermes-agent).
 
-### 部署健康自检
-
-安装或更新后，一条命令体检（依赖 / 服务 / 联网搜索后端 / 数据库 / 密钥 / 定时任务）：
-
-```bash
-cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
-```
-
-全部 PASS 说明部署健康；FAIL 项会附修复提示。
-
 ### 服务管理
 
 **启动服务：**
