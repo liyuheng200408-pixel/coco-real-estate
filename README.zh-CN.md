@@ -220,11 +220,11 @@ cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_esta
 scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 ```
 
-**第 2 步：重装系统**
+**第 2 步：重装服务器系统**
 
-在云服务器控制台选择「重装系统」，镜像选 Ubuntu 24.04，确认执行。重装后服务器是全新的，Coco 需要重新安装。
+在云服务器控制台选择「重装系统」，镜像选 Ubuntu 24.04，确认执行。这一步会把服务器清空，恢复成一台全新的机器。
 
-**第 3 步：全新安装**
+**第 3 步：在服务器上安装 Coco**
 
 按文档开头的「一键安装与配置」章节完成安装与配置。
 
