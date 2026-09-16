@@ -260,8 +260,6 @@ cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
 
 预期：数据库/密钥/备份新鲜度全部 PASS；在飞书给 Coco 发"看下房源统计"，数据完整返回（房源/客户/成交都在，品牌名保留）。
 
-> ⚠️ 若 healthcheck 数据库项 FAIL，说明 gateway 服务未加载数据库环境——这是 2026-08-12 幽灵库事故的复发信号，按报错提示修复环境后重启，不要继续使用。
-
 ## 📁 项目结构
 
 ```
