@@ -114,7 +114,7 @@ hermes setup
 5. 重启服务，让刚写入的配置生效（**网关只在启动时读取一次配置，配完不重启机器人不会响应**）：
 
 ```bash
-sudo systemctl restart hermes-agent
+hermes gateway restart
 ```
 
 ### 第三步：确认服务已运行

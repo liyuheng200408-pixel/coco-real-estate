@@ -221,7 +221,7 @@ setup_config() {
     echo "   hermes setup"
     echo ""
     echo "4. 重启服务，让刚写入的配置生效（重要：网关只在启动时读取配置，配完不重启机器人不会响应）:"
-    echo "   sudo systemctl restart hermes-agent"
+    echo "   hermes gateway restart"
     echo ""
     echo -e "${GREEN}服务已由安装脚本自动注册并启动；完成第 4 步后，智能体会自动连接飞书。${NC}"
     echo ""
