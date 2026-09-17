@@ -224,7 +224,7 @@ def main() -> int:
         print("      同步上游的操作流程见 docs/UPSTREAM_SYNC.md。")
         return 1
 
-    print("\n全部通过 —— 7 处挂钩点与自建文件都在位。")
+    print("\n全部通过 —— 挂钩点与自建文件都在位。")
     print("下一步：跑 scripts/smoke_test_real_estate.py（工具层冒烟）与单测。")
     return 0
 
