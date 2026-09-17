@@ -113,6 +113,17 @@ CONTENT_CHECKS = [
         "check_fn 检测不到后端、工具被隐藏，Coco 联网查政策会退化成「建议咨询当地」。\n"
         "处理：在 dependencies 里补回 \"ddgs==<版本>\"，并确认 install.sh 里也有它。",
     ),
+    (
+        "10",
+        "E2E 定时触发已移除",
+        ".github/workflows/install-e2e.yml",
+        # 反向匹配（! 开头）：文件里**不能**出现这个模式
+        [r"!^  schedule:"],
+        "官方 install-e2e 带每 12 小时 schedule 定时触发，但它测的是 Hermes 本体\n"
+        "（uv/Node、上游分发方式）的安装升级，与 Coco 的 install.sh 分发方式不符 →\n"
+        "定时跑必失败、每 12 小时制造一次 CI 红灯，并持续消耗 Actions 配额。\n"
+        "处理：删掉 on: 下的 schedule 段，保留 workflow_dispatch 与 push tags（参考提交 e1a42a84）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示
@@ -149,7 +160,14 @@ def check_content(repo: Path):
         except Exception as exc:  # pragma: no cover
             results.append((cid, name, False, f"读取失败：{exc}"))
             continue
-        missing = [p for p in patterns if not re.search(p, text)]
+        # 模式以 ! 开头 = 反向匹配（不应出现）：用于守「官方版带回来、Coco 必须去掉」的东西
+        missing = []
+        for _p in patterns:
+            if _p.startswith("!"):
+                if re.search(_p[1:], text, re.M):
+                    missing.append(_p)
+            elif not re.search(_p, text, re.M):
+                missing.append(_p)
         if missing:
             results.append((cid, name, False, f"未匹配到模式：{missing} —— {tip}"))
         else:

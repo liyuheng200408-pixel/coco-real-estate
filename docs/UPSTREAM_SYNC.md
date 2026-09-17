@@ -45,6 +45,9 @@ bash scripts/sync_upstream.sh v2026.9.14   # 换成实际的官方版本 tag
 | 05 | `hermes_cli/config_defaults.py` | 压缩阈值 0.8 / protect_last_n 40 |
 | 06 | `plugins/platforms/feishu/adapter.py` | 欢迎语 + 密钥提醒 + 注册定时任务，三件都要 |
 | 07 | `gateway/run_turn.py` | 开场白 + 关闭官方 profile-build 引导 |
+| 08 | `scripts/sandbox/pick-release-tags.sh` | 挑标签正则要同时认日期式与语义化标签（`v0.21.3-1`） |
+| 09 | `pyproject.toml` | 依赖里必须保留 `ddgs`（web_search 后端） |
+| 10 | `.github/workflows/install-e2e.yml` | **不能带 `schedule:` 定时触发**——该 E2E 测的是 Hermes 本体的安装升级，与 Coco 的 install.sh 分发方式不符，定时跑必失败并持续吃 Actions 配额 |
 
 ### 第 4 步｜自检 + 处理部署体系
 ```bash
