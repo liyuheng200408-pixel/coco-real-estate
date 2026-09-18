@@ -134,6 +134,37 @@ CONTENT_CHECKS = [
         "本仓库没有该钩子 → curl -X POST \"\" 报 URL rejected，每次发版必红（与代码无关）。\n"
         "处理：删掉 on: 下的 release / push 段，只留 workflow_dispatch（参考本次提交）。",
     ),
+    (
+        "12",
+        "README 命令不污染终端",
+        "README.md",
+        [r"!cd ~/hermes-agent"],
+        "对外命令里写 `cd ~/hermes-agent && ...` 会把用户终端切到仓库目录，跑完提示符变成\n"
+        "`user@host:~/hermes-agent$`（用户会以为出问题了）。\n"
+        "处理：改成自定位写法 —— `git -C ~/hermes-agent ...`、`~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/x.py`、\n"
+        "必须切目录时用括号子 shell `( cd ... && ... )`。",
+    ),
+    (
+        "13",
+        "README(中文) 命令不污染终端",
+        "README.zh-CN.md",
+        [r"!cd ~/hermes-agent"],
+        "同第 12 项：中英两份 README 的命令写法要保持一致，都用自定位写法。",
+    ),
+    (
+        "14",
+        "备份迁移手册命令不污染终端",
+        "docs/BACKUP_MIGRATION.md",
+        [r"!cd ~/hermes-agent"],
+        "同第 12 项：备份/恢复/迁移步骤里的命令都用 venv 绝对路径，不要 cd 到仓库目录。",
+    ),
+    (
+        "15",
+        "飞书实测清单命令不污染终端",
+        "docs/TESTING_FEISHU_FULL.md",
+        [r"!cd ~/hermes-agent"],
+        "同第 12 项：前置检查与查库模板都用自定位写法（查库用 `export $(grep DATABASE_URL ~/hermes-agent/.env.db)` 或一次性取值）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示
