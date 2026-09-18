@@ -30,7 +30,9 @@ jobs:
       - name: Install minimal dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install sqlalchemy cryptography pytest pyyaml httpx python-dateutil
+          # 最小依赖：必须覆盖被测代码真正的运行依赖
+          # 2026-09-20 修：海报功能依赖 Pillow（PIL），此前漏装 → CI 红而本地绿
+          pip install sqlalchemy cryptography pytest pyyaml httpx python-dateutil pillow requests
 
       - name: Syntax check (compileall)
         run: |
