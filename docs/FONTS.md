@@ -32,3 +32,15 @@ Coco 生成房源海报时会用到以下字体与渲染器，脚本 `scripts/in
 - 字体缺失时海报**不会失败**：渲染器与字体都做了多级回退，最差情况用系统自带中文字体出图，只是观感下降。
 - 字体文件不随本仓库分发，安装脚本从上述来源按 URL 下载（多源自动回退）。
 - 如某字体授权条款日后变更，请以字体官方页面为准。
+
+## 下载源与字体包
+
+安装脚本按这个顺序取字体：
+
+1. **Gitee 字体包**（首选，一个文件装齐，国内服务器最快）：
+   `https://gitee.com/liyuheng200408/coco-real-estate/releases/download/fonts-v1/coco_fonts_core_v1.tar.gz`
+   （扩展包 `coco_fonts_extra_v1.tar.gz`：`COCO_FONTS_EXTRA=1` 时使用）
+2. **逐字体下载**：GitHub raw / jsDelivr 多源回退（外网可达的服务器走这条）
+
+> 注：部分国内服务器会屏蔽 `raw.githubusercontent.com`（连接立即失败），
+> 这时 Gitee 字体包或 jsDelivr 就是有效路径；两者都不通也不会阻塞 —— 海报会回落系统字体。

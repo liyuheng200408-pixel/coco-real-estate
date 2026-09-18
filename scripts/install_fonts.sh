@@ -9,6 +9,10 @@
 # 所有字体均为免费可商用（思源/得意黑/霞鹜文楷为 SIL OFL 开源；普惠体/MiSans/鸿蒙/站酷/庞门正道/优设
 # 为各自官方声明的免费商用）。许可与来源见 docs/FONTS.md。
 #
+# 下载源优先级：
+#   ① Gitee 字体包（一个文件，国内快；发布在 coco-real-estate 的 fonts-v1 Release 附件）
+#   ② 逐个字体下载（GitHub / jsDelivr 回退；外网可达的服务器用这条）
+#
 # 用法：
 #   bash scripts/install_fonts.sh            # 安装/补齐（逐条显示进度）
 #   bash scripts/install_fonts.sh --quiet    # 已就绪时少说话（update.sh 用；下载时仍显示进度）
@@ -22,6 +26,10 @@ set -uo pipefail
 QUIET=0
 [[ "${1:-}" == "--quiet" ]] && QUIET=1
 FONT_DIR="/usr/local/share/fonts/coco"
+# Gitee 字体包（国内首选；一个文件装齐全部字体）
+BUNDLE_BASE="https://gitee.com/liyuheng200408/coco-real-estate/releases/download/fonts-v1"
+BUNDLE_CORE="coco_fonts_core_v1.tar.gz"
+BUNDLE_EXTRA="coco_fonts_extra_v1.tar.gz"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -59,16 +67,16 @@ mkdir -p "$TMP"
 
 # 字体清单：相对文件名|来源URL（多个 URL 用空格分隔，依次尝试）
 CORE_FONTS=(
-  "NotoSansCJKsc-Regular.otf|https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
-  "NotoSansCJKsc-Bold.otf|https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf"
-  "NotoSansCJKsc-Black.otf|https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Black.otf"
-  "NotoSerifCJKsc-Black.otf|https://github.com/notofonts/noto-cjk/raw/main/Serif/OTF/SimplifiedChinese/NotoSerifCJKsc-Black.otf"
-  "Alibaba-PuHuiTi-Heavy.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E9%98%BF%E9%87%8C%E5%B7%B4%E5%B7%B4%E6%99%AE%E6%83%A0%E4%BD%93/Alibaba-PuHuiTi-Heavy.ttf"
-  "Alibaba-PuHuiTi-Bold.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E9%98%BF%E9%87%8C%E5%B7%B4%E5%B7%B4%E6%99%AE%E6%83%A0%E4%BD%93/Alibaba-PuHuiTi-Bold.ttf"
-  "PangMenZhengDao.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E5%BA%9E%E9%97%A8%E6%AD%A3%E9%81%93%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%E5%BA%9E%E9%97%A8%E6%AD%A3%E9%81%93%E6%A0%87%E9%A2%98%E4%BD%93.ttf"
-  "站酷高端黑.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E7%AB%99%E9%85%B7%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%20%E7%AB%99%E9%85%B7%E9%AB%98%E7%AB%AF%E9%BB%91.ttf"
-  "站酷庆科黄油体.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E7%AB%99%E9%85%B7%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%E7%AB%99%E9%85%B7%E5%BA%86%E7%A7%91%E9%BB%84%E6%B2%B9%E4%BD%93.ttf"
-  "YouSheBiaoTiHei.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E5%85%B6%E4%BB%96%E5%AD%97%E4%BD%93/%E4%BC%98%E8%AE%BE%E6%A0%87%E9%A2%98%E9%BB%91.ttf"
+  "NotoSansCJKsc-Regular.otf|https://fastly.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
+  "NotoSansCJKsc-Bold.otf|https://fastly.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf"
+  "NotoSansCJKsc-Black.otf|https://fastly.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Black.otf https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Black.otf"
+  "NotoSerifCJKsc-Black.otf|https://github.com/notofonts/noto-cjk/raw/main/Serif/OTF/SimplifiedChinese/NotoSerifCJKsc-Black.otf https://fastly.jsdelivr.net/gh/notofonts/noto-cjk@main/Serif/OTF/SimplifiedChinese/NotoSerifCJKsc-Black.otf"
+  "Alibaba-PuHuiTi-Heavy.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E9%98%BF%E9%87%8C%E5%B7%B4%E5%B7%B4%E6%99%AE%E6%83%A0%E4%BD%93/Alibaba-PuHuiTi-Heavy.ttf https://fastly.jsdelivr.net/gh/wordshub/free-font@master/assets/font/%E4%B8%AD%E6%96%87/%E9%98%BF%E9%87%8C%E5%B7%B4%E5%B7%B4%E6%99%AE%E6%83%A0%E4%BD%93/Alibaba-PuHuiTi-Heavy.ttf ghapi:https://api.github.com/repos/wordshub/free-font/contents/assets/font/%E4%B8%AD%E6%96%87/%E9%98%BF%E9%87%8C%E5%B7%B4%E5%B7%B4%E6%99%AE%E6%83%A0%E4%BD%93/Alibaba-PuHuiTi-Heavy.ttf"
+  "Alibaba-PuHuiTi-Bold.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E9%98%BF%E9%87%8C%E5%B7%B4%E5%B7%B4%E6%99%AE%E6%83%A0%E4%BD%93/Alibaba-PuHuiTi-Bold.ttf https://fastly.jsdelivr.net/gh/wordshub/free-font@master/assets/font/%E4%B8%AD%E6%96%87/%E9%98%BF%E9%87%8C%E5%B7%B4%E5%B7%B4%E6%99%AE%E6%83%A0%E4%BD%93/Alibaba-PuHuiTi-Bold.ttf ghapi:https://api.github.com/repos/wordshub/free-font/contents/assets/font/%E4%B8%AD%E6%96%87/%E9%98%BF%E9%87%8C%E5%B7%B4%E5%B7%B4%E6%99%AE%E6%83%A0%E4%BD%93/Alibaba-PuHuiTi-Bold.ttf"
+  "PangMenZhengDao.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E5%BA%9E%E9%97%A8%E6%AD%A3%E9%81%93%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%E5%BA%9E%E9%97%A8%E6%AD%A3%E9%81%93%E6%A0%87%E9%A2%98%E4%BD%93.ttf https://fastly.jsdelivr.net/gh/wordshub/free-font@master/assets/font/%E4%B8%AD%E6%96%87/%E5%BA%9E%E9%97%A8%E6%AD%A3%E9%81%93%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%E5%BA%9E%E9%97%A8%E6%AD%A3%E9%81%93%E6%A0%87%E9%A2%98%E4%BD%93.ttf ghapi:https://api.github.com/repos/wordshub/free-font/contents/assets/font/%E4%B8%AD%E6%96%87/%E5%BA%9E%E9%97%A8%E6%AD%A3%E9%81%93%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%E5%BA%9E%E9%97%A8%E6%AD%A3%E9%81%93%E6%A0%87%E9%A2%98%E4%BD%93.ttf"
+  "站酷高端黑.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E7%AB%99%E9%85%B7%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%20%E7%AB%99%E9%85%B7%E9%AB%98%E7%AB%AF%E9%BB%91.ttf https://fastly.jsdelivr.net/gh/wordshub/free-font@master/assets/font/%E4%B8%AD%E6%96%87/%E7%AB%99%E9%85%B7%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%20%E7%AB%99%E9%85%B7%E9%AB%98%E7%AB%AF%E9%BB%91.ttf ghapi:https://api.github.com/repos/wordshub/free-font/contents/assets/font/%E4%B8%AD%E6%96%87/%E7%AB%99%E9%85%B7%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%20%E7%AB%99%E9%85%B7%E9%AB%98%E7%AB%AF%E9%BB%91.ttf"
+  "站酷庆科黄油体.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E7%AB%99%E9%85%B7%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%E7%AB%99%E9%85%B7%E5%BA%86%E7%A7%91%E9%BB%84%E6%B2%B9%E4%BD%93.ttf https://fastly.jsdelivr.net/gh/wordshub/free-font@master/assets/font/%E4%B8%AD%E6%96%87/%E7%AB%99%E9%85%B7%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%E7%AB%99%E9%85%B7%E5%BA%86%E7%A7%91%E9%BB%84%E6%B2%B9%E4%BD%93.ttf ghapi:https://api.github.com/repos/wordshub/free-font/contents/assets/font/%E4%B8%AD%E6%96%87/%E7%AB%99%E9%85%B7%E5%AD%97%E4%BD%93%E7%B3%BB%E5%88%97/%E7%AB%99%E9%85%B7%E5%BA%86%E7%A7%91%E9%BB%84%E6%B2%B9%E4%BD%93.ttf"
+  "YouSheBiaoTiHei.ttf|https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%E4%B8%AD%E6%96%87/%E5%85%B6%E4%BB%96%E5%AD%97%E4%BD%93/%E4%BC%98%E8%AE%BE%E6%A0%87%E9%A2%98%E9%BB%91.ttf https://fastly.jsdelivr.net/gh/wordshub/free-font@master/assets/font/%E4%B8%AD%E6%96%87/%E5%85%B6%E4%BB%96%E5%AD%97%E4%BD%93/%E4%BC%98%E8%AE%BE%E6%A0%87%E9%A2%98%E9%BB%91.ttf ghapi:https://api.github.com/repos/wordshub/free-font/contents/assets/font/%E4%B8%AD%E6%96%87/%E5%85%B6%E4%BB%96%E5%AD%97%E4%BD%93/%E4%BC%98%E8%AE%BE%E6%A0%87%E9%A2%98%E9%BB%91.ttf"
   "LXGWWenKaiScreen.ttf|https://github.com/lxgw/LxgwWenKai-Screen/releases/download/v1.522/LXGWWenKaiScreen.ttf"
   "SmileySans-Oblique.ttf|zip:https://github.com/atelier-anchor/smiley-sans/releases/download/v2.0.1/smiley-sans-v2.0.1.zip"
 )
@@ -102,16 +110,20 @@ DL_ERR=""
 dl_one() {
   local url="$1" out="$2" proxy_arg="" env_arg=()
   [[ -n "$PROXY" ]] && proxy_arg="$PROXY"
+  local ghapi=0
+  [[ "$url" == ghapi:* ]] && { ghapi=1; url="${url#ghapi:}"; }
   case "$DL" in
     curl)
       local err
-      err="$(curl -fsSL --retry 1 --retry-delay 2 --max-time 600 ${proxy_arg:+--proxy "$proxy_arg"} -o "$out" "$url" 2>&1 >/dev/null)"
+      err="$(curl -fsSL --retry 1 --retry-delay 2 --max-time 600 ${proxy_arg:+--proxy "$proxy_arg"} \
+        ${ghapi:+-H "Accept: application/vnd.github.raw"} -o "$out" "$url" 2>&1 >/dev/null)"
       [[ -s "$out" ]] && return 0
       DL_ERR="${err%%$'\n'*}"
       ;;
     wget)
       local err
-      err="$(wget -q --timeout=60 --tries=2 ${proxy_arg:+-e use_proxy=yes -e https_proxy="$proxy_arg"} -O "$out" "$url" 2>&1)"
+      err="$(wget -q --timeout=60 --tries=2 ${proxy_arg:+-e use_proxy=yes -e https_proxy="$proxy_arg"} \
+        ${ghapi:+--header="Accept: application/vnd.github.raw"} -O "$out" "$url" 2>&1)"
       [[ -s "$out" ]] && return 0
       DL_ERR="${err%%$'\n'*}"
       ;;
@@ -123,7 +135,8 @@ dl_one() {
 import sys, urllib.request, shutil
 url, out = sys.argv[1], sys.argv[2]
 try:
-    with urllib.request.urlopen(url, timeout=120) as r, open(out, "wb") as f:
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github.raw", "User-Agent": "coco-fonts"})
+    with urllib.request.urlopen(req, timeout=120) as r, open(out, "wb") as f:
         shutil.copyfileobj(r, f)
 except Exception as exc:
     print(f"{type(exc).__name__}: {exc}")
@@ -173,6 +186,27 @@ fetch_one() {
   [[ -z "$DL_ERR" ]] && DL_ERR="下载失败（网络不可达或超时）"
   return 1
 }
+
+# ---- 优先走 Gitee 字体包（一个文件，国内服务器更快更稳） ----
+count_fonts() { find "$FONT_DIR" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | wc -l | tr -d ' '; }
+install_bundle() {
+  local name="$1" tmp="$TMP/$1"
+  say "下载字体包 $name ..."
+  if dl_one "$BUNDLE_BASE/$name" "$tmp"; then
+    if sudo tar xzf "$tmp" -C /usr/local/share/fonts 2>/dev/null || tar xzf "$tmp" -C /usr/local/share/fonts 2>/dev/null; then
+      ok "字体包已解压（当前 $(count_fonts) 个字体文件）"
+      return 0
+    fi
+    DL_ERR="字体包解压失败"
+  fi
+  warn "字体包下载失败（${DL_ERR}），改用逐个字体下载"
+  return 1
+}
+
+if [[ "$(count_fonts)" -lt 12 ]]; then
+  install_bundle "$BUNDLE_CORE" || true
+  [[ "${COCO_FONTS_EXTRA:-0}" == "1" ]] && install_bundle "$BUNDLE_EXTRA" || true
+fi
 
 ALL=("${CORE_FONTS[@]}")
 [[ "${COCO_FONTS_EXTRA:-0}" == "1" ]] && ALL+=("${EXTRA_FONTS[@]}")
