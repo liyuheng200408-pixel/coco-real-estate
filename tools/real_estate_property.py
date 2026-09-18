@@ -421,7 +421,7 @@ registry.register(
         "type": "object",
         "properties": {},
     }},
-    handler=lambda args, **kw: get_property_form(**kw),
+    handler=lambda args, **kw: get_property_form(**args),
 )
 
 registry.register(

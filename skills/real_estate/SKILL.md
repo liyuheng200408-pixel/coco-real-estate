@@ -73,6 +73,7 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 
 ### 2. 添加房源
 
+**只说"要录入房源"而没给信息 → 直接调 `get_property_form` 把标准模板发过去**（不要反问"请把标题/价格/面积发过来"，不要自己手写模板，不要说"我没有模板"）；**已经给了关键信息（标题/售价/面积至少其一）→ 直接抽取调 `add_property` 录入，不要先拉表单**；经纪人明确要表单时也调 `get_property_form`。
 调用 `add_property`，必须指定 `property_type`（new一手房 / second_hand二手房 / rental租房）。
 添加成功后检查返回的 `matched_customers`，主动告知用户匹配到的客户（2026-08-29 起不限 S/A，匹配到就报；录入后**直接报告匹配结果，禁止问"要不要重新跑一轮匹配"**，只有用户明确要求才额外跑全量匹配）。
 **业主/租客要求（2026-08-29 加）**：①录入房源时**只要经纪人提供了业主信息，必须**把它分别传进 `add_property` 的 `owner_name`/`owner_phone`/`owner_wechat`（不是写进标题/备注），系统会自动登记房东并关联此房源（owner_id，电话加密）；②出租房源**必须**把租客要求传进 `tenant_requirements`。反馈：填了业主信息就确认"已登记关联"，没填才中性提示"未录入，可后续补充"，**禁止**说"可在房源详情中补充"；**严禁**说"系统没有房东模块/add_property 不支持业主字段"——系统支持，判定用 `list_owners`/`get_owner` 查询。

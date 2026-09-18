@@ -68,7 +68,9 @@ def call(tool, args=None):
     if entry is None:
         return ('NO_ENTRY', None)
     try:
-        raw = entry.handler(args or {})
+        # 与网关一致：registry.dispatch 会注入 session_id/task_id 等运行时参数。
+        # 裸调用测不出"handler 注册写错（**kw 直传）"这类故障（2026-09-18 get_property_form 事故）。
+        raw = entry.handler(args or {}, session_id='agent:main:feishu:dm:oc_smoke', task_id='smoke')
     except Exception:
         return ('EXC', traceback.format_exc(limit=3))
     try:
