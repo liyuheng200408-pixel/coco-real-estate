@@ -96,6 +96,44 @@ def _stack(blocks: list, top: float, bottom: float, weights: list | None = None)
     return ys
 
 
+def _fit_mode(d: dict, has_image: bool) -> str:
+    """图片适配：照片默认裁切铺满（slice）；显式指定或户型图用完整显示（meet）"""
+    mode = str(d.get("image_fit") or "").lower()
+    if mode in ("meet", "slice"):
+        return mode
+    return "slice" if has_image else "meet"
+
+
+def _image_size(path: str | None):
+    """读取图片宽高（失败返回 (0, 0)）"""
+    if not path or not os.path.exists(path):
+        return (0, 0)
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return (0, 0)
+
+
+def _panel_size(box_w: float, box_h: float, path: str | None, fit: str):
+    """meet 模式：按图片宽高比收缩面板，避免大块白边（户型图多为竖图）"""
+    if fit != "meet":
+        return box_w, box_h
+    iw, ih = _image_size(path)
+    if not iw or not ih:
+        return box_w, box_h
+    aspect = iw / ih
+    if aspect < box_w / box_h:
+        h = box_h
+        w = max(h * aspect, 360.0)
+    else:
+        w = box_w
+        h = max(w / aspect, 360.0)
+    return min(w, box_w), min(h, box_h)
+
+
 def _img_href(path: str | None) -> str:
     if not path or not os.path.exists(path):
         return ""
@@ -130,6 +168,9 @@ def _defs(gold=("#F7E3A1", "#D9A93C"), red=("#E03A3A", "#A81018")) -> str:
         '<linearGradient id="photoFade" x1="0" y1="0" x2="0" y2="1">'
         '<stop offset="45%%" stop-color="#000000" stop-opacity="0"/>'
         '<stop offset="100%%" stop-color="#000000" stop-opacity="0.82"/></linearGradient>'
+        '<linearGradient id="topScrim" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0%%" stop-color="#000000" stop-opacity="0.55"/>'
+        '<stop offset="100%%" stop-color="#000000" stop-opacity="0"/></linearGradient>'
         '<filter id="soft" x="-25%%" y="-25%%" width="150%%" height="150%%">'
         '<feGaussianBlur in="SourceAlpha" stdDeviation="9" result="b"/>'
         '<feOffset in="b" dx="0" dy="7" result="o"/>'
@@ -306,8 +347,15 @@ def template_a(d: dict) -> str:
     out.append('<circle cx="950" cy="180" r="280" fill="#FFFFFF" opacity="0.05"/>'
                '<circle cx="110" cy="1500" r="300" fill="#000000" opacity="0.07"/>')
     if has_photo:
-        out.append('<image href="%s" x="0" y="0" width="%d" height="900" preserveAspectRatio="xMidYMid slice"/>'
-                   % (_img_href(photo), W))
+        fit = _fit_mode(d, True)
+        if fit == "meet":
+            pw, ph = _panel_size(W, 900, photo, fit)
+            out.append('<rect x="0" y="0" width="%d" height="900" fill="#F3EFE7"/>' % W)
+            out.append('<image href="%s" x="%.0f" y="%.0f" width="%.0f" height="%.0f"/>'
+                       % (_img_href(photo), (W - pw) / 2, (900 - ph) / 2, pw, ph))
+        else:
+            out.append('<image href="%s" x="0" y="0" width="%d" height="900" '
+                       'preserveAspectRatio="xMidYMid slice"/>' % (_img_href(photo), W))
         out.append('<rect x="0" y="400" width="%d" height="500" fill="url(#photoFade)"/>' % W)
     else:
         out.append('<g opacity="0.16">'
@@ -317,16 +365,22 @@ def template_a(d: dict) -> str:
         out.append('<path d="M0 470 L%d 330 L%d 424 L0 564 Z" fill="#FFFFFF" opacity="0.06"/>' % (W, W))
         out.append('<rect x="%d" y="206" width="180" height="9" fill="url(#gold)"/>'
                    '<rect x="%d" y="206" width="9" height="180" fill="url(#gold)"/>' % (MARGIN, MARGIN))
-    out.append(_brand(agent.get("company", ""), d.get("slogan", "")))
+    if has_photo:
+        out.append('<rect x="0" y="0" width="%d" height="176" fill="url(#topScrim)"/>' % W)
+    light_bg = bool(has_photo and _fit_mode(d, True) == "meet")   # 浅底图（户型图等）→ 文字要用深色
+    out.append(_brand(agent.get("company", ""), d.get("slogan", ""),
+                      color=("#8E1B20" if light_bg else "#FFE9AE"),
+                      rule=("#C79A4A" if light_bg else "#FFD98A")))
 
     # 主标题
     out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-size="%d" fill="url(#gold)" '
                'stroke="#7A0C10" stroke-width="6" filter="url(#soft)" letter-spacing="4">%s</text>'
                % (W // 2, ys[0] + title_h - 44, _esc(FONTS["title_promo"][0]), tsize, _esc(title)))
-    out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-size="%d" fill="#FFE9AE" '
+    out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-size="%d" fill="%s" '
                'letter-spacing="6">%s</text>'
                % (W // 2, ys[1] + 52, _esc(FONTS["body"][0]),
-                  _auto_size(sub, CONTENT_W - 40, 44, "body", 32), _esc(sub)))
+                  _auto_size(sub, CONTENT_W - 40, 44, "body", 32),
+                  ("#8E1B20" if light_bg else "#FFE9AE"), _esc(sub)))
 
     # 房源卡
     cy0 = ys[2]
@@ -397,17 +451,25 @@ def template_b(d: dict) -> str:
     out.append('<line x1="80" y1="148" x2="%d" y2="148" stroke="%s" stroke-width="1.5" opacity="0.32"/>'
                % (W - 80, ink))
 
-    photo_y, photo_h = 196, 720
+    photo_y, box_w, box_h = 196, W - 160, 720
+    fit = _fit_mode(d, bool(photo))
+    panel_w, photo_h = _panel_size(box_w, box_h, photo, fit) if photo else (box_w, box_h)
+    panel_x = (W - panel_w) / 2
     if photo and os.path.exists(photo):
-        out.append('<clipPath id="photoClip"><rect x="80" y="%d" width="%d" height="%d" rx="18"/></clipPath>'
-                   % (photo_y, W - 160, photo_h))
-        out.append('<image href="%s" x="80" y="%d" width="%d" height="%d" clip-path="url(#photoClip)" '
-                   'preserveAspectRatio="xMidYMid slice"/>' % (_img_href(photo), photo_y, W - 160, photo_h))
+        out.append('<clipPath id="photoClip"><rect x="%.0f" y="%d" width="%.0f" height="%.0f" rx="18"/>'
+                   '</clipPath>' % (panel_x, photo_y, panel_w, photo_h))
+        if fit == "meet":
+            # 户型图/横幅图：白底完整显示，绝不裁切
+            out.append('<rect x="%.0f" y="%d" width="%.0f" height="%.0f" rx="18" fill="#FFFFFF"/>'
+                       % (panel_x, photo_y, panel_w, photo_h))
+        out.append('<image href="%s" x="%.0f" y="%d" width="%.0f" height="%.0f" clip-path="url(#photoClip)" '
+                   'preserveAspectRatio="xMidYMid %s"/>'
+                   % (_img_href(photo), panel_x, photo_y, panel_w, photo_h, fit))
     else:
         out.append('<rect x="80" y="%d" width="%d" height="%d" rx="18" fill="#E7E0D4"/>'
                    '<text x="%d" y="%d" text-anchor="middle" font-family="%s" font-size="38" fill="%s">'
                    '本模板需要房源照片</text>'
-                   % (photo_y, W - 160, photo_h, W // 2, photo_y + photo_h // 2, _esc(FONTS["body"][0]), mute))
+                   % (photo_y, box_w, box_h, W // 2, photo_y + box_h // 2, _esc(FONTS["body"][0]), mute))
 
     ty = photo_y + photo_h + 132
     tsize = _auto_size(title, W - 160, 104, "body", 64)
