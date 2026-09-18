@@ -131,7 +131,7 @@ def test_template_b_without_photo_asks_photo(wired):
     res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推", template="B"))
     assert res["success"] is False
     assert res["need_photo"] is True
-    assert set(res["templates_without_photo"]) == {"A", "C"}
+    assert set(res["templates_without_photo"]) == {"A"}
 
 
 @needs_rsvg
@@ -207,42 +207,9 @@ def test_template_auto_pick_prefers_b_for_high_end_with_photo(wired, tmp_path):
 def test_pick_template_reason_and_alias():
     code, reason = poster._pick_template({"area": 80}, "premium", "")
     assert code == "A" and "指定" in reason
+    # 已删除的清单款应被忽略并回落到 A/B
     code2, _ = poster._pick_template({"area": 80}, "list", "")
-    assert code2 == "C"
-
-
-# ---------------- 清单海报 ----------------
-def test_listing_poster_requires_ids(wired):
-    _save_card()
-    res = json.loads(poster.generate_listing_poster(property_ids=""))
-    assert res["success"] is False
-    assert "房源ID" in res["error"]
-
-
-def test_listing_poster_missing_property(wired):
-    _save_card()
-    res = json.loads(poster.generate_listing_poster(property_ids="999999"))
-    assert res["success"] is False
-
-
-def test_listing_poster_blocks_on_missing_agent_info(wired):
-    a, b = _prop(wired, title="A栋101")["id"], _prop(wired, title="B栋202")["id"]
-    res = json.loads(poster.generate_listing_poster(property_ids=f"{a},{b}"))
-    assert res["need_info"] is True
-    assert any("公司" in m for m in res["missing"])
-
-
-@needs_rsvg
-def test_listing_poster_renders(wired):
-    _save_card()
-    a = _prop(wired, title="A栋101")["id"]
-    b = _prop(wired, title="B栋202", price=520000, area=45.0)["id"]
-    res = json.loads(poster.generate_listing_poster(property_ids=f"{a},{b}"))
-    assert res["success"] is True
-    assert res["template"] == "C"
-    import os
-
-    assert os.path.exists(res["poster_path"])
+    assert code2 in ("A", "B")
 
 
 # ---------------- 价格与文本工具 ----------------
@@ -285,6 +252,6 @@ def test_new_tools_registered_and_in_toolset():
 
     names = set(registry.get_all_tool_names())
     for name in ("generate_property_poster", "suggest_poster_titles",
-                 "generate_listing_poster", "save_agent_card", "get_agent_card"):
+                 "save_agent_card", "get_agent_card"):
         assert name in names, f"{name} 未注册到 registry"
         assert name in registry.get_tool_names_for_toolset("real_estate"), f"{name} 不在 real_estate 工具集"

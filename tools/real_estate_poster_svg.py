@@ -9,7 +9,8 @@ rsvg-convert 渲染，设计自由度接近网页，依赖却很轻（librsvg �
 - 海报上**只显示经纪人自己的公司/门店名**，绝不出现"Coco"字样；公司名没拿到就不显示品牌
 - 页脚固定一句「房源信息以实际看房为准」
 - 二维码内容 = 经纪人微信名片
-- 三款模板：A 红金促销（有照片/无照片两版）、B 极简高级（需照片）、C 真房源清单（多套，不需要照片）
+- 两款模板：A 红金促销（有照片/无照片两版）、B 极简高级（需照片）
+  （2026-09-19 老板评审：B 款效果好；C 清单款做的差，已删除，待以后重新设计）
 
 版式原则（v2 修版）：竖直方向按"块"排布 —— 先算每块高度，再把剩余空间**均分到块间间距**，
 保证既不重叠也不出现大空洞；所有文本按列宽量宽后自适应字号/截断。
@@ -530,111 +531,14 @@ def template_b(d: dict) -> str:
     return "\n".join(out)
 
 
-# ---------------- 模板 C：真房源清单（多套，不需要照片） ----------------
-def template_c(d: dict) -> str:
-    props = (d.get("properties") or [])[:5]
-    agent = d.get("agent") or {}
-    title = d.get("title") or "今日主推 · 真房源"
-    sub = d.get("subtitle") or ("%d 套真房源 · 可约看房" % len(props))
-    tags = _tags_of(d)
-
-    # 列网格（互不重叠）：房源 90-410 ｜ 建面 420-610 ｜ 单价胶囊 620-836 ｜ 总价 846-1010
-    col_code, col_area, col_pill, col_price = 250, 515, 728, 928
-    out = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">'
-           % (W, H, W, H), _defs()]
-    out.append('<rect width="%d" height="%d" fill="url(#bg)"/>' % (W, H))
-    out.append('<circle cx="900" cy="140" r="240" fill="#FFFFFF" opacity="0.05"/>'
-               '<circle cx="140" cy="1560" r="280" fill="#000000" opacity="0.07"/>')
-    out.append(_brand(agent.get("company", ""), d.get("slogan", "")))
-
-    top = 402
-    title_h, sub_h, head_h = 176, 76, 72
-    row_h = 172
-    rows_h = row_h * len(props)
-    caps_h = 74 if tags else 0
-    agent_h, foot_h = 252, 40
-    gaps = [1.0, 0.5, 0.6, 0.5, 0.35]
-    if not tags:
-        gaps = [1.0, 0.5, 0.7, 0.35]
-    ys = _stack([(title_h, 0), (sub_h, 1), (head_h, 2), (rows_h, 3), (caps_h, 4), (agent_h, 5), (foot_h, 6)],
-                top, 1820, gaps)
-    ys_rows, ys_caps, ys_agent = ys[3], ys[4], ys[5]
-
-    tsize = _auto_size(title, CONTENT_W, 122, "title_heavy", 68)
-    out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-size="%d" fill="url(#gold)" '
-               'stroke="#7A0C10" stroke-width="6" letter-spacing="4" filter="url(#soft)">%s</text>'
-               % (W // 2, ys[0] + title_h - 40, _esc(FONTS["title_list"][0]), tsize, _esc(title)))
-    out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-size="%d" fill="#FFE9AE" '
-               'letter-spacing="8">%s</text>'
-               % (W // 2, ys[1] + 46, _esc(FONTS["body"][0]),
-                  _auto_size(sub, CONTENT_W - 40, 42, "body", 30), _esc(sub)))
-
-    # 表头
-    hy = ys[2]
-    out.append('<rect x="%d" y="%.0f" width="%d" height="%d" rx="16" fill="#FFE9AE" opacity="0.94"/>'
-               % (MARGIN, hy, CONTENT_W, head_h))
-    for text, hx in (("房源", col_code), ("建面", col_area), ("单价", col_pill), ("总价", col_price)):
-        out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-weight="700" font-size="32" '
-                   'fill="#8E1B20">%s</text>' % (hx, hy + 49, _esc(FONTS["body"][0]), text))
-
-    y = ys_rows
-    for i, p in enumerate(props):
-        out.append('<g filter="url(#soft)"><rect x="%d" y="%.0f" width="%d" height="%d" rx="20" '
-                   'fill="#FFF7EC"/></g>' % (MARGIN, y, CONTENT_W, row_h - 14))
-        code = str(p.get("title") or p.get("community") or ("房源%d" % (i + 1)))
-        out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-weight="700" font-size="%d" '
-                   'fill="#8E1B20">%s</text>'
-                   % (col_code, y + 60, _esc(FONTS["body"][0]),
-                      _auto_size(code, 300, 40, "body", 26), _esc(_fit(code, 300, 40))))
-        sub_line = " · ".join(str(x) for x in [p.get("community") if code != p.get("community") else None,
-                                               _layout_text(p)] if x)
-        if sub_line:
-            out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-size="26" '
-                       'fill="#8A7A6A">%s</text>'
-                       % (col_code, y + 104, _esc(FONTS["body"][0]), _esc(_fit(sub_line, 300, 26))))
-        area = ("%s㎡" % p.get("area")) if p.get("area") else "—"
-        out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-weight="900" font-size="%d" '
-                   'fill="#3C2E26">%s</text>'
-                   % (col_area, y + 94, _esc(FONTS["number"][0]),
-                      _auto_size(area, 180, 50, "title_heavy", 32), _esc(area)))
-        up = _unit_price_text(p, prefix="").strip()
-        if up:
-            out.append('<rect x="%d" y="%.0f" width="216" height="50" rx="25" fill="#C81E2B"/>'
-                       '<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-size="28" '
-                       'fill="#FFFFFF">%s</text>'
-                       % (col_pill - 108, y + 26, col_pill, y + 61, _esc(FONTS["body"][0]),
-                          _esc(_fit(up, 196, 28))))
-        ptext = _price_text(p)
-        if ptext.endswith("元/月"):
-            out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-weight="900" '
-                       'font-size="%d" fill="#C81E2B">%s</text>'
-                       % (col_price - 16, y + 94, _esc(FONTS["number"][0]),
-                          _auto_size(ptext[:-2], 140, 56, "title_heavy", 30), _esc(ptext[:-2])))
-            out.append('<text x="%d" y="%.0f" text-anchor="start" font-family="%s" font-size="28" '
-                       'fill="#C81E2B">/月</text>' % (col_price + 48, y + 94, _esc(FONTS["body"][0])))
-        else:
-            out.append('<text x="%d" y="%.0f" text-anchor="middle" font-family="%s" font-weight="900" font-size="%d" '
-                       'fill="#C81E2B">%s</text>'
-                       % (col_price, y + 94, _esc(FONTS["number"][0]),
-                          _auto_size(ptext, 190, 56, "title_heavy", 34), _esc(ptext)))
-        y += row_h
-
-    if tags:
-        out.append(_capsules(tags, ys_caps))
-    out.append(_agent_dark(agent, d.get("qr_path"), ys_agent))
-    out.append(_footer(d.get("footer", "房源信息以实际看房为准")))
-    out.append("</svg>")
-    return "\n".join(out)
-
-
-TEMPLATES = {"A": template_a, "B": template_b, "C": template_c}
+TEMPLATES = {"A": template_a, "B": template_b}
 
 
 def render(d: dict, out_path: str | None = None) -> dict:
     """渲染海报：SVG → rsvg-convert → PNG。失败时返回 success=False（调用方回退 Pillow 引擎）。"""
     template = str(d.get("template") or "A").upper()
     if template not in TEMPLATES:
-        return {"success": False, "error": "未知模板 %s（可选 A/B/C）" % template}
+        return {"success": False, "error": "未知模板 %s（可选 A/B）" % template}
     svg = TEMPLATES[template](d)
     if not out_path:
         out_path = os.path.join(tempfile.mkdtemp(prefix="coco_poster_"), "poster_%s.png" % template)

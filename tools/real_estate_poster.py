@@ -493,10 +493,10 @@ def _title_candidates(p) -> list:
 
 def _pick_template(p, template: str, photo: str) -> tuple:
     """返回 (模板代号, 选择理由)。template 为空时按房源特征自动挑。"""
-    alias = {"premium": "A", "modern": "B", "vibrant": "A", "promo": "A", "classic": "B", "list": "C"}
+    alias = {"premium": "A", "modern": "B", "vibrant": "A", "promo": "A", "classic": "B"}
     if template:
         code = alias.get(str(template).lower(), str(template).upper())
-        if code in ("A", "B", "C"):
+        if code in ("A", "B"):
             return code, "按指定模板"
     try:
         area = float(p.get('area') or 0)
@@ -514,7 +514,7 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     """生成房源海报（1080x1920）
 
     property_id 或 title 二选一：传 id 精确匹配；传标题模糊匹配。
-    template 可选 A（红金促销）/B（极简高级，需照片）/C（清单款）；不传按房源特征自动选。
+    template 可选 A（红金促销）/B（极简高级，需照片）；不传按房源特征自动选。
     poster_title：海报主标题文案（先调 suggest_poster_titles 拿候选给经纪人挑）。
     allow_missing=True：经纪人明确说"先出图/信息就这些"时使用，缺的字段留空不编造。
     信息不齐时**不出图**，返回 missing 清单让 Coco 一次问清。
@@ -539,8 +539,8 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
                 "need_photo": True,
                 "missing": ["房源照片"],
                 "ask": ("所选模板需要房源照片。请二选一：①请经纪人发一张房源照片；"
-                        "②改用不需要照片的模板（A 促销款/C 清单款），或说「先出图」我再生成。"),
-                "templates_without_photo": ["A", "C"],
+                        "②改用不需要照片的模板（A 红金促销款），或说「先出图」我再生成。"),
+                "templates_without_photo": ["A"],
             }, ensure_ascii=False)
 
     missing = _missing_poster_info(p, card, need_photo=False) if not allow_missing else []
@@ -625,7 +625,7 @@ def _render_legacy(p, qr_content, tpl: str) -> str:
     """旧 Pillow 引擎兜底（rsvg 缺失/渲染失败时使用）"""
     from PIL import Image, ImageDraw
 
-    template = {"A": "vibrant", "B": "modern", "C": "modern"}.get(tpl, "modern")
+    template = {"A": "vibrant", "B": "modern"}.get(tpl, "modern")
     W, H = 1080, 1440
     img = Image.new('RGB', (W, H), (240, 244, 250))
     draw = ImageDraw.Draw(img)
@@ -654,65 +654,6 @@ def suggest_poster_titles(property_id: int = None, title: str = None, task_id: s
         "candidates": cands,
         "ask": "把候选标题发给经纪人挑一个（他也可以自己给文案），选定后用 poster_title 传给 generate_property_poster。",
     }, ensure_ascii=False)
-
-
-def generate_listing_poster(property_ids: str, poster_title: str = None,
-                            allow_missing: bool = False, qr_content: str = None,
-                            task_id: str = None) -> str:
-    """一图多套（真房源清单，模板 C，3~5 套，不需要照片）"""
-    db = _get_db()
-    ids = [int(x.strip()) for x in str(property_ids or '').split(',') if x.strip()][:5]
-    if not ids:
-        return json.dumps({"success": False, "error": "请提供房源ID列表（逗号分隔，3~5 个）"}, ensure_ascii=False)
-    props = []
-    for i in ids:
-        row = db.get_available_property(i)
-        if row is None:
-            return json.dumps({"success": False, "error": f"房源不存在或不在售：{i}"}, ensure_ascii=False)
-        props.append(row)
-
-    card = _agent_card()
-    missing = []
-    for row in props:
-        if not (row.get('title') or row.get('community')):
-            missing.append("房源名称/房号")
-        if not row.get('area'):
-            missing.append("建筑面积")
-        if not row.get('price'):
-            missing.append("价格")
-    if not card.get('company'):
-        missing.append("您的公司/门店名称")
-    if not (card.get('name') or card.get('phone') or card.get('wechat')):
-        missing.append("您的联系方式（姓名/电话/微信 至少一项）")
-    if missing and not allow_missing:
-        return json.dumps({"success": False, "need_info": True, "missing": sorted(set(missing)),
-                           "ask": "清单海报还缺以上信息，请一次问清后再出图。"}, ensure_ascii=False)
-
-    qr_path = _make_qr_png(qr_content or card.get('wechat') or '') or None
-    data = {
-        "template": "C",
-        "title": poster_title or "今日主推 · 真房源",
-        "subtitle": f"{len(props)} 套真房源 · 可约看房",
-        "properties": props,
-        "agent": card,
-        "qr_path": qr_path,
-        "footer": _FOOTER_TEXT,
-    }
-    out_path = os.path.join(_poster_dir(), 'poster_listing_C.png')
-    try:
-        from tools import real_estate_poster_svg
-
-        result = real_estate_poster_svg.render(data, out_path)
-    except Exception as exc:  # noqa: BLE001
-        result = {"success": False, "error": f"SVG 引擎不可用：{exc}"}
-    if not result.get("success"):
-        return json.dumps({"success": False, "error": result.get("error"),
-                           "hint": "可改用 generate_poster_grid（九宫格）"}, ensure_ascii=False)
-    path = result["png_path"]
-    return json.dumps({"success": True, "property_ids": ids, "template": "C", "poster_path": path,
-                       "notes": ([] if card.get('company') else ["未提供公司名称，海报未显示品牌"]),
-                       "message": f"清单海报已生成：{path}（发送时用 MEDIA:{path} 直接发图）"},
-                      ensure_ascii=False)
 
 
 # 九宫格（旧版 3x3 拼图，保留兼容）
@@ -770,13 +711,13 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, task_id: str
 registry.register(
     name="generate_property_poster",
     toolset="real_estate",
-    schema={"name": "generate_property_poster", "description": "生成房源海报图（1080x1920）。信息不齐会拒绝出图并返回 missing 清单（先问清再出）；未提供主标题会返回 2~3 个候选让经纪人挑。模板 A 红金促销/B 极简高级(需照片)/C 清单款，不传自动选。返回图片路径，用 MEDIA:路径 发送", "parameters": {
+    schema={"name": "generate_property_poster", "description": "生成房源海报图（1080x1920）。信息不齐会拒绝出图并返回 missing 清单（先问清再出）；未提供主标题会返回 2~3 个候选让经纪人挑。模板 A 红金促销/B 极简高级(需照片)，不传自动选。返回图片路径，用 MEDIA:路径 发送", "parameters": {
         "type": "object",
         "properties": {
             "property_id": {"type": "integer", "description": "房源ID（与 title 二选一，优先用 ID）"},
             "title": {"type": "string", "description": "房源标题关键词（与 property_id 二选一，模糊匹配）"},
             "poster_title": {"type": "string", "description": "海报主标题文案（先用 suggest_poster_titles 拿候选给经纪人挑）"},
-            "template": {"type": "string", "enum": ["A", "B", "C"], "description": "可选：A 红金促销（默认，无需照片）/B 极简高级（需照片）/C 清单款"},
+            "template": {"type": "string", "enum": ["A", "B"], "description": "可选：A 红金促销（默认，无需照片）/B 极简高级（需照片）"},
             "qr_content": {"type": "string", "description": "可选：二维码内容；不传则用经纪人名片里的微信号（微信名片）"},
             "allow_missing": {"type": "boolean", "description": "仅当经纪人明确说「就这些，先出图」时传 true；缺的字段留空，不编造"},
         },
@@ -795,22 +736,6 @@ registry.register(
         },
     }},
     handler=lambda args, **kw: suggest_poster_titles(**args),
-)
-
-registry.register(
-    name="generate_listing_poster",
-    toolset="real_estate",
-    schema={"name": "generate_listing_poster", "description": "生成「真房源清单」海报（一图 3~5 套，模板 C，不需要照片）：房源卡列表 + 卖点 + 经纪人名片 + 二维码", "parameters": {
-        "type": "object",
-        "properties": {
-            "property_ids": {"type": "string", "description": "房源ID列表，逗号分隔，3~5 个，如 1,2,3,4"},
-            "poster_title": {"type": "string", "description": "可选：主标题（默认「今日主推 · 真房源」）"},
-            "qr_content": {"type": "string", "description": "可选：二维码内容；不传用名片微信号"},
-            "allow_missing": {"type": "boolean", "description": "经纪人明确说「先出图」时传 true"},
-        },
-        "required": ["property_ids"],
-    }},
-    handler=lambda args, **kw: generate_listing_poster(**args),
 )
 
 registry.register(

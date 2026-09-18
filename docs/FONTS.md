@@ -16,10 +16,10 @@ Coco 生成房源海报时会用到以下字体与渲染器，脚本 `scripts/in
 |---|---|---|---|
 | 思源黑体 Noto Sans CJK SC（Regular/Bold/Black） | 正文、标签、数字 | SIL Open Font License 1.1 | notofonts/noto-cjk |
 | 思源宋体 Noto Serif CJK SC Black | 极简高级款标题 | SIL Open Font License 1.1 | notofonts/noto-cjk |
-| 得意黑 Smiley Sans | 清单款动感标题 | SIL Open Font License 1.1 | atelier-anchor/smiley-sans |
+| 得意黑 Smiley Sans | 预留（多套清单款重做时用） | SIL Open Font License 1.1 | atelier-anchor/smiley-sans |
 | 霞鹜文楷 LXGW WenKai Screen | 中式雅致标题/正文 | SIL Open Font License 1.1 | lxgw/LxgwWenKai-Screen |
 | 阿里巴巴普惠体 Heavy / Bold | 促销款大标题与价格数字 | 阿里巴巴普惠体官方声明免费商用（含嵌入式使用） | fonts.alibabagroup.com（镜像分发） |
-| 庞门正道标题体 | 硬朗标题备选 | 作者声明免费商用 | 公开镜像 |
+| 庞门正道标题体 | 硬朗标题备选（预留） | 作者声明免费商用 | 公开镜像 |
 | 站酷高端黑 / 站酷庆科黄油体 | 极简清冷标题 / 租房活泼标题 | 站酷官方声明免费商用 | zcool.com.cn/special/zcoolfonts（镜像分发） |
 | 优设标题黑 | 促销标题备选 | 优设官方声明免费商用 | 公开镜像 |
 | MiSans（可选） | 现代黑体多字重 | 小米官方声明免费商用 | 小米官方 CDN |
