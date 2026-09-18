@@ -749,6 +749,9 @@ from tools.terminal_tool_guards import (
     _foreground_background_guidance, _safe_command_preview, _validate_workdir,
     gateway_lifecycle_block, self_repo_block,
 )
+# COCO-PATCH（2026-09-20）: Coco 定制 —— 更新类命令拦截（Coco 自己在会话里执行更新会
+# 重启网关、打断对话、跳过数据库迁移；统一让经纪人在服务器上执行）
+from tools.real_estate_update_guard import coco_update_block  # COCO-PATCH
 from tools.terminal_tool_background import _YIELDED_NOTE, spawn_background_process, yield_to_background_handler
 from tools.terminal_tool_result import finalize_foreground_result
 
@@ -1134,6 +1137,14 @@ def _pre_exec_block(
     Order matters: gateway lifecycle first (protects the running gateway),
     then the dangerous-workdir check, then the self-repo guard (local only).
     """
+    # COCO-PATCH（2026-09-20）: 更新类命令先拦（给经纪人的中文话术 + 正确命令），
+    # 早于上游 gateway 生命周期守卫（那条只覆盖 gateway restart/stop，且提示是英文）
+    blocked = coco_update_block(
+        command=command, cwd=cwd, workdir=workdir, session_key=session_key,
+    )
+    if blocked:
+        logger.warning("Coco 拦截更新类命令（command: %s）", _safe_command_preview(command))
+        raise _Rejected(blocked)
     blocked = gateway_lifecycle_block(
         command=command, env=env, env_type=env_type, cwd=cwd, workdir=workdir, session_key=session_key,
     )

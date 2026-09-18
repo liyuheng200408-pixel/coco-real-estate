@@ -166,6 +166,15 @@ CONTENT_CHECKS = [
         "处理：恢复 _brand() 与 _footer() 的默认文案；渲染结果里不得出现平台名。",
     ),
     (
+        "16",
+        "更新类命令拦截",
+        "tools/terminal_tool.py",
+        [r"coco_update_block"],
+        "Coco 会话里的终端更新命令拦截被移除：经纪人一句“帮我更新”，她就可能自己跑官方 "
+        "hermes update（不跑我们的数据库迁移、可能覆盖手改代码）或 update.sh（重启网关连自己一起杀掉）。\n"
+        "处理：恢复 COCO-PATCH 调用点（tools/real_estate_update_guard.coco_update_block）。",
+    ),
+    (
         "12",
         "README 命令不污染终端",
         "README.md",

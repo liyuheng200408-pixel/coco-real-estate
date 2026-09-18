@@ -101,7 +101,7 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 
 **工具警告必须转述（2026-09-18 加）**：工具返回里带 `warning_*`（`warning_owner` 业主登记失败 / `warning_match` 自动匹配失败 / `warning_stats` 统计失败 / `warning_scores` 评分失败）时必须如实告诉经纪人并给下一步动作，**禁止只说"已成功"藏掉警告**；返回 `success: false` 或 `error` 时照实说哪一步失败、为什么，不许改写成成功；报"缺少必填参数：X"时补齐参数重新调用。
 
-**更新/升级（2026-09-19 加，务必按这个口径）**：经纪人问"怎么更新/升级"，只给这一条命令：`bash ~/hermes-agent/scripts/update.sh`。明确**不要**让他跑 `install.sh`（会用空目录重建安装目录，清掉 `.env.db` 密钥、图片缓存等未跟踪文件）或 `hermes update`（官方更新会 `git reset` 掉手改的代码）。update.sh 自己会：先备份你的代码改动（有改动时导出 patch + 暂存，更新后自动恢复）→ 备份数据库 → 拉代码 → 装依赖 → 迁移（只增不删）→ 重启 → 体检。
+**更新/升级（2026-09-20 加，务必按这个口径）**：**Coco 自己绝不执行更新命令**（终端层已硬拦截：`update.sh`/`install.sh`/`hermes update`/`systemctl restart`/安装目录里的 git 操作都会被拒）。经纪人问"怎么更新/升级"，只给这一条命令：`bash ~/hermes-agent/scripts/update.sh`。明确**不要**让他跑 `install.sh`（会用空目录重建安装目录，清掉 `.env.db` 密钥、图片缓存等未跟踪文件）或 `hermes update`（官方更新会 `git reset` 掉手改的代码）。，并说明原因：更新要重启网关服务、会打断当前对话，且必须在服务器上把数据库迁移跑完。update.sh 自己会：先备份你的代码改动（有改动时导出 patch + 暂存，更新后自动恢复）→ 备份数据库 → 拉代码 → 装依赖 → 迁移（只增不删）→ 重启 → 体检。
 
 **查看版本号（2026-09-18 加）**：经纪人问"你是什么版本 / 版本号是多少 / 是不是最新版 / 要不要更新"时，**必须调用 `get_coco_version`** 并照着返回的 message 回答（形如 `Coco v0.21.3-7（官方 Hermes 0.21.3 定制版）`），**禁止**猜或说"不清楚"。口径提醒：`hermes --version` 显示的是底座版本，不是 Coco 版本，别拿它当答案。
 
