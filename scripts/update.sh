@@ -77,10 +77,7 @@ info "[6/8] 迁移配置文件（官方底座升级后需要，非交互式）"
 "$VENV_PY" scripts/migrate_config.py || echo "  警告：配置迁移步骤异常，不阻断更新"
 ok "配置迁移步骤完成"
 
-info "[7/8] 部署健康自检"
-"$VENV_PY" scripts/healthcheck.py || echo "  警告：健康自检存在 FAIL 项，请查看上方提示"
-
-info "[8/8] 重启服务（以 hermes-gateway 用户服务为准，兼容 hermes-agent）"
+info "[7/8] 重启服务（以 hermes-gateway 用户服务为准，兼容 hermes-agent）"
 if [[ "$NO_RESTART" == "1" ]]; then
   echo "  已跳过重启（--no-restart），请稍后手动重启。"
 else
@@ -99,7 +96,19 @@ else
   if [[ "$RESTARTED" == "0" ]]; then
     err "未检测到在运行的 hermes-gateway / hermes-agent 服务，请手动重启以加载新代码。"
   fi
+  # 体检放在重启之后，读到的才是新进程的状态与日志；服务是 Type=simple，
+  # restart 会在进程刚起来时就返回，所以等它真正 active 再体检。
+  if [[ "$RESTARTED" == "1" ]]; then
+    for _ in $(seq 1 30); do
+      systemctl --user is-active --quiet hermes-gateway.service 2>/dev/null && break
+      sleep 2
+    done
+    sleep 5
+  fi
 fi
+
+info "[8/8] 部署健康自检"
+"$VENV_PY" scripts/healthcheck.py || echo "  警告：健康自检存在 FAIL 项，请查看上方提示"
 
 echo ""
 # 版本号直接读仓库根 VERSION 文件（2026-08-29 加，与 install.sh 保持一致）：以后只改 VERSION，更新终端自动同步

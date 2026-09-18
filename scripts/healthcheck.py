@@ -12,7 +12,7 @@
     5. 数据库连接与数据量
     6. COCO_ENC_KEY 与密钥备份
     7. 备份新鲜度（最新 dump 是否 <48h，2026-08-12 加）
-    8. cron 注册（4 个定时任务）
+    8. cron 注册（早报/午间/逾期 3 个任务，默认关闭属预期）
     9. 技能同步
     10. 磁盘空间
     11. 网关运行期日志错误（已排除"重启导致飞书长连接正常断开"的噪音）
@@ -244,10 +244,9 @@ else:
 print("\n[8] 定时任务（cron）")
 marker = os.path.join(HERMES_HOME, ".coco_cron_registered")
 if os.path.isfile(marker):
-    ok("cron 已注册（标记文件存在），含早报/午间/逾期/生日 4 个任务")
+    ok("定时任务已注册（早报 09:00 / 午间 13:00 / 逾期每 30 分钟）")
 else:
-    warn("定时任务未注册（默认关闭，省 token，属预期）",
-         "需要时对 Coco 说一句「开启定时任务」，她会自行注册，不用登服务器")
+    ok("定时任务默认关闭（省 token，属预期；需要时对 Coco 说一句「开启定时任务」即可）")
 
 # ---- 9. 技能同步 ----
 print("\n[9] 技能同步")
@@ -263,9 +262,9 @@ rc, out = sh("df -P / | awk 'NR==2{print $4}'")
 if rc and out.isdigit():
     free_mb = int(out) // 1024
     if free_mb > 2048:
-        ok(f"磁盘可用 {free_mb} MB")
+        ok(f"磁盘可用 {free_mb / 1024:.1f} GB")
     else:
-        warn(f"磁盘可用仅 {free_mb} MB", "清理空间，避免备份/日志写满")
+        warn(f"磁盘可用仅 {free_mb / 1024:.1f} GB", "清理空间，避免备份/日志写满")
 else:
     warn("无法读取磁盘空间")
 

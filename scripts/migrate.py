@@ -266,6 +266,14 @@ def main():
         history = load_history(conn)
         pending = [(seq, p) for seq, p in migrations if seq not in history]
 
+        # 正常情况下（无待执行迁移）只回一行结论，不逐条列文件 —— 每次更新都刷 7 行"已执行"
+        # 属过程噪音；要看逐条明细用 `--status`。
+        if not pending and not args.status:
+            seqs = sorted(history)
+            span = f"{seqs[0]:03d}~{seqs[-1]:03d}" if seqs else "无"
+            print(f"数据库已是最新（已执行 {len(history)} 个迁移：{span}），无需迁移。")
+            return
+
         print(f"迁移目录: {MIGRATIONS_DIR}")
         print(f"已执行: {len(history)} 个 | 待执行: {len(pending)} 个")
         print("----------------------------------------")
@@ -275,10 +283,6 @@ def main():
             print(f"  {mark} {p.name}  [{status}]")
 
         if args.status:
-            return
-
-        if not pending:
-            print("数据库已是最新，无需迁移。")
             return
 
         for seq, p in pending:
