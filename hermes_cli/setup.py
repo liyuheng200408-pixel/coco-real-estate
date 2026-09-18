@@ -396,12 +396,16 @@ def setup_model_provider(config: dict, *, quick: bool = False):
 
 def _apply_default_agent_settings(config: dict):
     """Apply recommended defaults for all agent settings without prompting."""
-    config.setdefault("agent", {})["max_turns"] = 150
+    # COCO-PATCH: 轮次上限 150 → 500（官方默认 150 会在重跑向导时冲掉 Coco 的设定）
+    config.setdefault("agent", {})["max_turns"] = 500
     # config.yaml is authoritative for max_turns (the gateway bridges it into HERMES_MAX_ITERATIONS);
     # a stale .env entry silently shadowing it caused the 60-vs-500 bug, so drop it.
     remove_env_value("HERMES_MAX_ITERATIONS")
     config.setdefault("display", {})["tool_progress"] = "all"
     config.setdefault("compression", {})["enabled"] = True
+    # COCO-PATCH: Coco 标准压缩配置（官方默认 threshold 0.50 / protect_last_n 20）
+    config.setdefault("compression", {})["threshold"] = 0.8
+    config.setdefault("compression", {})["protect_last_n"] = 40
     config["compression"]["threshold"] = 0.50
     save_config(config)
     print_success("Applied recommended defaults:")
@@ -440,10 +444,11 @@ def setup_agent_settings(config: dict):
     # ── Max Iterations ── (config.yaml is authoritative; never surface a stale legacy .env value)
     # If a legacy .env entry is still around (from pre-PR#18413 setups), prefer the config value so we don't
     # surface a stale number to the user.
-    current_max = str(cfg_get(config, "agent", "max_turns", default=90))
+    # COCO-PATCH: 提示语与默认值 90 → 500
+    current_max = str(cfg_get(config, "agent", "max_turns", default=500))
     _info("Maximum tool-calling iterations per conversation.",
           "Higher = more complex tasks, but costs more tokens.",
-          f"Press Enter to keep {current_max}. Use 90 for most tasks or 150+ for open exploration.")
+          f"Press Enter to keep {current_max}. Use 500 for long multi-step agent work.")
     max_iter = _prompt_number("Max iterations", current_max)
     if max_iter is None:
         print_warning("Invalid number, keeping current value")

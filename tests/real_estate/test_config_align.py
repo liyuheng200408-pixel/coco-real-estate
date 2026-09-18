@@ -1,0 +1,122 @@
+"""Coco 运行时配置对齐（scripts/coco_config_align.py）。"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+
+import coco_config_align as align  # noqa: E402
+
+
+def test_standard_values_are_the_agreed_ones():
+    """老板拍板的标准值，改动必须是有意的。"""
+    assert align.STANDARD == {
+        "agent.max_turns": 500,
+        "compression.threshold": 0.8,
+        "compression.protect_last_n": 40,
+        "compression.hygiene_hard_message_limit": 5000,
+        "timezone": "Asia/Shanghai",
+    }
+
+
+def test_dig_reads_nested_and_missing():
+    cfg = {"agent": {"max_turns": 150}, "compression": {"threshold": 0.5}}
+    assert align.dig(cfg, "agent.max_turns") == 150
+    assert align.dig(cfg, "compression.threshold") == 0.5
+    assert align.dig(cfg, "compression.protect_last_n") is None
+    assert align.dig(cfg, "timezone", default="") == ""
+    assert align.dig({"agent": "broken"}, "agent.max_turns") is None
+
+
+def test_diffs_flags_official_defaults():
+    """官方向导写的 config.yaml（150 / 0.5 / 20）必须被判定为不一致。"""
+    eff = {
+        "agent.max_turns": 150,
+        "compression.threshold": 0.5,
+        "compression.protect_last_n": 20,
+        "compression.hygiene_hard_message_limit": 5000,
+        "timezone": "UTC",
+    }
+    bad = dict((k, (g, w)) for k, g, w in align.diffs(eff))
+    assert set(bad) == {
+        "agent.max_turns",
+        "compression.threshold",
+        "compression.protect_last_n",
+        "timezone",
+    }
+    assert bad["agent.max_turns"] == (150, 500)
+
+
+def test_diffs_ok_when_aligned():
+    eff = {
+        "agent.max_turns": 500,
+        "compression.threshold": 0.8000000000000001,  # 浮点写法差异不算偏差
+        "compression.protect_last_n": 40,
+        "compression.hygiene_hard_message_limit": 5000,
+        "timezone": "Asia/Shanghai",
+    }
+    assert align.diffs(eff) == []
+
+
+def test_check_mode_reports_mismatch(monkeypatch, capsys):
+    monkeypatch.setattr(align, "effective_values", lambda: {"agent.max_turns": 150})
+    rc = align.main(["--check"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "agent.max_turns" in out
+
+
+def test_check_mode_passes_when_aligned(monkeypatch, capsys):
+    eff = {
+        "agent.max_turns": 500,
+        "compression.threshold": 0.8,
+        "compression.protect_last_n": 40,
+        "compression.hygiene_hard_message_limit": 5000,
+        "timezone": "Asia/Shanghai",
+    }
+    monkeypatch.setattr(align, "effective_values", lambda: eff)
+    assert align.main(["--check"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_apply_is_noop_when_aligned(monkeypatch):
+    eff = {
+        "agent.max_turns": 500,
+        "compression.threshold": 0.8,
+        "compression.protect_last_n": 40,
+        "compression.hygiene_hard_message_limit": 5000,
+        "timezone": "Asia/Shanghai",
+    }
+    monkeypatch.setattr(align, "effective_values", lambda: eff)
+    assert align.apply() == []
+
+
+def test_main_never_raises_on_broken_config(monkeypatch, capsys):
+    def boom():
+        raise RuntimeError("配置读不到")
+
+    monkeypatch.setattr(align, "effective_values", boom)
+    assert align.main([]) == 2
+    assert "配置对齐未完成" in capsys.readouterr().out
+
+
+def test_apply_backs_up_config(monkeypatch, tmp_path):
+    """改配置前必须留一份 .coco-bak 备份。"""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("agent:\n  max_turns: 150\n", encoding="utf-8")
+    import hermes_cli.config as hcfg
+
+    monkeypatch.setattr(hcfg, "get_config_path", lambda: cfg)
+    monkeypatch.setattr(align, "effective_values", lambda: {"agent.max_turns": 150})
+    monkeypatch.setattr(hcfg, "set_config_value", lambda key, value: None)
+    monkeypatch.setattr(align, "diffs", lambda eff=None: [("agent.max_turns", 150, 500)])
+    import importlib
+
+    importlib.reload  # noqa: B018  (保持导入语义，set_config_value 由 apply 内部导入)
+
+    changed = align.apply()
+    assert changed == [("agent.max_turns", 150, 500)]
+    assert (tmp_path / "config.yaml.coco-bak").is_file()

@@ -497,6 +497,21 @@ setup_timezone() {
     echo "     手动修复：sudo timedatectl set-timezone $COCO_TARGET_TZ"
 }
 
+# ==================== Coco 标准运行时配置（2026-09-19 加） ====================
+# 轮次 500 / 压缩阈值 0.8 / 保留最近 40 条 / 网关卫生 5000 / 时区北京时间。
+# 显式写进 config.yaml，避免"代码默认值改了但已装实例不生效"或"配置被向导/重装冲掉"。
+setup_coco_config() {
+    if [[ ! -f "$HOME/.hermes/config.yaml" ]]; then
+        info "首次配置向导尚未运行，Coco 标准配置将在向导写入后自动生效"
+        return 0
+    fi
+    if "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/scripts/coco_config_align.py"; then
+        ok "Coco 标准运行时配置已对齐（轮次 500 / 压缩阈值 0.8 / 保留最近 40 条 / 时区北京时间）"
+    else
+        warn "运行时配置对齐未完成，可稍后执行 scripts/update.sh 重试"
+    fi
+}
+
 # ==================== 主函数 ====================
 main() {
     echo ""
@@ -514,6 +529,7 @@ main() {
     install_packages
     setup_database
     setup_config
+    setup_coco_config
     setup_tables
     # 环境补丁必须先于服务安装：用户服务创建时才会带上 EnvironmentFile（防幽灵库）
     setup_gateway_env_patch

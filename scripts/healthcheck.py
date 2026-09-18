@@ -18,6 +18,7 @@
     11. 磁盘空间
     12. 网关运行期日志错误（已排除"重启导致飞书长连接正常断开"的噪音）
     13. 服务器时区（应为 Asia/Shanghai，时间显示统一为北京时间）
+    14. Coco 运行时配置（轮次 500 / 压缩阈值 0.8 / 保留最近 40 条 / 时区北京时间）
 
 退出码: 0 = 全部通过/仅警告; 1 = 存在 FAIL 项
 """
@@ -361,6 +362,31 @@ elif _cur_tz == TARGET_TZ:
 else:
     warn(f"服务器时区是 {_cur_tz}，与北京时间不一致（日志/定时任务会偏移）",
          f"修复：sudo timedatectl set-timezone {TARGET_TZ}（或 COCO_SKIP_TZ=1 明确跳过）")
+
+# ---- 14. Coco 运行时配置核对 ----
+print("\n[14] Coco 运行时配置核对（轮次 / 压缩阈值 / 时区）")
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import coco_config_align as _align  # noqa: E402
+
+    _eff = _align.effective_values()
+    _bad = _align.diffs(_eff)
+    if not _bad:
+        ok(
+            "运行时配置已对齐 Coco 标准"
+            f"（轮次 {_eff.get('agent.max_turns')}、压缩阈值 {_eff.get('compression.threshold')}、"
+            f"保留最近 {_eff.get('compression.protect_last_n')} 条、"
+            f"网关卫生 {_eff.get('compression.hygiene_hard_message_limit')}、"
+            f"时区 {_eff.get('timezone')}）"
+        )
+    else:
+        _detail = "；".join(f"{k} 生效 {g!r} ≠ 标准 {w!r}" for k, g, w in _bad)
+        warn(
+            f"配置与 Coco 标准不一致：{_detail}",
+            "修复：bash ~/hermes-agent/scripts/update.sh（会自动对齐以上各项）",
+        )
+except Exception as _exc:  # noqa: BLE001
+    warn(f"配置核对未完成（{_exc}）", "修复：bash ~/hermes-agent/scripts/update.sh")
 
 # ---- 汇总 ----
 print("\n" + "=" * 56)

@@ -98,10 +98,12 @@ elif sudo ln -sf "/usr/share/zoneinfo/$TARGET_TZ" /etc/localtime 2>/dev/null; th
 else
   echo "  提示: 未能自动设置时区（可能需要 sudo）。手动: sudo timedatectl set-timezone $TARGET_TZ"
 fi
-# Coco 自身时区（幂等）：让定时任务严格按北京时间，不依赖服务器设置
-"$REPO_ROOT/venv/bin/hermes" config set timezone "$TARGET_TZ" >/dev/null 2>&1 \
-  && ok "Coco 时区配置 = $TARGET_TZ（定时任务按北京时间）" \
-  || echo "  提示: 未能写入时区配置，可手动执行 hermes config set timezone $TARGET_TZ"
+# Coco 标准运行时配置（幂等）：时区 + 轮次上限 + 压缩阈值等，避免被向导/重装冲掉
+if "$REPO_ROOT/venv/bin/python" "$REPO_ROOT/scripts/coco_config_align.py"; then
+  ok "Coco 标准运行时配置已对齐（时区 / 轮次 500 / 压缩阈值 0.8 / 保留最近 40 条）"
+else
+  echo "  提示: 运行时配置对齐未完成，可执行 hermes config set 手动设置，或用 hermes config 查看当前值"
+fi
 
 info "[7/8] 重启服务（以 hermes-gateway 用户服务为准，兼容 hermes-agent）"
 if [[ "$NO_RESTART" == "1" ]]; then

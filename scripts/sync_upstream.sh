@@ -6,7 +6,7 @@
 #   1. 下载官方指定版本的完整快照
 #   2. 用官方新文件替换本仓库的「官方层」文件
 #   3. 【保留】Coco 自有文件（官方快照里没有的，一律不动）
-#   4. 【备份】7 个挂钩点文件，并列出需要重新应用改动的位置
+#   4. 【备份】10 个挂钩点文件，并列出需要重新应用改动的位置
 #
 # 不做什么（安全边界）：
 #   · 不动未跟踪的运行时文件（.env.db / 加密密钥 / 缓存）
@@ -43,7 +43,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 UPSTREAM_URL="${COCO_UPSTREAM_URL:-https://github.com/NousResearch/hermes-agent.git}"
 
-# 7 个挂钩点：同步后会变成官方版本，需要重新应用 Coco 的改动
+# 10 个挂钩点：同步后会变成官方版本，需要重新应用 Coco 的改动
 HOOK_FILES=(
   "toolsets.py"
   "agent/prompt_builder.py"
@@ -54,6 +54,9 @@ HOOK_FILES=(
   "gateway/run.py"
   # 第 8 处：CI 挑标签的正则（2026-09-15 同步时被官方版冲掉，实测教训）
   "scripts/sandbox/pick-release-tags.sh"
+  # 第 9、10 处：设置向导的默认值（2026-09-19 加；官方写 max_turns=150，会冲掉 Coco 的 500）
+  "hermes_cli/setup.py"
+  "hermes_cli/setup_quick.py"
 )
 
 # Coco 重写过、但官方也有同名文件：**跳过替换**，保住我们自己的版本。

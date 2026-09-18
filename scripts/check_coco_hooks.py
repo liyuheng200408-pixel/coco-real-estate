@@ -135,6 +135,28 @@ CONTENT_CHECKS = [
         "处理：删掉 on: 下的 release / push 段，只留 workflow_dispatch（参考本次提交）。",
     ),
     (
+        "13",
+        "Coco 运行时配置标准值",
+        "scripts/coco_config_align.py",
+        [
+            r'"agent\.max_turns":\s*500',
+            r'"compression\.threshold":\s*0\.8',
+            r'"compression\.protect_last_n":\s*40',
+            r'"compression\.hygiene_hard_message_limit":\s*5000',
+        ],
+        "对齐脚本缺失或标准值被改，安装/更新就不会再校正运行时配置，\n"
+        "表现为「代码默认值对了但服务器上不生效」或「重装后又回到 150 轮」。\n"
+        "处理：恢复 scripts/coco_config_align.py 的 STANDARD 与安装/更新脚本里的调用。",
+    ),
+    (
+        "14",
+        "设置向导的轮次上限",
+        "hermes_cli/setup.py",
+        [r'max_turns"\]\s*=\s*500'],
+        "官方向导写 max_turns=150，重跑向导会把 Coco 的 500 冲掉。\n"
+        "处理：恢复 COCO-PATCH（向导写 500 + 压缩阈值 0.8 / 保留 40 条）。",
+    ),
+    (
         "12",
         "README 命令不污染终端",
         "README.md",

@@ -187,7 +187,8 @@ def _blank_slate_minimal_toolsets(config: dict):
 
 def _blank_slate_minimize_config(config: dict):
     """Turn OFF every optional config feature; all opt back in via ``hermes setup agent``."""
-    config.setdefault("agent", {})["max_turns"] = 90
+    # COCO-PATCH: 轮次上限 90 → 500（与 Coco 标准一致）
+    config.setdefault("agent", {})["max_turns"] = 500
     config.setdefault("compression", {})["enabled"] = False
     mem = config.setdefault("memory", {})
     mem["memory_enabled"] = False
