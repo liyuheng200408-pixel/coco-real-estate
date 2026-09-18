@@ -51,7 +51,7 @@ STATIC_TOOLS = [
     "save_script","get_script_by_name","list_scripts","delete_script",
     "generate_report",
     "generate_property_poster","generate_poster_grid",
-    "save_agent_brand","get_agent_brand",
+    "save_agent_brand","get_agent_brand","get_coco_version",
     "enable_cron","disable_cron",
     "add_owner","get_owner","list_owners","owner_portfolio","exclusive_expiring","get_property_owners","find_person_by_name",
 ]
@@ -188,6 +188,7 @@ CASES = [
     ("generate_property_poster", {"property_id":pid2}),
     ("generate_poster_grid", {"property_ids":str(pid2)}),
     ("get_agent_brand", {}),
+    ("get_coco_version", {}),
     ("enable_cron", {"chat_id":"oc_test"}),
     ("disable_cron", {}),
     ("get_owner", {"owner_id":oid}),

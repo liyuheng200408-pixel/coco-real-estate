@@ -111,6 +111,25 @@ info "[8/8] 部署健康自检"
 "$VENV_PY" scripts/healthcheck.py || echo "  警告：健康自检存在 FAIL 项，请查看上方提示"
 
 echo ""
+# 确保 coco 命令入口存在（新命令靠这条通道分发给已安装实例；幂等，失败不阻断）
+COCO_BIN="$REPO_ROOT/scripts/coco.sh"
+if [[ -x "$COCO_BIN" ]] && ! command -v coco >/dev/null 2>&1; then
+  COCO_LINKED=0
+  if [[ -w /usr/local/bin ]] && ln -sf "$COCO_BIN" /usr/local/bin/coco 2>/dev/null; then
+    COCO_LINKED=1
+  elif command -v sudo >/dev/null 2>&1 && sudo ln -sf "$COCO_BIN" /usr/local/bin/coco 2>/dev/null; then
+    COCO_LINKED=1
+  else
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$COCO_BIN" "$HOME/.local/bin/coco" 2>/dev/null && COCO_LINKED=1
+  fi
+  if [[ "$COCO_LINKED" == "1" ]]; then
+    ok "coco 命令已就绪（coco version 查版本号 / coco check 体检）"
+  else
+    echo "  提示: coco 命令未创建，可手动执行 sudo ln -sf $COCO_BIN /usr/local/bin/coco"
+  fi
+fi
+
 # 版本号直接读仓库根 VERSION 文件（2026-08-29 加，与 install.sh 保持一致）：以后只改 VERSION，更新终端自动同步
 COCO_VER=$(cat "$REPO_ROOT/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "未知")
 # 版本号形如 0.21.3-1：前半段是官方底座，后半段是 Coco 自己的第 N 次发行

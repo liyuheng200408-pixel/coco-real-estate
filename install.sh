@@ -360,6 +360,29 @@ start_service() {
     else
         warn "未找到 $HERMES_BIN —— hermes 命令不可用（安装可能未完成）"
     fi
+
+    # 创建 coco 命令入口（查版本号 / 体检 / 备份）：与 hermes 同一套策略
+    COCO_BIN="$INSTALL_DIR/scripts/coco.sh"
+    if [[ -x "$COCO_BIN" ]]; then
+        LINKED=0
+        if [[ -w /usr/local/bin ]] && ln -sf "$COCO_BIN" /usr/local/bin/coco 2>/dev/null; then
+            ok "coco 命令已就绪：/usr/local/bin/coco（查版本号: coco version）"
+            LINKED=1
+        elif command -v sudo >/dev/null 2>&1 && sudo ln -sf "$COCO_BIN" /usr/local/bin/coco 2>/dev/null; then
+            ok "coco 命令已就绪：/usr/local/bin/coco（查版本号: coco version）"
+            LINKED=1
+        fi
+        if [[ $LINKED == 0 ]]; then
+            mkdir -p "$HOME/.local/bin"
+            if ln -sf "$COCO_BIN" "$HOME/.local/bin/coco" 2>/dev/null; then
+                ok "coco 命令已就绪：$HOME/.local/bin/coco（查版本号: coco version）"
+                LINKED=1
+            fi
+        fi
+        if [[ $LINKED == 0 ]]; then
+            warn "coco 命令未能创建，请手动执行: sudo ln -sf $COCO_BIN /usr/local/bin/coco"
+        fi
+    fi
     
     # 创建备份目录并设置定时备份
     mkdir -p ~/backups/real_estate
