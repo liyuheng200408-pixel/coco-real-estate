@@ -830,6 +830,13 @@ class ToolRegistry:
         entry = self.get_entry(name, scope=scope)
         if not entry:
             return tool_error(f"Unknown tool: {name}")
+        # 必填参数校验（COCO-PATCH 2026-09-18）：模型漏传必填参数时给出可读提示，
+        # 而不是让 handler 抛 TypeError（模型看到 "Tool execution failed: TypeError..." 会
+        # 转而自己编答案 —— 实测过：房源录入模板那次就是这样）。
+        _missing = self._missing_required_params(entry, args)
+        if _missing:
+            _req = ", ".join(_missing)
+            return tool_error(f"缺少必填参数：{_req}。请补齐这些参数后重新调用 {name}。")
         try:
             if entry.is_async:
                 from model_tools import _run_async
@@ -848,6 +855,19 @@ class ToolRegistry:
             except Exception:
                 sanitized = raw  # defensive: never let the sanitizer block error propagation
             return tool_error(sanitized)
+
+    @staticmethod
+    def _missing_required_params(entry, args) -> list:
+        """schema 里标为必填、但这次调用没给的参数名（COCO-PATCH 2026-09-18）"""
+        try:
+            params = ((entry.schema or {}).get("parameters") or {})
+            required = params.get("required") or []
+        except Exception:
+            return []
+        if not required:
+            return []
+        given = args if isinstance(args, dict) else {}
+        return [k for k in required if k not in given]
 
     # ---- Query helpers -----------------------------------------------
 

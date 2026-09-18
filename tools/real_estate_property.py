@@ -61,17 +61,22 @@ def add_property(
     if tenant_requirements:
         result['tenant_requirements'] = tenant_requirements
     # 业主信息一步关联：找到/新建房东(电话加密)并挂到房源 owner_id
+    # 业主信息一步关联：失败要如实告知经纪人（原先静默吞掉，经纪人以为登记好了）
     owner = None
+    owner_warning = None
     if owner_name or owner_phone:
         try:
             owner = db.link_owner_to_property(result['id'], name=owner_name, phone=owner_phone, wechat=owner_wechat)
-        except Exception:
+        except Exception as exc:
             owner = None
-    # 房源反匹配：自动扫描匹配到的客户
+            owner_warning = f"业主信息登记失败：{type(exc).__name__}: {exc}（房源已录入，可用 update_property 补录业主）"
+    # 房源反匹配：自动扫描匹配到的客户（失败同样要如实说，不能悄悄跳过）
+    match_warning = None
     try:
         matched = db.match_customers_for_property(result['id'])
-    except Exception:
+    except Exception as exc:
         matched = []
+        match_warning = f"自动匹配客户失败：{type(exc).__name__}: {exc}（可稍后重跑匹配）"
     # 同名提示（2026-08-13 加）：防重复录入——同标题在售房源已存在时提醒经纪人确认
     #（真实案例：雅居乐金沙湾/保利中央海岸/恒大美丽沙均录入两条价格、区域冲突的记录）
     duplicate_warning = None
@@ -91,6 +96,10 @@ def add_property(
     response = {"success": True, "property": result}
     if owner:
         response["owner"] = owner
+    if owner_warning:
+        response["warning_owner"] = owner_warning
+    if match_warning:
+        response["warning_match"] = match_warning
     if duplicate_warning:
         response["duplicate_warning"] = duplicate_warning
     if matched:
@@ -116,14 +125,18 @@ def update_property(
     if not result:
         return json.dumps({"success": False, "error": "房源不存在"}, ensure_ascii=False)
     owner = None
+    owner_warning = None
     if owner_name or owner_phone:
         try:
             owner = db.link_owner_to_property(property_id, name=owner_name, phone=owner_phone, wechat=owner_wechat)
-        except Exception:
+        except Exception as exc:
             owner = None
+            owner_warning = f"业主信息登记失败：{type(exc).__name__}: {exc}（房源已更新，可重试补录业主）"
     response = {"success": True, "property": result}
     if owner:
         response["owner"] = owner
+    if owner_warning:
+        response["warning_owner"] = owner_warning
     return json.dumps(response, ensure_ascii=False)
 
 

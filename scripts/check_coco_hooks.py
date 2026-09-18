@@ -159,6 +159,15 @@ CONTENT_CHECKS = [
         "同第 12 项：备份/恢复/迁移步骤里的命令都用 venv 绝对路径，不要 cd 到仓库目录。",
     ),
     (
+        "16",
+        "工具必填参数校验",
+        "tools/registry.py",
+        [r"COCO-PATCH", r"_missing_required_params"],
+        "官方 registry 被上游快照覆盖后，模型漏传必填参数会重新变成 TypeError（模型看到\n"
+        "\"Tool execution failed\" 就会自己编答案）。\n"
+        "处理：在 dispatch 里补回必填参数校验（标记 COCO-PATCH 2026-09-18）。",
+    ),
+    (
         "15",
         "飞书实测清单命令不污染终端",
         "docs/TESTING_FEISHU_FULL.md",
