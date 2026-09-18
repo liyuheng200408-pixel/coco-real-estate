@@ -40,7 +40,7 @@ def _poster_dir():
 
 
 def _fmt_price(p):
-    """价格展示（系统存元）：二手/新房 → '400万'，出租 → '1000元/月'"""
+    """价格展示（系统存元）：二手/一手房 → '400万'，出租 → '1000元/月'"""
     price = p.get('price')
     if price is None:
         return '价格待定'
@@ -167,7 +167,7 @@ def _draw_qr(img, qr_content, center_x, center_y, size=260, bg_light=True):
 
 
 def _draw_premium(img, draw, p, qr_content):
-    """模板1 高端黑金：深黑蓝渐变 + 金色价格 + 细线装饰（新房）"""
+    """模板1 高端黑金：深黑蓝渐变 + 金色价格 + 细线装饰（一手房）"""
     from PIL import ImageDraw
     W, H = img.size
     gold = (212, 175, 55)
@@ -184,7 +184,7 @@ def _draw_premium(img, draw, p, qr_content):
         img.paste(_gradient((W, 640), c1, c2), (0, 0))
 
     # 类型角标（左上）
-    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '新房'}.get(p.get('property_type'), '房源')
+    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '一手房'}.get(p.get('property_type'), '房源')
     f_type = _load_font(30)
     tw = draw.textlength(type_label, font=f_type) + 36
     draw.rounded_rectangle([(40, 40), (40 + tw, 92)], radius=26,
@@ -281,7 +281,7 @@ def _draw_modern(img, draw, p, qr_content):
         img.paste(photo2, (30, 30), card)
 
     # 类型角标
-    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '新房'}.get(p.get('property_type'), '房源')
+    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '一手房'}.get(p.get('property_type'), '房源')
     f_type = _load_font(28)
     tw = draw.textlength(type_label, font=f_type) + 30
     draw.rounded_rectangle([(52, 52), (52 + tw, 96)], radius=22, fill=accent)
@@ -361,7 +361,7 @@ def _draw_vibrant(img, draw, p, qr_content):
         img.paste(_gradient((W, 620), c1, c2), (0, 0))
 
     # 类型角标
-    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '新房'}.get(p.get('property_type'), '房源')
+    type_label = {'second_hand': '二手房', 'rental': '租房', 'new': '一手房'}.get(p.get('property_type'), '房源')
     f_type = _load_font(30)
     tw = draw.textlength(type_label, font=f_type) + 36
     draw.rounded_rectangle([(40, 40), (40 + tw, 92)], radius=26, fill=red)

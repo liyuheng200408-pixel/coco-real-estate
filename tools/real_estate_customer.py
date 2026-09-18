@@ -30,7 +30,7 @@ def add_customer(
 ) -> str:
     """添加新客户到系统
     
-    customer_type: buy_new(买新房) / buy_second_hand(买二手房) / rent(租房)
+    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)
     force=True 跳过客户查重强制新增（仅当老板确认要新增重复客户时才用，默认 False）。
     """
     db = _get_db()
@@ -167,7 +167,7 @@ def get_customer(customer_id: int, task_id: str = None) -> str:
 def list_customers(tier: str = None, status: str = None, customer_type: str = None, limit: int = 20, task_id: str = None) -> str:
     """列出客户列表
     
-    customer_type: buy_new(买新房) / buy_second_hand(买二手房) / rent(租房)
+    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)
     """
     db = _get_db()
     result = db.list_customers(tier=tier, status=status, customer_type=customer_type, limit=limit)
@@ -208,7 +208,7 @@ TOOLS = [
             "renovation": {"type": "string", "description": "装修偏好"},
             "notes": {"type": "string", "description": "备注"},
             "source": {"type": "string", "description": "客户来源"},
-            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型：buy_new(买新房)/buy_second_hand(买二手房)/rent(租房)"},
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型：buy_new(买一手房)/buy_second_hand(买二手房)/rent(租房)"},
             "birthday": {"type": "string", "description": "客户生日 YYYY-MM-DD"},
             "force": {"type": "boolean", "description": "默认 false。true=跳过客户查重强制新增（仅当老板确认要新增重复客户时才用）"},
         },
@@ -412,7 +412,7 @@ def get_customer_form(task_id: str = None) -> str:
 - 客户姓名：（必填）
 - 客户电话：
 - 客户微信：
-- 客户类型：(买新房) / (买二手房) / (租房)
+- 客户类型：(买一手房) / (买二手房) / (租房)
 - 预算范围：（元，如 3000000-5000000；经纪人若说"300-500万"，换算成元后填写）
 - 面积偏好：（如 80-120㎡）
 - 户型需求：（如 3室2厅）

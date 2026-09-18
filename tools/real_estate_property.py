@@ -26,7 +26,7 @@ def add_property(
 ) -> str:
     """添加新房源
     
-    property_type: new(新房) / second_hand(二手房) / rental(租房)
+    property_type: new(一手房) / second_hand(二手房) / rental(租房)
     images: 图片链接或标识（逗号分隔）
     image_paths: 本地图片文件路径（逗号分隔），优先于 images 合并存储
     force=True 跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用，默认 False）。
@@ -137,7 +137,7 @@ def search_property(
     """搜索房源（支持按标题关键词、价格、面积、户型、区域、类型筛选）
     
     title: 标题关键词（模糊匹配，如"华庭"可匹配滨海华庭）
-    property_type: new(新房) / second_hand(二手房) / rental(租房)
+    property_type: new(一手房) / second_hand(二手房) / rental(租房)
     """
     db = _get_db()
     filters = {}
@@ -155,12 +155,12 @@ def search_property(
     return json.dumps({"success": True, "properties": result, "count": len(result)}, ensure_ascii=False)
 
 
-_TYPE_LABELS = {"new": "新房", "second_hand": "二手房", "rental": "租房"}
+_TYPE_LABELS = {"new": "一手房", "second_hand": "二手房", "rental": "租房"}
 _STATUS_LABELS = {"available": "在售", "sold": "已售", "rented": "已租"}
 
 
 def _fmt_price(prop: dict) -> str:
-    """价格展示（系统存元）：二手/新房 → '28.37万'，出租 → '1000元/月'"""
+    """价格展示（系统存元）：二手/一手房 → '28.37万'，出租 → '1000元/月'"""
     price = prop.get("price")
     if price is None:
         return "未录入"
@@ -310,7 +310,7 @@ def batch_match_report(
     """批量匹配汇报：为全部客户（或按类型/等级/区域筛选）生成逐客户匹配明细与汇总
 
     每个客户必有一行（无匹配显式标注"无匹配"），汇总统计由代码生成，禁止自行口算。
-    customer_type: buy_new(买新房) / buy_second_hand(买二手房) / rent(租房)
+    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)
     tier: S/A/B/C
     district: 区域筛选（如"美兰区"或"美兰"）
     top_n: 每个客户展示的最佳房源数（默认 1）
@@ -337,14 +337,14 @@ TOOLS = [
     {"name": "add_property", "description": "添加新房源（支持业主信息：owner_name/owner_phone/owner_wechat 会自动登记房东并关联此房源、电话加密；出租房源可传 tenant_requirements 租客要求，匹配租客时用于筛选）", "parameters": {
         "type": "object", "properties": {
             "title": {"type": "string", "description": "房源标题"},
-            "price": {"type": "integer", "description": "价格（元）：二手房/新房总价如 4000000=400万；出租月租如 1000=1000元/月"},
+            "price": {"type": "integer", "description": "价格（元）：二手房/一手房总价如 4000000=400万；出租月租如 1000=1000元/月"},
             "area": {"type": "number", "description": "面积（㎡）"},
             "community": {"type": "string", "description": "小区名"},
             "district": {"type": "string", "description": "区域"},
             "rooms": {"type": "integer", "description": "室数"},
             "halls": {"type": "integer", "description": "厅数"},
             "renovation": {"type": "string", "enum": ["毛坯", "简装", "精装"], "description": "装修状态"},
-            "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型：new(新房)/second_hand(二手房)/rental(租房)"},
+            "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型：new(一手房)/second_hand(二手房)/rental(租房)"},
             "images": {"type": "string", "description": "房源图片，多个用逗号分隔（URL或本地路径）"},
             "image_paths": {"type": "string", "description": "经纪人消息中附带的图片本地路径，多个用逗号分隔，与 images 合并存入房源"},
             "tenant_requirements": {"type": "string", "description": "出租房源的租客要求（如不吸烟/办居住证/学生优先），多个用逗号或顿号分隔，匹配租客时会用于过滤"},
@@ -383,7 +383,7 @@ TOOLS = [
     }, "handler": lambda args, **kw: property_stats()},
     {"name": "batch_match_report", "description": "批量匹配汇报：为全部客户（或按类型/等级/区域筛选）生成逐客户匹配明细与汇总，每个客户一行（无匹配显式标注），完全匹配/接近匹配/无匹配由代码判定，汇总数字由代码统计，禁止自行口算", "parameters": {
         "type": "object", "properties": {
-            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型筛选：buy_new买新房/buy_second_hand买二手房/rent租房"},
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型筛选：buy_new买一手房/buy_second_hand买二手房/rent租房"},
             "tier": {"type": "string", "enum": ["S", "A", "B", "C"], "description": "客户等级筛选"},
             "district": {"type": "string", "description": "区域筛选，如 美兰区 或 美兰"},
             "top_n": {"type": "integer", "description": "每个客户展示的最佳房源数，默认1"},
@@ -408,7 +408,7 @@ def get_property_form(task_id: str = None) -> str:
 - 建造年份：
 - 有无电梯：（有/无）
 - 车位：（有/无）
-- 房源类型：（新房/二手房/租房）
+- 房源类型：（一手房/二手房/租房）
 - 特色标签：（如"学区房""地铁房"，多个用逗号分隔）
 - 房源图片：（可直接在消息中发送图片，会自动关联）"""
     return json.dumps({"success": True, "form": form}, ensure_ascii=False)

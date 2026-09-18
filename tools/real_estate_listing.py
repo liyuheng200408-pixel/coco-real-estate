@@ -36,7 +36,7 @@ def _fmt_basic(p):
 
 
 def _fmt_price(p):
-    """价格展示（系统存元）：二手/新房 → '400万'，出租 → '1000元/月'"""
+    """价格展示（系统存元）：二手/一手房 → '400万'，出租 → '1000元/月'"""
     price = p.get('price')
     if price is None:
         return '价格待定'

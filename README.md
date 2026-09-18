@@ -2,9 +2,9 @@
 
 > 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
-[![Coco v0.21.3-9](https://img.shields.io/badge/Coco%20AI-v0.21.3--9-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-9)
+[![Coco v0.21.3-10](https://img.shields.io/badge/Coco%20AI-v0.21.3--10-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-10)
 
-> 🏷️ **当前版本：v0.21.3-9**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-9)
+> 🏷️ **当前版本：v0.21.3-10**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-10)
 
 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
@@ -131,7 +131,7 @@ git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
 ### 查看版本
 
 ```bash
-coco version     # 输出形如：Coco v0.21.3-9（官方 Hermes 0.21.3 定制版）
+coco version     # 输出形如：Coco v0.21.3-10（官方 Hermes 0.21.3 定制版）
 coco help        # 查看全部可用命令（version / check / backup）
 ```
 

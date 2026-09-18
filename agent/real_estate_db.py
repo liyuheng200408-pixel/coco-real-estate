@@ -1232,7 +1232,7 @@ class RealEstateDB:
                 # 租客要求过滤（2026-08-29 加）：出租房源租客要求与客户资料冲突 → 排除
                 if prop.property_type == 'rental' and not self._tenant_req_ok(prop.tenant_requirements, c):
                     continue
-                # 类型硬匹配（2026-08-30 加）：客户类型明确(买新/买二手)时，类型不符即排除——买二手不推新房、买新房不推二手
+                # 类型硬匹配（2026-08-30 加）：客户类型明确(买新/买二手)时，类型不符即排除——买二手不推一手房、买一手房不推二手
                 if c.customer_type in ('buy_new', 'buy_second_hand') and not self._match_type(c.customer_type, prop.property_type):
                     continue
                 # 户型硬性要求：客户明确 N 室/N 厅而房源不满足 → 跳过
@@ -1278,7 +1278,7 @@ class RealEstateDB:
                     # 客户明确指定区域但房源不在该区：显式标注（2026-08-30 与正向 match_property 对称）
                     reasons.append("区域不符")
 
-                # 类型匹配（新房/二手房/租房）：不匹配不加分但标注，且不算完全匹配
+                # 类型匹配（一手房/二手房/租房）：不匹配不加分但标注，且不算完全匹配
                 type_ok = self._match_type(c.customer_type, prop.property_type)
                 if c.customer_type and not type_ok:
                     reasons.append("类型不符")
@@ -1400,7 +1400,7 @@ class RealEstateDB:
             # 租客要求过滤（2026-08-29 加）：出租房源租客要求与客户资料冲突 → 排除
             if prop_type == 'rental' and not self._tenant_req_ok(prop.get('tenant_requirements'), customer):
                 continue
-            # 类型硬匹配（2026-08-30 加）：客户类型明确(买新/买二手)时，类型不符即排除——买二手不推新房、买新房不推二手
+            # 类型硬匹配（2026-08-30 加）：客户类型明确(买新/买二手)时，类型不符即排除——买二手不推一手房、买一手房不推二手
             if ctype in ('buy_new', 'buy_second_hand') and not self._match_type(ctype, prop_type):
                 continue
             
@@ -1435,8 +1435,8 @@ class RealEstateDB:
                 #（2026-08-30 真实案例：周女士要秀英区，4 套其他区被排前面且被误判完全匹配）
                 reasons.append("区域不符")
             
-            # 类型匹配（新房/二手房/租房）：不匹配不加分但标注，且不算完全匹配
-            #（2026-08-13 真实案例：要买新房的客户被推二手房并标完全匹配）
+            # 类型匹配（一手房/二手房/租房）：不匹配不加分但标注，且不算完全匹配
+            #（2026-08-13 真实案例：要买一手房的客户被推二手房并标完全匹配）
             type_ok = self._match_type(ctype, prop.get('property_type'))
             if ctype and not type_ok:
                 reasons.append("类型不符")
@@ -1604,7 +1604,7 @@ class RealEstateDB:
         return False
 
     _CUSTOMER_TYPE_TO_PROP_TYPE = {
-        'buy_new': 'new',            # 买新房 → 新房
+        'buy_new': 'new',            # 买一手房 → 一手房
         'buy_second_hand': 'second_hand',  # 买二手房 → 二手房
         'rent': 'rental',            # 租房 → 出租
     }
@@ -1864,7 +1864,7 @@ class RealEstateDB:
         with self.get_session() as s:
             d = Deal(customer_id=customer_id, property_id=property_id, **kwargs)
             s.add(d)
-            # 成交后房源不再对外在售：二手房/新房 → sold，出租 → rented
+            # 成交后房源不再对外在售：二手房/一手房 → sold，出租 → rented
             # （真实案例 2026-08-11：阳光花园过户完成仍显示在售 21 套）
             p = s.query(Property).get(property_id)
             if p and p.status == 'available':
