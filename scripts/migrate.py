@@ -56,6 +56,8 @@ MIG_FILE_RE = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 # 删列放行开关：迁移文件里写 -- migrate:allow-drop-column 才允许 DROP COLUMN
 _DROP_COLUMN_OPT_IN_RE = re.compile(r"--\s*migrate:allow-drop-column\b", re.I)
 _DROP_COLUMN_LABELS = {"DROP COLUMN", "ALTER ... DROP"}
+# CREATE INDEX ... ON <表> (列, 列)：用于"部分结构库"安全检查（缺列则跳过）
+_INDEX_RE = re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX[^;]*?\bON\s+([\"\w.]+)\s*\(([^)]*)\)", re.I)
 # 规范删列形态：ALTER TABLE <表> DROP COLUMN <列>（COLUMN 关键字可省）
 _DROP_COL_RE = re.compile(r"ALTER\s+TABLE\s+([\"\w.]+)\s+DROP\s+(?:COLUMN\s+)?(\w+)", re.I)
 
@@ -209,6 +211,17 @@ def apply_migration(conn, seq, path):
                 if not _column_exists(conn, table_name, col_name):
                     print(f"    跳过（列 {table_name}.{col_name} 不存在）")
                     continue
+            # CREATE INDEX 幂等：索引引用的列不存在则跳过（对"只有部分结构"的库安全）
+            _body = re.sub(r"(?m)^\s*--.*$", "", stmt).strip().upper()
+            if _body.startswith("CREATE INDEX") or _body.startswith("CREATE UNIQUE INDEX"):
+                mi = _INDEX_RE.search(stmt)
+                if mi:
+                    tbl, cols_raw = mi.group(1), mi.group(2)
+                    cols = [c.strip().split()[0].strip('"') for c in cols_raw.split(",") if c.strip()]
+                    missing = [c for c in cols if not _column_exists(conn, tbl, c)]
+                    if missing:
+                        print(f"    跳过（表 {tbl} 缺列 {missing}，该索引暂不适用）")
+                        continue
             conn.execute(text(stmt))
         conn.execute(text(
             "INSERT INTO migrations_history (seq, filename, duration_ms) "

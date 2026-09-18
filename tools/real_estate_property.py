@@ -529,23 +529,21 @@ def price_history(property_id: int, limit: int = 20, task_id: str = None) -> str
 def price_drop_alerts(days: int = 7, task_id: str = None) -> str:
     """降价提醒：扫描近期降价房源，反匹配"预算差一点够得着"的客户，输出联系建议"""
     db = _get_db()
-    props = db.search_properties(limit=10000)
+    # 2026-09-18 修：原先遍历 1 万套房、对每套各查一次调价历史 + 一次客户反匹配（N+1 很慢且漏房源）。
+    # 现在先用一次 SQL 取出"近期降过价的在售房源"，再只对这些房源做客户反匹配。
     alerts = []
-    for p in props:
-        customers = db.find_customers_for_price_drop(p["id"], days=days)
-        if customers:
-            history = db.get_price_history(p["id"], limit=1)
-            if not history:
-                continue
-            drop = history[0]
-            alerts.append({
-                "property_id": p["id"],
-                "title": p["title"],
-                "old_price": drop["old_price"],
-                "new_price": drop["new_price"],
-                "drop_amount": (drop["old_price"] - drop["new_price"]) if drop["old_price"] else None,
-                "matched_customers": customers,
-            })
+    for drop in db.recent_price_drops(days=days):
+        customers = db.find_customers_for_price_drop(drop["property_id"], days=days)
+        if not customers:
+            continue
+        alerts.append({
+            "property_id": drop["property_id"],
+            "title": drop["title"],
+            "old_price": drop["old_price"],
+            "new_price": drop["new_price"],
+            "drop_amount": drop["drop_amount"],
+            "matched_customers": customers,
+        })
     if not alerts:
         return json.dumps({"success": True, "message": f"近{days}天无降价房源或降价后无可捞回客户", "alerts": []}, ensure_ascii=False)
     total_hits = sum(len(a["matched_customers"]) for a in alerts)
