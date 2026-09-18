@@ -77,7 +77,7 @@ python3 scripts/check_coco_hooks.py    # 应全部 PASS
 
 ### 第 6 步｜灰度发布
 1. 先在你自己的服务器（测试实例）跑完整更新链路：
-   `cd ~/hermes-agent && source venv/bin/activate && git pull && bash scripts/update.sh`
+   `git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh`
 2. 更新后确认：
    - [ ] 飞书里 Coco 自我介绍正确（不是官方默认文案）
    - [ ] 房产工具可用（例如"看下房源统计"）

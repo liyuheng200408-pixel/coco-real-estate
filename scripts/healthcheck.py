@@ -106,7 +106,7 @@ if os.path.isdir(os.path.join(INSTALL_DIR, ".git")):
     rc, behind = sh(f"git -C {INSTALL_DIR} rev-list --count HEAD..origin/master 2>/dev/null")
     if rc and behind.isdigit() and int(behind) > 0:
         warn(f"代码落后远程 {behind} 个提交",
-             "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && systemctl --user restart hermes-gateway.service")
+             "git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh")
     elif rc:
         ok("代码已是最新")
 else:
@@ -150,7 +150,7 @@ if not missing:
     ok("依赖齐全（ddgs/Pillow/qrcode/lark-oapi/sqlalchemy/psycopg2 等）")
 else:
     bad(f"缺少依赖: {', '.join(missing)}",
-        "cd ~/hermes-agent && source venv/bin/activate && git pull && pip install -e . -q && systemctl --user restart hermes-gateway.service")
+        "git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh")
 
 # ---- 4. web_search 可用性 ----
 print("\n[4] web_search 联网搜索后端")
