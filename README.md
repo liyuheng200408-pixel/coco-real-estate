@@ -2,9 +2,9 @@
 
 > 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
-[![Coco v0.21.3-17](https://img.shields.io/badge/Coco%20AI-v0.21.3--17-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-17)
+[![Coco v0.21.3-18](https://img.shields.io/badge/Coco%20AI-v0.21.3--18-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-18)
 
-> 🏷️ **当前版本：v0.21.3-17**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-17)
+> 🏷️ **当前版本：v0.21.3-18**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-18)
 
 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
@@ -31,7 +31,7 @@
 | 🎯 客户管理 | S/A/B/C 四级分类，自动计算跟进周期；客户画像管理（预算、户型、区域、装修偏好）；一键添加、查询、更新客户；客户生日管理 |
 | 🏠 智能匹配 | 多维度加权评分算法：价格 30% + 户型 25% + 面积 20% + 区域 15% + 装修 10%，自动推荐最合适房源；新房源自动反匹配 S/A 级客户 |
 | 🏠 房源详情 | 问某套房源（给编号或标题均可）一次返回全部字段 + 自动计算的单价（总价÷面积，保留两位小数）+ 业主联系方式 + 图片、调价记录；标题对不上时列出最接近的候选请你确认 |
-| ⏰ 跟进提醒 | 早报/午间检查/逾期检查定时提醒功能（默认关闭，设置 `COCO_ENABLE_CRON=1` 开启：早报 09:00、午间 13:00、逾期每 30 分钟），S 级客户 2 天内跟进 |
+| ⏰ 跟进提醒 | 定时任务默认关闭；需要时对 Coco 说一句「开启定时任务」即可（早报 09:00 / 午间检查 13:00 / 逾期提醒每 30 分钟）。S 级客户 2 天内跟进 |
 | 🏠 带看管理 | 预约带看、记录带看结果、客户反馈、自动 1 小时回访提醒 |
 | 📝 成交管理 | 定金→签约→贷款→过户→交房 五阶段状态机，自动推进提醒 |
 | 📊 数据报告 | 客户统计、房源统计、逾期跟进提醒、经营周报/月报、竞品对比、客户意向度评分 |
@@ -131,13 +131,15 @@ git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
 ### 查看版本
 
 ```bash
-coco version     # 输出形如：Coco v0.21.3-17（官方 Hermes 0.21.3 定制版）
+coco version     # 输出形如：Coco v0.21.3-18（官方 Hermes 0.21.3 定制版）
 coco help        # 查看全部可用命令（version / check / backup）
 ```
 
 注意：`hermes --version` 显示的是**底座（官方 Hermes）版本**，不是 Coco 版本。
 
 ### 服务管理
+
+> 定时任务如需在重装/重启后自动开启（无需每天手动开），可在服务器的 `.env.db` 里加一行 `COCO_ENABLE_CRON=1` 再重启服务。
 
 **启动服务：**
 ```bash
