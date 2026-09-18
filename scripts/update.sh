@@ -77,6 +77,9 @@ info "[6/8] 迁移配置文件（跟随官方版本升级时需要，非交互�
 "$VENV_PY" scripts/migrate_config.py || echo "  警告：配置迁移步骤异常，不阻断更新"
 ok "配置迁移步骤完成"
 
+info "补齐海报字体与渲染器（幂等，已装则跳过）"
+bash "$REPO_ROOT/scripts/install_fonts.sh" --quiet || echo "  提示: 字体安装未完成，可重跑 scripts/install_fonts.sh（海报会回落系统字体，不阻塞）"
+
 info "统一时区（北京时间；如需保留原时区可设 COCO_SKIP_TZ=1）"
 TARGET_TZ="Asia/Shanghai"
 CUR_TZ=""

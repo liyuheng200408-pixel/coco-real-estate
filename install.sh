@@ -512,6 +512,17 @@ setup_coco_config() {
     fi
 }
 
+# ==================== 海报渲染器与字体（2026-09-19 加） ====================
+# 海报要用 librsvg + 中文商用字体才有"专业感"。失败不阻塞安装：海报会回落旧引擎/系统字体。
+install_poster_fonts() {
+    info "安装海报渲染器与字体（约 140MB，可跳过：COCO_SKIP_FONTS=1）"
+    if [[ "${COCO_SKIP_FONTS:-0}" == "1" ]]; then
+        warn "已跳过（COCO_SKIP_FONTS=1），海报将使用系统自带字体"
+        return 0
+    fi
+    bash "$INSTALL_DIR/scripts/install_fonts.sh" || warn "字体安装未完成，可稍后重跑 scripts/install_fonts.sh（不影响出图）"
+}
+
 # ==================== 主函数 ====================
 main() {
     echo ""
@@ -524,6 +535,7 @@ main() {
     check_system
     setup_timezone
     install_deps
+    install_poster_fonts
     clone_project
     setup_python
     install_packages
