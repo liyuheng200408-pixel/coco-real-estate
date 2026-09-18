@@ -1412,7 +1412,8 @@ DEFAULT_CONFIG = {
     # peerName, sessions, enabled); hermes-specific overrides only here.
     "honcho": {},
     # IANA timezone (e.g. "Asia/Kolkata", "America/New_York"). Empty = server-local time.
-    "timezone": "",
+    # Coco 定制（2026-09-19）：默认固定北京时间，避免云服务器默认 UTC 导致日志/定时任务/业务时间戳差 8 小时。
+    "timezone": "Asia/Shanghai",
 
     "slack": {
         "require_mention": True,  # require @mention to respond in channels

@@ -77,6 +77,32 @@ info "[6/8] 迁移配置文件（跟随官方版本升级时需要，非交互�
 "$VENV_PY" scripts/migrate_config.py || echo "  警告：配置迁移步骤异常，不阻断更新"
 ok "配置迁移步骤完成"
 
+info "统一时区（北京时间；如需保留原时区可设 COCO_SKIP_TZ=1）"
+TARGET_TZ="Asia/Shanghai"
+CUR_TZ=""
+if command -v timedatectl >/dev/null 2>&1; then
+  CUR_TZ="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+fi
+if [[ -z "$CUR_TZ" && -f /etc/timezone ]]; then
+  CUR_TZ="$(tr -d '[:space:]' < /etc/timezone 2>/dev/null || true)"
+fi
+if [[ "${COCO_SKIP_TZ:-0}" == "1" ]]; then
+  echo "  已跳过（COCO_SKIP_TZ=1）"
+elif [[ "$CUR_TZ" == "$TARGET_TZ" ]]; then
+  ok "服务器时区已是 $TARGET_TZ"
+elif command -v timedatectl >/dev/null 2>&1 && sudo timedatectl set-timezone "$TARGET_TZ" 2>/dev/null; then
+  ok "服务器时区已统一为 $TARGET_TZ（当前 $(date '+%Y-%m-%d %H:%M %Z')）"
+elif sudo ln -sf "/usr/share/zoneinfo/$TARGET_TZ" /etc/localtime 2>/dev/null; then
+  echo "$TARGET_TZ" | sudo tee /etc/timezone >/dev/null 2>&1 || true
+  ok "服务器时区已统一为 $TARGET_TZ"
+else
+  echo "  提示: 未能自动设置时区（可能需要 sudo）。手动: sudo timedatectl set-timezone $TARGET_TZ"
+fi
+# Coco 自身时区（幂等）：让定时任务严格按北京时间，不依赖服务器设置
+"$REPO_ROOT/venv/bin/hermes" config set timezone "$TARGET_TZ" >/dev/null 2>&1 \
+  && ok "Coco 时区配置 = $TARGET_TZ（定时任务按北京时间）" \
+  || echo "  提示: 未能写入时区配置，可手动执行 hermes config set timezone $TARGET_TZ"
+
 info "[7/8] 重启服务（以 hermes-gateway 用户服务为准，兼容 hermes-agent）"
 if [[ "$NO_RESTART" == "1" ]]; then
   echo "  已跳过重启（--no-restart），请稍后手动重启。"

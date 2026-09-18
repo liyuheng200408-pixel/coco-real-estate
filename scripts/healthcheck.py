@@ -17,6 +17,7 @@
     10. 技能同步
     11. 磁盘空间
     12. 网关运行期日志错误（已排除"重启导致飞书长连接正常断开"的噪音）
+    13. 服务器时区（应为 Asia/Shanghai，时间显示统一为北京时间）
 
 退出码: 0 = 全部通过/仅警告; 1 = 存在 FAIL 项
 """
@@ -60,6 +61,15 @@ def warn(msg, hint=""):
     print(f"  [WARN] {msg}")
     if hint:
         print(f"         建议: {hint}")
+
+
+def to_beijing(ts: str) -> str:
+    """把 systemd 时间戳转成北京时间显示（服务器可能跑在 UTC，直接显示会让人对不上表）"""
+    ts = (ts or "").strip()
+    if not ts:
+        return ""
+    rc, out = sh(f"TZ=Asia/Shanghai date -d '{ts}' '+%Y-%m-%d %H:%M' 2>/dev/null")
+    return out if (rc and out) else ts
 
 
 def sh(cmd, timeout=15):
@@ -119,7 +129,8 @@ _user = "--user " if SERVICE_USER else ""
 rc, _ = sh(f"systemctl {_user}is-active --quiet {SERVICE}")
 if rc:
     rc2, since = sh(f"systemctl {_user}show -p ActiveEnterTimestamp --value {SERVICE}")
-    ok(f"服务 {SERVICE} 运行中" + (f"（自 {since}）" if rc2 and since else ""))
+    since_cn = to_beijing(since) if (rc2 and since) else ""
+    ok(f"服务 {SERVICE} 运行中" + (f"（自 {since_cn}，北京时间）" if since_cn else ""))
 else:
     # 主服务未运行，查备选系统服务（旧版 install.sh 自建的那个）
     _fb_user = "--user " if SERVICE_FALLBACK_USER else ""
@@ -328,6 +339,28 @@ if rc and out:
         ok(f"近期日志无运行期错误（窗口: {_window}；重启时的飞书断开噪音已排除）")
 else:
     warn("无法读取服务日志")
+
+# ---- 13. 服务器时区 ----
+print("\n[13] 服务器时区（北京时间口径）")
+TARGET_TZ = "Asia/Shanghai"
+_cur_tz = ""
+if sh("command -v timedatectl >/dev/null 2>&1")[0]:
+    rc_tz, _cur_tz = sh("timedatectl show -p Timezone --value 2>/dev/null")
+    _cur_tz = _cur_tz.strip()
+if not _cur_tz:
+    try:
+        with open("/etc/timezone", encoding="utf-8") as fh:
+            _cur_tz = fh.read().strip()
+    except Exception:
+        _cur_tz = ""
+if not _cur_tz:
+    warn("无法读取服务器时区", f"手动确认：timedatectl")
+elif _cur_tz == TARGET_TZ:
+    _now_cn = sh("TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M'")[1]
+    ok(f"服务器时区 {TARGET_TZ}（当前 {_now_cn}）")
+else:
+    warn(f"服务器时区是 {_cur_tz}，与北京时间不一致（日志/定时任务会偏移）",
+         f"修复：sudo timedatectl set-timezone {TARGET_TZ}（或 COCO_SKIP_TZ=1 明确跳过）")
 
 # ---- 汇总 ----
 print("\n" + "=" * 56)

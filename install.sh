@@ -460,6 +460,43 @@ print_result() {
     echo -e "${GREEN}========================================${NC}"
 }
 
+# ==================== 时区统一（2026-09-19 加） ====================
+# 目的：不管云服务商默认给什么时区（阿里云/腾讯云常为 UTC），装完都按北京时间走，
+# 否则日志、定时任务（早报 09:00）、业务时间戳都会差 8 小时。
+# 想保留服务器原时区：COCO_SKIP_TZ=1 bash install.sh
+COCO_TARGET_TZ="Asia/Shanghai"
+
+setup_timezone() {
+    info "统一服务器时区为北京时间（$COCO_TARGET_TZ）"
+    if [[ "${COCO_SKIP_TZ:-0}" == "1" ]]; then
+        warn "已跳过时区设置（COCO_SKIP_TZ=1），服务器保持原时区"
+        return 0
+    fi
+    local cur=""
+    if command -v timedatectl >/dev/null 2>&1; then
+        cur="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+    fi
+    if [[ -z "$cur" && -f /etc/timezone ]]; then
+        cur="$(tr -d '[:space:]' < /etc/timezone 2>/dev/null || true)"
+    fi
+    if [[ "$cur" == "$COCO_TARGET_TZ" ]]; then
+        ok "服务器时区已是 $COCO_TARGET_TZ（当前 $(date '+%Y-%m-%d %H:%M %Z')）"
+        return 0
+    fi
+    if command -v timedatectl >/dev/null 2>&1 && sudo timedatectl set-timezone "$COCO_TARGET_TZ" 2>/dev/null; then
+        ok "服务器时区已设为 $COCO_TARGET_TZ（当前 $(date '+%Y-%m-%d %H:%M %Z')）"
+        return 0
+    fi
+    # 回退：容器/精简系统没有 timedatectl 时直接写时区文件
+    if sudo ln -sf "/usr/share/zoneinfo/$COCO_TARGET_TZ" /etc/localtime 2>/dev/null; then
+        echo "$COCO_TARGET_TZ" | sudo tee /etc/timezone >/dev/null 2>&1 || true
+        ok "服务器时区已设为 $COCO_TARGET_TZ（当前 $(date '+%Y-%m-%d %H:%M %Z')）"
+        return 0
+    fi
+    warn "时区设置失败（可能需要 sudo 权限）"
+    echo "     手动修复：sudo timedatectl set-timezone $COCO_TARGET_TZ"
+}
+
 # ==================== 主函数 ====================
 main() {
     echo ""
@@ -470,6 +507,7 @@ main() {
     echo ""
     
     check_system
+    setup_timezone
     install_deps
     clone_project
     setup_python
