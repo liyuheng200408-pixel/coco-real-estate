@@ -2,9 +2,9 @@
 
 > 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
-[![Coco v0.21.3-31](https://img.shields.io/badge/Coco%20AI-v0.21.3--19-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-31)
+[![Coco v0.21.3-32](https://img.shields.io/badge/Coco%20AI-v0.21.3--19-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-32)
 
-> 🏷️ **当前版本：v0.21.3-31**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-31)
+> 🏷️ **当前版本：v0.21.3-32**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-32)
 
 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
@@ -70,8 +70,6 @@ curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-esta
 
 这个脚本会自动完成所有安装步骤（检测系统环境、安装依赖、克隆代码、创建数据库、注册服务并启动）。
 
-脚本会同时探测两个源，**谁响应快就用谁**；也可以强制指定：`COCO_SOURCE=github bash install.sh`。
-
 ### 第二步：安装后的配置
 
 安装脚本执行成功后，你需要完成以下配置才能使用 Hermes。
@@ -126,21 +124,17 @@ hermes gateway restart
 
 ```bash
 git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
+```
 
 > 更新只用这条命令。**不要用 `install.sh` 更新**（它会重建安装目录，清掉数据库密钥与图片缓存），**也不要直接跑 `hermes update`**（官方更新会重置你手改过的代码）。
-```
 
 > 更新会自动备份，客户数据全程保留，不会删除你的加密密钥。
 
 ### 查看版本
 
-安装脚本会自动把服务器时区统一为**北京时间（Asia/Shanghai）**，日志、定时任务、录入时间都按北京时间显示。
-安装脚本还会装好**海报渲染器与中文商用字体**（约 140MB，多源自动回退；装不上自动回落系统字体，不影响出图），海报支持两款模板（A 红金促销 / B 极简高级需照片），画幅 1080×1920，品牌栏只显示经纪人自己的公司名、页脚固定「房源信息以实际看房为准」。
-每次安装/更新还会自动把 Coco 的运行时配置校正为标准值（单次任务 500 轮、上下文压缩阈值 0.8、保留最近 40 条消息），重装或重跑配置向导后也不会丢失。
-如需保留服务器原时区：安装时执行 `COCO_SKIP_TZ=1 bash install.sh`。
 
 ```bash
-coco version     # 输出形如：Coco v0.21.3-31（官方 Hermes 0.21.3 定制版）
+coco version     # 输出形如：Coco v0.21.3-32（官方 Hermes 0.21.3 定制版）
 coco help        # 查看全部可用命令（version / check / backup）
 ```
 
