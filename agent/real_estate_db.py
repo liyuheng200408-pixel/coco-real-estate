@@ -140,7 +140,6 @@ class Property(Base):
     district = Column(String(100))
     address = Column(String(300))
     price = Column(BigInteger, nullable=False)  # 元（二手房总价如 4000000，出租月租如 1000）
-    unit_price = Column(Integer)  # 元/㎡ = price/area
     area = Column(Float, nullable=False)
     rooms = Column(Integer)
     halls = Column(Integer)
@@ -176,13 +175,28 @@ class Property(Base):
         Index('re_idx_prop_district', 'district'),
     )
     
+    def unit_price_value(self):
+        """单价（元/㎡；出租为 元/㎡/月）：按当前 总价÷面积 现算，保留两位小数。
+
+        单价不再存列（历史 unit_price 列已由迁移 009 删除），避免"录入后改价/改面积不重算"
+        造成展示层拿到过期值或空值。面积缺失/为 0 时返回 None（无法计算）。
+        """
+        try:
+            price = float(self.price) if self.price is not None else None
+            area = float(self.area) if self.area is not None else None
+        except (TypeError, ValueError):
+            return None
+        if not price or not area or area <= 0:
+            return None
+        return round(price / area, 2)
+
     def to_dict(self):
         return {
             'id': self.id, 'title': self.title, 'community': self.community,
             'district': self.district, 'address': self.address,
-            # price 列是 Numeric(12,2)，读出为 Decimal，必须转 float 否则 json.dumps 崩溃
+            # price 列读出为 Decimal，必须转 float 否则 json.dumps 崩溃
             'price': float(self.price) if self.price is not None else None,
-            'unit_price': self.unit_price,
+            'unit_price': self.unit_price_value(),
             'area': self.area, 'rooms': self.rooms, 'halls': self.halls,
             'bathrooms': self.bathrooms, 'floor': self.floor,
             'orientation': self.orientation, 'renovation': self.renovation,

@@ -42,7 +42,6 @@ def add_property(
                           f"请先向老板确认：合并/更新请用 update_property(property_id={dup['id']}, ...)；"
                           f"确实要新增请用 add_property(..., force=true)。"),
             }, ensure_ascii=False)
-    unit_price = int(price / area) if area > 0 else None  # 元/㎡
     # 合并 images 和 image_paths
     img_list = []
     for src in (images, image_paths):
@@ -51,7 +50,7 @@ def add_property(
     merged_images = ','.join(img_list) if img_list else None
     result = db.add_property(
         title=title, price=price, area=area, community=community,
-        district=district, address=address, unit_price=unit_price,
+        district=district, address=address,
         rooms=rooms, halls=halls, bathrooms=bathrooms, floor=floor,
         orientation=orientation, renovation=renovation, year_built=year_built,
         has_elevator=has_elevator, parking=parking, property_type=property_type,

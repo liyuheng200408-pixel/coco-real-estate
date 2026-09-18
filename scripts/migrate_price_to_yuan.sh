@@ -16,14 +16,11 @@ DB_URL="${DATABASE_URL:-postgresql://hermes:***@localhost:5432/hermes_agent}"
 echo "== 1. re_properties.price: 万元 → 元（列类型 numeric(12,2) → bigint） =="
 psql "$DB_URL" -c "ALTER TABLE re_properties ALTER COLUMN price TYPE bigint USING round(price * 10000);"
 
-echo "== 2. re_properties.unit_price 按新 price 重算（元/㎡） =="
-psql "$DB_URL" -c "UPDATE re_properties SET unit_price = CASE WHEN area > 0 THEN round((price / area)::numeric, 0)::int ELSE unit_price END WHERE price > 0;"
-
-echo "== 3. re_customers 预算: 万元 → 元 =="
+echo "== 2. re_customers 预算: 万元 → 元 =="
 psql "$DB_URL" -c "UPDATE re_customers SET budget_min = budget_min * 10000 WHERE budget_min > 0;"
 psql "$DB_URL" -c "UPDATE re_customers SET budget_max = budget_max * 10000 WHERE budget_max > 0;"
 
-echo "== 4. re_deals 成交价/定金: 万元 → 元 =="
+echo "== 3. re_deals 成交价/定金: 万元 → 元 =="
 psql "$DB_URL" -c "UPDATE re_deals SET price = price * 10000 WHERE price > 0;"
 psql "$DB_URL" -c "UPDATE re_deals SET deposit_amount = deposit_amount * 10000 WHERE deposit_amount > 0;"
 

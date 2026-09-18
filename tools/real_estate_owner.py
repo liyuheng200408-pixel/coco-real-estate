@@ -26,26 +26,13 @@ def _mask_id(id_number: str) -> str:
     return id_number[:4] + '*' * (len(id_number) - 8) + id_number[-4:]
 
 
-def _mask_phone(phone) -> str:
-    """手机号脱敏（2026-08-30 老板定：业主电话脱敏展示）：保留前3后4，中间打星。
-
-    老板决策：对外/经纪人展示业主联系方式要脱敏，与"房源公开营销、联系方式敏感"的口径一致。
-    仅对展示层做脱敏，库内仍存密文（EncryptedString），不影响比对/关联。
-    """
-    if not phone:
-        return None
-    phone = str(phone).strip()
-    if len(phone) < 7:
-        return phone
-    return phone[:3] + '*' * (len(phone) - 7) + phone[-4:]
-
-
 def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
     """按房源 ID 批量查询业主信息（房源→业主反向查询，最多 3 套）。
 
     老板实测现象：让 Coco "把这套/几套房源的业主信息给我"，Coco 只能做模糊工具搜索，
     找不到就兜底报"均未录入业主信息"。本工具补上反向能力：给房源ID → 返回该房源关联业主
-    的姓名/电话(脱敏)/微信/看房方式；房源未关联业主则 owner=None，如实说明。
+    的姓名/电话/微信/看房方式；房源未关联业主则 owner=None，如实说明。
+    联系方式给完整号码（经纪人本人是唯一接收方，脱敏只会挡住他自己）。
     """
     db = _get_db()
     if not property_ids:
@@ -64,12 +51,12 @@ def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
         if not o:
             lines.append(f"· {r['title']}（ID:{r['id']}）：未录入业主信息")
             continue
-        masked_phone = _mask_phone(o.get('phone'))
+        phone = o.get('phone')
         wechat = o.get('wechat')
         view = f"，看房方式: {r.get('viewing_note')}" if r.get('viewing_note') else ""
         lines.append(
             f"· {r['title']}（ID:{r['id']}）：业主 {o.get('name')}，"
-            f"电话 {masked_phone or '未录'}"
+            f"电话 {phone or '未录'}"
             + (f"，微信 {wechat}" if wechat else "")
             + view)
     return json.dumps({
@@ -81,7 +68,7 @@ def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
 
 
 def find_person_by_name(name: str = None, task_id: str = None) -> str:
-    """按姓名同时查客户和业主（两边都给），电话/微信脱敏展示。
+    """按姓名同时查客户和业主（两边都给），电话/微信给完整号码。
 
     老板实测：问"某人详细信息"（如"欧阳先生"），Coco 默认只查客户，找不到就报"库内无此客户"，
     实际对方可能是业主（房东）。本工具一次覆盖 客户(买家/租客) + 业主(房源主人)两类，
@@ -96,15 +83,15 @@ def find_person_by_name(name: str = None, task_id: str = None) -> str:
     owners = result.get('owners', [])
     lines = [f"按姓名「{name}」检索到 客户 {len(customers)} 人 / 业主 {len(owners)} 人："]
     for c in customers:
-        masked = _mask_phone(c.get('phone'))
+        phone = c.get('phone')
         lines.append(f"\n【客户】{c.get('name')}（ID:{c.get('id')}）"
-                     f"电话 {masked or '未录'} | 等级 {c.get('tier') or '-'} | "
+                     f"电话 {phone or '未录'} | 等级 {c.get('tier') or '-'} | "
                      f"类型 {c.get('customer_type') or '-'} | 预算 {'-'.join(filter(None,[str(c.get('budget_min') or ''),str(c.get('budget_max') or '')])) or '-'}万 | "
                      f"意向 {c.get('location') or '-'} {c.get('layout_pref') or ''}")
     for o in owners:
-        masked = _mask_phone(o.get('phone'))
+        phone = o.get('phone')
         lines.append(f"\n【业主】{o.get('name')}（ID:{o.get('id')}）"
-                     f"电话 {masked or '未录'} | 微信 {o.get('wechat') or '未录'} | "
+                     f"电话 {phone or '未录'} | 微信 {o.get('wechat') or '未录'} | "
                      f"脱敏证件 {o.get('id_masked') or '-'} | 信任度 {o.get('trust_note') or '-'}")
     if not customers and not owners:
         lines.append("\n客户表和业主表均无此人。可能未登记；如需新建客户请提供电话及需求，业主可先登记。")
@@ -243,7 +230,7 @@ TOOLS = [
     },
     {
         "name": "get_property_owners",
-        "description": "按房源ID批量查业主信息（房源→业主反向查询，最多3套）。返回每套房源关联业主的姓名/电话(脱敏)/微信/看房方式；房源未关联业主则如实说明。用于经纪人问'这套/这几套房源的业主是谁/业主联系方式'",
+        "description": "按房源ID批量查业主信息（房源→业主反向查询，最多3套）。返回每套房源关联业主的姓名/电话（完整号码）/微信/看房方式；房源未关联业主则如实说明。用于经纪人问'这套/这几套房源的业主是谁/业主联系方式'",
         "parameters": {
             "type": "object",
             "properties": {"property_ids": {"type": "array", "items": {"type": "integer"},
@@ -254,7 +241,7 @@ TOOLS = [
     },
     {
         "name": "find_person_by_name",
-        "description": "按姓名同时查客户和业主（两边都给），电话/微信脱敏展示。用于经纪人问'某人/某先生/某女士的详细信息'（对方可能是客户=买家租客，也可能是业主=房东），按姓名模糊匹配，找到哪类报哪类，同名两边都有则分别列出；两表都无则如实说明。严禁用psql直接连库",
+        "description": "按姓名同时查客户和业主（两边都给），电话/微信给完整号码。用于经纪人问'某人/某先生/某女士的详细信息'（对方可能是客户=买家租客，也可能是业主=房东），按姓名模糊匹配，找到哪类报哪类，同名两边都有则分别列出；两表都无则如实说明。严禁用psql直接连库",
         "parameters": {
             "type": "object",
             "properties": {"name": {"type": "string", "description": "姓名（支持模糊匹配，子串命中即返回）"}},

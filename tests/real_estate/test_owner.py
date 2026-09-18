@@ -141,12 +141,17 @@ class TestPropertyOwnerLookup:
         rows = db.get_property_owners([p["id"] for p in ps])
         assert len(rows) == 3  # 截断到 3
 
-    def test_property_owner_tool_masks_phone(self, db, monkeypatch):
-        """工具层：业主电话按老板要求脱敏展示（前3后4打星）"""
+    def test_property_owner_tool_shows_full_phone(self, db, monkeypatch):
+        """工具层：业主要联系方式时给完整号码（2026-09-18 改，不再打星）"""
         import tools.real_estate_owner as omod
         monkeypatch.setattr(omod, "_get_db", lambda: db)
-        assert omod._mask_phone("13800138000") == "138****8000"
-        assert omod._mask_phone(None) is None
+        o = _add_owner(db, name="房东张三", phone="13800138000")
+        p = make_property(db, price=3_000_000, area=100.0)
+        db.update_property(p["id"], owner_id=o["id"])
+        data = json.loads(omod.get_property_owners(property_ids=[p["id"]]))
+        assert data["success"] is True
+        assert "13800138000" in data["message"]
+        assert "****" not in data["message"]
 
 
 # ==================== 按姓名跨表查人（2026-08-30 加） ====================
@@ -194,8 +199,8 @@ class TestFindPersonByName:
         r = db.find_person_by_name("欧阳")
         assert len(r["owners"]) == 1
 
-    def test_tool_layer_masks_phone(self, db, monkeypatch):
-        """工具层 find_person_by_name：电话脱敏展示 + 客户/业主分区"""
+    def test_tool_layer_shows_full_phone(self, db, monkeypatch):
+        """工具层 find_person_by_name：电话给完整号码 + 客户/业主分区（2026-09-18 改）"""
         import tools.real_estate_owner as omod
         monkeypatch.setattr(omod, "_get_db", lambda: db)
         db.add_customer(name="欧阳客户", phone="13500000001", customer_type="buy_second_hand")
@@ -205,7 +210,8 @@ class TestFindPersonByName:
         assert data["success"] is True
         assert data["count_customers"] == 1
         assert data["count_owners"] == 1
-        assert "135****0001" in data["message"]  # 客户电话已脱敏
-        assert "135****0002" in data["message"]  # 业主电话已脱敏
+        assert "13500000001" in data["message"]  # 客户电话完整显示
+        assert "13500000002" in data["message"]  # 业主电话完整显示
+        assert "****" not in data["message"]
         assert "【客户】" in data["message"]
         assert "【业主】" in data["message"]

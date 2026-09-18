@@ -12,7 +12,9 @@ Coco 数据库迁移脚本：带版本号的表结构变更管理
 - migrations_history 表记录已执行的迁移（序号、文件名、时间、耗时）
 - 只执行序号大于已记录最大序号的迁移；执行过的跳过（幂等）
 - 每个迁移在事务里执行，失败立即中止（生产库不会被半途而废的迁移污染）
-- 安全约束：迁移 SQL 禁止 DROP TABLE / DROP COLUMN（只增不删）
+- 安全约束：迁移 SQL 禁止 DROP TABLE / TRUNCATE / DELETE（只增不删）
+- 删列（清理用不上的遗留列）需要显式声明：迁移文件里写 `-- migrate:allow-drop-column`
+  才允许 `ALTER TABLE <表> DROP COLUMN <列>`，且该语句按列存在性幂等（列已不存在则跳过）
 
 首次执行前建议先跑 backup_db.py backup。
 """
@@ -26,7 +28,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 MIGRATIONS_DIR = REPO_ROOT / "migrations"
-# 安全约束：迁移里禁止出现的破坏性语句（只增不删）
+# 安全约束：迁移里禁止出现的破坏性语句（只增不删）。
+# 例外：删列（DROP COLUMN）在迁移文件显式写 -- migrate:allow-drop-column 时放行，
+# 且只放行 ALTER TABLE <表> DROP COLUMN <列> 这一种规范形态（见 _DROP_COL_RE）。
 FORBIDDEN_PATTERNS = [
     (re.compile(r"\bDROP\s+TABLE\b", re.I), "DROP TABLE"),
     (re.compile(r"\bDROP\s+COLUMN\b", re.I), "DROP COLUMN"),
@@ -48,6 +52,12 @@ _DEFAULT_RE = re.compile(r"\bDEFAULT\b", re.I)
 _ALTER_RE = re.compile(r"\bALTER\s+TABLE\b", re.I)
 
 MIG_FILE_RE = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
+
+# 删列放行开关：迁移文件里写 -- migrate:allow-drop-column 才允许 DROP COLUMN
+_DROP_COLUMN_OPT_IN_RE = re.compile(r"--\s*migrate:allow-drop-column\b", re.I)
+_DROP_COLUMN_LABELS = {"DROP COLUMN", "ALTER ... DROP"}
+# 规范删列形态：ALTER TABLE <表> DROP COLUMN <列>（COLUMN 关键字可省）
+_DROP_COL_RE = re.compile(r"ALTER\s+TABLE\s+([\"\w.]+)\s+DROP\s+(?:COLUMN\s+)?(\w+)", re.I)
 
 # 解析 ALTER TABLE ... ADD COLUMN（用于幂等：列已存在则跳过）
 _ALTER_ADD_COL_RE = re.compile(r"ALTER\s+TABLE\s+([\"\w.]+)\s+ADD\s+COLUMN\s+(\w+)", re.I)
@@ -140,10 +150,23 @@ def _split_statements(sql_text):
 
 
 def validate_sql(sql_text, filename):
-    """安全检查：禁止破坏性语句 + 禁止'给已有表加 NOT NULL 无默认值列'（无损更新红线）"""
+    """安全检查：禁止破坏性语句 + 禁止'给已有表加 NOT NULL 无默认值列'（无损更新红线）
+
+    删列例外：文件里显式写了 -- migrate:allow-drop-column 时，放行规范形态的
+    ALTER TABLE <表> DROP COLUMN <列>（用于清理用不上的遗留列）；其余 DROP 语句照旧禁止。
+    """
+    allow_drop_column = bool(_DROP_COLUMN_OPT_IN_RE.search(sql_text))
     for pattern, label in FORBIDDEN_PATTERNS:
+        if allow_drop_column and label in _DROP_COLUMN_LABELS:
+            continue
         if pattern.search(sql_text):
             raise ValueError(f"{filename} 含禁止语句 {label}（迁移只增不删，不允许删改数据）")
+    if allow_drop_column:
+        for stmt in _split_statements(sql_text):
+            if re.search(r"\bDROP\b", stmt, re.I) and not _DROP_COL_RE.search(stmt):
+                raise ValueError(
+                    f"{filename} 含非规范删列语句（只允许 ALTER TABLE <表> DROP COLUMN <列>）: {stmt[:80]}"
+                )
     # 逐句检查：对已有表 ALTER ADD COLUMN 且带 NOT NULL 但无 DEFAULT，会把已有数据行写坏
     for stmt in _split_statements(sql_text):
         if _ALTER_RE.search(stmt) and _ADD_COL_NOT_NULL_RE.search(stmt):
@@ -178,6 +201,13 @@ def apply_migration(conn, seq, path):
                 table_name, col_name = m.group(1), m.group(2)
                 if _column_exists(conn, table_name, col_name):
                     print(f"    跳过（列 {table_name}.{col_name} 已存在）")
+                    continue
+            # DROP COLUMN 幂等：列已不存在则跳过（重跑/已删过的库安全，SQLite 不支持 DROP COLUMN IF EXISTS）
+            m = _DROP_COL_RE.search(stmt)
+            if m:
+                table_name, col_name = m.group(1), m.group(2)
+                if not _column_exists(conn, table_name, col_name):
+                    print(f"    跳过（列 {table_name}.{col_name} 不存在）")
                     continue
             conn.execute(text(stmt))
         conn.execute(text(

@@ -110,6 +110,50 @@ class TestMigrate:
         finally:
             f.unlink(missing_ok=True)
 
+    def test_drop_column_rejected_without_optin(self, sqlite_db, tmp_path):
+        """未声明 -- migrate:allow-drop-column 的删列语句仍被拒绝（护栏不开口子）"""
+        f = write_migration(tmp_path, "906_test_drop_col.sql",
+                            "ALTER TABLE re_properties DROP COLUMN name;")
+        try:
+            r = run_migrate(sqlite_db)
+            assert r.returncode == 2
+            assert "DROP COLUMN" in r.stderr or "ALTER ... DROP" in r.stderr
+            import sqlite3
+            conn = sqlite3.connect(sqlite_db.replace("sqlite:///", ""))
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(re_properties)")]
+            conn.close()
+            assert "name" in cols  # 列还在，没被删
+        finally:
+            f.unlink(missing_ok=True)
+
+    def test_drop_column_allowed_with_optin(self, sqlite_db, tmp_path):
+        """显式声明后允许删列（清理用不上的遗留列）"""
+        f = write_migration(tmp_path, "907_test_drop_col_ok.sql",
+                            "-- migrate:allow-drop-column\n"
+                            "ALTER TABLE re_properties DROP COLUMN name;")
+        try:
+            r = run_migrate(sqlite_db)
+            assert r.returncode == 0
+            import sqlite3
+            conn = sqlite3.connect(sqlite_db.replace("sqlite:///", ""))
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(re_properties)")]
+            conn.close()
+            assert "name" not in cols  # 列真的删了
+        finally:
+            f.unlink(missing_ok=True)
+
+    def test_drop_column_idempotent_when_missing(self, sqlite_db, tmp_path):
+        """列已不存在时跳过（重跑安全；SQLite 没有 DROP COLUMN IF EXISTS）"""
+        f = write_migration(tmp_path, "908_test_drop_col_missing.sql",
+                            "-- migrate:allow-drop-column\n"
+                            "ALTER TABLE re_properties DROP COLUMN never_existed;")
+        try:
+            r = run_migrate(sqlite_db)
+            assert r.returncode == 0
+            assert "不存在" in r.stdout
+        finally:
+            f.unlink(missing_ok=True)
+
     def test_status_only(self, sqlite_db, tmp_path):
         """--status 只看状态不执行"""
         f = write_migration(tmp_path, "905_test_status.sql",
