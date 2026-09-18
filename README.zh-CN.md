@@ -2,9 +2,9 @@
 
 > 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
-[![Coco v0.21.3-29](https://img.shields.io/badge/Coco%20AI-v0.21.3--19-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-29)
+[![Coco v0.21.3-30](https://img.shields.io/badge/Coco%20AI-v0.21.3--19-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-30)
 
-> 🏷️ **当前版本：v0.21.3-29**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-29)
+> 🏷️ **当前版本：v0.21.3-30**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-30)
 
 ## ⚠️ 免责声明
 
@@ -124,6 +124,8 @@ hermes gateway restart
 
 ```bash
 git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
+
+> 更新只用这条命令。**不要用 `install.sh` 更新**（它会重建安装目录，清掉数据库密钥与图片缓存），**也不要直接跑 `hermes update`**（官方更新会重置你手改过的代码）。
 ```
 
 > 更新会自动备份，客户数据全程保留，不会删除你的加密密钥。
@@ -136,7 +138,7 @@ git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
 如需保留服务器原时区：安装时执行 `COCO_SKIP_TZ=1 bash install.sh`。
 
 ```bash
-coco version     # 输出形如：Coco v0.21.3-29（官方 Hermes 0.21.3 定制版）
+coco version     # 输出形如：Coco v0.21.3-30（官方 Hermes 0.21.3 定制版）
 coco help        # 查看全部可用命令（version / check / backup）
 ```
 

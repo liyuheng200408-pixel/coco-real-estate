@@ -110,13 +110,92 @@ def test_apply_backs_up_config(monkeypatch, tmp_path):
     import hermes_cli.config as hcfg
 
     monkeypatch.setattr(hcfg, "get_config_path", lambda: cfg)
-    monkeypatch.setattr(align, "effective_values", lambda: {"agent.max_turns": 150})
     monkeypatch.setattr(hcfg, "set_config_value", lambda key, value: None)
-    monkeypatch.setattr(align, "diffs", lambda eff=None: [("agent.max_turns", 150, 500)])
-    import importlib
-
-    importlib.reload  # noqa: B018  (保持导入语义，set_config_value 由 apply 内部导入)
+    monkeypatch.setattr(align, "_read_state", lambda: {"written": {}})
+    monkeypatch.setattr(align, "_write_state", lambda d: None)
+    monkeypatch.setattr(align, "effective_values", lambda: {"agent.max_turns": 150})
+    monkeypatch.setattr(align, "plan", lambda eff=None, state=None: ([("agent.max_turns", 150, 500)], []))
 
     changed = align.apply()
     assert changed == [("agent.max_turns", 150, 500)]
     assert (tmp_path / "config.yaml.coco-bak").is_file()
+
+
+# ---------------- "经纪人改过就不动"（2026-09-19 老板拍板） ----------------
+def _eff(**over):
+    base = {"agent.max_turns": 500, "compression.threshold": 0.8,
+            "compression.protect_last_n": 40, "compression.hygiene_hard_message_limit": 5000,
+            "timezone": "Asia/Shanghai"}
+    base.update(over)
+    return base
+
+
+def test_plan_first_run_aligns_everything():
+    """没有状态文件（首次对齐，含存量实例）→ 一律对齐（修好"设定失效"）"""
+    eff = _eff(**{"agent.max_turns": 150, "compression.threshold": 0.5, "timezone": "UTC"})
+    to_align, preserved = align.plan(eff, state={})
+    assert {k for k, _g, _w in to_align} == {"agent.max_turns", "compression.threshold", "timezone"}
+    assert preserved == []
+
+
+def test_plan_preserves_broker_customisation():
+    """有状态文件 + 当前值既不是标准值也不是我们写的值 → 判定为经纪人改的，保留"""
+    eff = _eff(**{"agent.max_turns": 300})
+    state = {"written": {"agent.max_turns": 500, "compression.threshold": 0.8,
+                         "compression.protect_last_n": 40,
+                         "compression.hygiene_hard_message_limit": 5000, "timezone": "Asia/Shanghai"}}
+    to_align, preserved = align.plan(eff, state)
+    assert to_align == []
+    assert preserved == [("agent.max_turns", 300)]
+
+
+def test_plan_follows_our_standard_upgrade():
+    """当前值 == 我们上次写的值（说明经纪人没动）→ 我们的标准升级了，跟着对齐"""
+    eff = _eff(**{"agent.max_turns": 400})
+    state = {"written": {"agent.max_turns": 400}}
+    to_align, preserved = align.plan(eff, state)
+    assert to_align == [("agent.max_turns", 400, 500)]
+    assert preserved == []
+
+
+def test_plan_fills_missing_value():
+    """键缺失 → 补上标准值（不算"经纪人改过"）"""
+    eff = _eff(**{"timezone": None})
+    state = {"written": {"agent.max_turns": 500}}
+    to_align, preserved = align.plan(eff, state)
+    assert ("timezone", None, "Asia/Shanghai") in to_align
+    assert preserved == []
+
+
+def test_apply_force_overrides_preservation(monkeypatch, tmp_path):
+    """COCO_FORCE_CONFIG=1 → 无视保护，强制拉回标准值"""
+    written = {}
+
+    class _Cfg:
+        @staticmethod
+        def get_config_path():
+            return tmp_path / "config.yaml"
+
+    monkeypatch.setenv("COCO_FORCE_CONFIG", "1")
+    monkeypatch.setattr(align, "effective_values", lambda: _eff(**{"agent.max_turns": 300}))
+    monkeypatch.setattr(align, "_read_state", lambda: {"written": {"agent.max_turns": 500}})
+    monkeypatch.setattr(align, "_write_state", lambda d: written.update(d))
+    monkeypatch.setattr(align, "_backup_config", lambda: None)
+    import hermes_cli.config as hcfg
+    monkeypatch.setattr(hcfg, "set_config_value", lambda key, value: None)
+    changed = align.apply()
+    assert changed == [("agent.max_turns", 300, 500)]
+
+
+def test_apply_preserves_without_force(monkeypatch, tmp_path):
+    """不加 force 时经纪人自改的值不动，且会打印已保留"""
+    monkeypatch.delenv("COCO_FORCE_CONFIG", raising=False)
+    monkeypatch.setattr(align, "effective_values", lambda: _eff(**{"agent.max_turns": 300}))
+    monkeypatch.setattr(align, "_read_state", lambda: {"written": {"agent.max_turns": 500}})
+    monkeypatch.setattr(align, "_write_state", lambda d: None)
+    monkeypatch.setattr(align, "_backup_config", lambda: None)
+    import hermes_cli.config as hcfg
+    called = []
+    monkeypatch.setattr(hcfg, "set_config_value", lambda key, value: called.append(key))
+    assert align.apply() == []
+    assert called == []

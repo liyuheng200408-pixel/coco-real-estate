@@ -396,4 +396,5 @@ if FAIL == 0:
 else:
     print(f" 结论: 存在 {FAIL} 个问题，按上方修复提示处理后再测")
 print("=" * 56)
+print("提示: 更新请用 bash ~/hermes-agent/scripts/update.sh（不要用 install.sh，也不要直接跑 hermes update）")
 sys.exit(1 if FAIL else 0)

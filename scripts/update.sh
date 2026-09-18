@@ -41,15 +41,30 @@ if [[ ! -x "$VENV_PY" ]]; then
 fi
 
 info "[1/8] 前置检查：git 工作区"
-if [[ -n "$(git status --porcelain)" ]]; then
-  # 允许"未跟踪"运行时文件（.env.db / 缓存等）；但"已跟踪文件被改动"则拒绝，避免覆盖
-  if [[ -n "$(git status --porcelain | grep -vE '^\?\?')" ]]; then
-    err "检测到已跟踪文件的本地改动。为避免覆盖/丢失，请先提交或 stash 后再更新。"
-    git status --short
+# 经纪人自己改过代码（已跟踪文件）时的友好模式（2026-09-19 老板拍板）：
+#   ① 先把改动导出成 patch 备份  ② git stash 暂存（只暂存已跟踪文件，绝不动未跟踪的 .env.db/密钥）
+#   ③ 正常更新  ④ 更新后自动尝试恢复；有冲突则保留 stash+patch 并保持代码干净
+STASHED=0
+PATCH_FILE=""
+if [[ -n "$(git status --porcelain | grep -vE '^\?\?' || true)" ]]; then
+  TS="$(date +%Y%m%d_%H%M%S)"
+  BK_DIR="$HOME/backups/real_estate"
+  mkdir -p "$BK_DIR"
+  PATCH_FILE="$BK_DIR/code_changes_${TS}.patch"
+  { git diff; git diff --cached; } > "$PATCH_FILE" 2>/dev/null || true
+  echo "  检测到你对代码的本地改动（已跟踪文件），先备份再更新："
+  git status --short | head -20
+  echo "  · 改动已备份：$PATCH_FILE（$(wc -l < "$PATCH_FILE" 2>/dev/null | tr -d ' ') 行）"
+  if git stash push -m "coco-auto-${TS}" >/dev/null 2>&1; then
+    STASHED=1
+    ok "已暂存你的改动（不含未跟踪文件），继续更新，更新后会自动恢复"
+  else
+    err "暂存失败，已中止更新（你的改动没有被改动过）"
     exit 1
   fi
+else
+  ok "工作区干净；本脚本绝不运行 git clean（不删 .env.db / 加密密钥等未跟踪文件）"
 fi
-ok "工作区干净；本脚本绝不运行 git clean（不删 .env.db / 加密密钥等未跟踪文件）"
 
 info "[2/8] 备份数据库（安全网，可回滚到更新前）"
 if [[ "$SKIP_BACKUP" == "1" ]]; then
@@ -60,8 +75,28 @@ else
 fi
 
 info "[3/8] 拉取最新代码（git pull --ff-only）"
-git pull --ff-only
+if ! git pull --ff-only; then
+  err "拉取失败（网络或历史分叉）"
+  if [[ "$STASHED" == "1" ]]; then
+    git stash pop >/dev/null 2>&1 && echo "  你的本地改动已恢复（备份：$PATCH_FILE）"
+  fi
+  exit 1
+fi
 ok "代码已更新"
+
+# 恢复经纪人自己的改动（有冲突就保留现场：patch + git stash，代码保持干净可运行）
+if [[ "$STASHED" == "1" ]]; then
+  if git stash pop >/dev/null 2>&1; then
+    ok "你的本地改动已恢复（备份也在 $PATCH_FILE）"
+  else
+    git checkout -- . >/dev/null 2>&1 || true
+    git reset --hard HEAD >/dev/null 2>&1 || true
+    echo "  提醒：你的改动与新版本有冲突，未能自动合并，但已完整保留："
+    echo "    · patch 备份：$PATCH_FILE"
+    echo "    · git stash：git -C $REPO_ROOT stash list 查看，用 git stash show -p 看内容"
+    ok "已跳过冲突部分，代码保持为新版本（功能正常）"
+  fi
+fi
 
 info "[4/8] 安装 / 更新 Python 依赖（pip install -e .）"
 "$VENV_PY" -m pip install -e . -q

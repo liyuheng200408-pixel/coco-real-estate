@@ -44,6 +44,8 @@ Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）
 
 更新到最新版:
   git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
+  （更新只跑这条。不要用 install.sh 更新：它会重建安装目录、清掉数据库密钥与图片缓存；
+    也不要直接跑 hermes update：官方更新会重置你手改过的代码。你的本地代码改动会被自动备份。）
 
 说明: Coco 版本号存在 $REPO_ROOT/VERSION；官方 \`hermes --version\` 显示的是底座版本。
 EOF
