@@ -77,24 +77,86 @@ EXTRA_FONTS=(
   "HarmonyOS_Sans_SC.ttf|zip:https://alliance-communityfile-drcn.dbankcdn.com/FileServer/getFile/cmtyManage/011/111/111/0000000000011111111.20260611171743.77886644144213121813005934094365:50001231000000:2800:0CCF575ADA0FCAD85EE25909C15C402A40FA94ABCCFEFC5BD37061A6B94239FF.zip"
 )
 
+# ---- 下载器：curl → wget → python3（任何一个可用即可） ----
+DL=""
+for tool in curl wget python3; do
+  command -v "$tool" >/dev/null 2>&1 && { DL="$tool"; break; }
+done
+[[ -z "$DL" ]] && { warn "服务器上没有 curl/wget/python3，无法下载字体（可手动上传字体到 $FONT_DIR）"; }
+
+# ---- 本机代理自动探测：直连失败时用（有代理的服务器常见） ----
+PROXY=""
+detect_proxy() {
+  local port
+  for port in 7890 7891 1080 10809 10808 8118 8889 2080 20171; do
+    if (echo > "/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; then
+      PROXY="http://127.0.0.1:$port"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 下载一个 URL → $2；失败时把原因写入全局 DL_ERR
+DL_ERR=""
+dl_one() {
+  local url="$1" out="$2" proxy_arg="" env_arg=()
+  [[ -n "$PROXY" ]] && proxy_arg="$PROXY"
+  case "$DL" in
+    curl)
+      local err
+      err="$(curl -fsSL --retry 1 --retry-delay 2 --max-time 600 ${proxy_arg:+--proxy "$proxy_arg"} -o "$out" "$url" 2>&1 >/dev/null)"
+      [[ -s "$out" ]] && return 0
+      DL_ERR="${err%%$'\n'*}"
+      ;;
+    wget)
+      local err
+      err="$(wget -q --timeout=60 --tries=2 ${proxy_arg:+-e use_proxy=yes -e https_proxy="$proxy_arg"} -O "$out" "$url" 2>&1)"
+      [[ -s "$out" ]] && return 0
+      DL_ERR="${err%%$'\n'*}"
+      ;;
+    python3)
+      env_arg=()
+      [[ -n "$PROXY" ]] && env_arg=(env "https_proxy=$PROXY" "http_proxy=$PROXY")
+      local err
+      err="$("${env_arg[@]}" python3 - "$url" "$out" <<'PY' 2>&1
+import sys, urllib.request, shutil
+url, out = sys.argv[1], sys.argv[2]
+try:
+    with urllib.request.urlopen(url, timeout=120) as r, open(out, "wb") as f:
+        shutil.copyfileobj(r, f)
+except Exception as exc:
+    print(f"{type(exc).__name__}: {exc}")
+    sys.exit(1)
+PY
+)"
+      [[ -s "$out" ]] && return 0
+      DL_ERR="${err%%$'\n'*}"
+      ;;
+    *)
+      DL_ERR="没有可用的下载工具（curl/wget/python3 均缺失）"
+      ;;
+  esac
+  return 1
+}
+
 # 返回 0=本次装上；1=失败；2=已存在
 fetch_one() {
-  local name="$1" urls="$2" tmpfile
+  local name="$1" urls="$2" tmpfile url
   [[ -s "$FONT_DIR/$name" ]] && return 2
   tmpfile="$TMP/$name"
   for url in $urls; do
     if [[ "$url" == zip:* ]]; then
-      local zurl="${url#zip:}" zf="$TMP/pkg.zip"
-      curl -fsSL --retry 2 --retry-delay 3 --max-time 600 -o "$zf" "$zurl" >/dev/null 2>&1 || continue
-      (cd "$TMP" && unzip -o -q "$zf") >/dev/null 2>&1 || continue
+      local zurl="${url#zip:}"
+      dl_one "$zurl" "$TMP/pkg.zip" || continue
+      (cd "$TMP" && unzip -o -q "$TMP/pkg.zip") >/dev/null 2>&1 || continue
       local found
       found="$(find "$TMP" -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | grep -iv '__MACOSX' | head -1)"
       [[ -n "$found" ]] && cp -f "$found" "$tmpfile"
-      [[ -s "$tmpfile" ]] && break || continue
     else
-      curl -fsSL --retry 2 --retry-delay 3 --max-time 600 -o "$tmpfile" "$url" >/dev/null 2>&1 \
-        && [[ -s "$tmpfile" ]] && break
+      dl_one "$url" "$tmpfile" || continue
     fi
+    [[ -s "$tmpfile" ]] && break
   done
   # 校验字体文件头（sfnt: 00010000 / OTTO / true），防止把错误页当字体装进去
   if [[ -s "$tmpfile" ]]; then
@@ -103,8 +165,12 @@ fetch_one() {
     if [[ "$magic" == "00010000" || "$magic" == "4f54544f" || "$magic" == "74727565" ]]; then
       sudo cp -f "$tmpfile" "$FONT_DIR/$name" 2>/dev/null || cp -f "$tmpfile" "$FONT_DIR/$name" 2>/dev/null
       [[ -s "$FONT_DIR/$name" ]] && return 0
+      DL_ERR="文件已下载但写入 $FONT_DIR 失败（权限问题）"
+    else
+      DL_ERR="下载内容不是字体文件（可能被网络拦截或返回了错误页）"
     fi
   fi
+  [[ -z "$DL_ERR" ]] && DL_ERR="下载失败（网络不可达或超时）"
   return 1
 }
 
@@ -129,7 +195,12 @@ else
     if fetch_one "$name" "$urls"; then
       say "  [$i/$todo] $name ... 已安装（$(du -h "$FONT_DIR/$name" 2>/dev/null | cut -f1)）"
     else
-      say "  [$i/$todo] $name ... 未装成功（继续下一个）"
+      # 直连失败 → 探测本机代理再试一次
+      if [[ -z "$PROXY" ]] && detect_proxy; then
+        say "  [$i/$todo] $name ... 直连失败，改用本机代理 $PROXY 重试"
+        fetch_one "$name" "$urls" && { say "      → 代理下载成功（$(du -h "$FONT_DIR/$name" 2>/dev/null | cut -f1)）"; continue; }
+      fi
+      say "  [$i/$todo] $name ... 未装成功：${DL_ERR}"
       missed+=("$name")
     fi
   done
@@ -140,7 +211,12 @@ count=$(find "$FONT_DIR" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf'
 size=$(du -sh "$FONT_DIR" 2>/dev/null | cut -f1)
 
 if [[ ${#missed[@]} -gt 0 ]]; then
-  warn "未装成功：${missed[*]}（海报会回落系统字体，不影响出图；网络好了重跑本脚本即可）"
+  warn "未装成功：${missed[*]}"
+  echo "  海报仍可正常出图（会回落系统自带字体，观感差一些）。想装上的话按下面排查："
+  echo "    1) 看下载工具：command -v curl wget python3   （都没有就 apt-get install -y curl）"
+  echo "    2) 看网络：curl -sSI --max-time 10 https://raw.githubusercontent.com/wordshub/free-font/master/README.md | head -1"
+  echo "    3) 服务器若有代理：export https_proxy=http://127.0.0.1:端口 && bash scripts/install_fonts.sh"
+  echo "    4) 也可把这台机器上已装好的字体目录拷过来：/usr/local/share/fonts/coco"
 else
   ok "海报字体已就绪（${count} 个文件，${size}）"
 fi
