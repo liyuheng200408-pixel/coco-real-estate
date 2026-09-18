@@ -30,13 +30,15 @@ python3 scripts/smoke_test_real_estate.py   # 预期 61 OK + 1 ERR(政策空库)
 | 给[客户]加一个标签：刚需 | add_customer_tag | 标签出现 |
 | 查看[客户]的标签 | list_customer_tags | 标签列表 |
 
-### 第二批：客户收尾 + 房源 + 跟进（10 条）
+### 第二批：客户收尾 + 房源 + 跟进（12 条）
 | 指令 | 预期工具 | 验证点 |
 |---|---|---|
 | 看下客户统计 | customer_stats | 数字与库一致 |
 | 查看[客户]的需求变更历史 | customer_change_history | 变更记录完整 |
-| 把[房源]月租改成 X 元 / 价格改成 X 万 | update_property | 价格变 + 落库 |
+| 把[房源]月租改成 X 元 / 价格改成 X 万 | update_property | 价格变 + 落库；**单价按新总价÷面积自动变（两位小数）** |
 | 搜索[区域] X-Y 万的房源 | search_property | 结果与库一致 |
+| 查 [某套房源] 的详细信息 | get_property_detail | 房源全字段 + **单价(两位小数)** + **业主姓名/完整电话** |
+| 查一下[某个库里没有的楼栋房号]的详情 | get_property_detail | 如实说找不到 + 列出候选，**不得拿别的房源充当答案** |
 | 查一下房源统计数据 | property_stats | 总数/在售/已售 |
 | 给我房源录入模板 | get_property_form | 完整模板 |
 | 检查一下有没有重复房源 | deduplicate_properties | 报告重复组 |

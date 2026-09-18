@@ -1328,6 +1328,40 @@ class RealEstateDB:
             if 'title' in filters: q = q.filter(Property.title.contains(filters['title']))
             return [p.to_dict() for p in q.limit(limit).all()]
     
+    def get_property(self, property_id):
+        """按 id 取单套房源（含现算单价），不存在返回 None"""
+        with self.get_session() as s:
+            p = s.query(Property).get(property_id)
+            return p.to_dict() if p else None
+
+    def find_property_by_title(self, title):
+        """按标题定位单套房源：先"完全一致"，再"包含"。
+
+        返回 {'exact': [...], 'contains': [...]}。分开两类是为了让上层能区分
+        "库里确实没有" 与 "标题写法不完全一样"，从而如实回答而不是拿别的房源顶替。
+        """
+        title = (title or '').strip()
+        if not title:
+            return {'exact': [], 'contains': []}
+        with self.get_session() as s:
+            exact = [p.to_dict() for p in
+                     s.query(Property).filter(Property.title == title).limit(10).all()]
+            contains = [p.to_dict() for p in
+                        s.query(Property).filter(Property.title.contains(title)).limit(10).all()]
+        return {'exact': exact, 'contains': contains}
+
+    def similar_properties_by_title(self, title, limit=5):
+        """标题查不到时的候选：把输入尾部逐字去掉再找（最多退 4 级），返回第一批命中的在售房源"""
+        title = (title or '').strip()
+        for cut in range(0, 5):
+            probe = title[:len(title) - cut] if cut else title
+            if len(probe) < 2:
+                break
+            rows = self.search_properties(title=probe, limit=limit)
+            if rows:
+                return rows
+        return []
+
     def customer_has_deal(self, customer_id) -> bool:
         """客户是否已有交易记录（进行中或已完成）"""
         with self.get_session() as s:

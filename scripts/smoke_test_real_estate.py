@@ -37,7 +37,7 @@ registry = registry_mod.registry
 STATIC_TOOLS = [
     "add_customer","update_customer","get_customer","list_customers","update_tier","customer_stats",
     "add_customer_tag","remove_customer_tag","list_customer_tags","get_customer_form","customer_change_history",
-    "add_property","update_property","search_property","match_property","batch_match_report","property_stats","get_property_form","deduplicate_properties",
+    "add_property","update_property","search_property","get_property_detail","match_property","batch_match_report","property_stats","get_property_form","deduplicate_properties",
     "add_followup","get_followups","get_overdue","schedule_reminder","daily_report","midday_check","stale_check",
     "mortgage_calculator","tax_calculator","roi_calculator",
     "get_script","use_template",
@@ -136,6 +136,8 @@ CASES = [
     ("customer_change_history", {"customer_id":cid}),
     ("update_property", {"property_id":pid,"price":1250000}),
     ("search_property", {"district":"朝阳","max_price":1500000,"limit":10}),
+    ("get_property_detail", {"property_id":pid2}),
+    ("get_property_detail", {"title":"在售房源二号"}),
     ("match_property", {"customer_id":cid,"top_n":5}),
     ("batch_match_report", {"top_n":1}),
     ("property_stats", {}),

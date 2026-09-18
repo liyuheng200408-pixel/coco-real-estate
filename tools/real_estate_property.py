@@ -155,6 +155,129 @@ def search_property(
     return json.dumps({"success": True, "properties": result, "count": len(result)}, ensure_ascii=False)
 
 
+_TYPE_LABELS = {"new": "新房", "second_hand": "二手房", "rental": "租房"}
+_STATUS_LABELS = {"available": "在售", "sold": "已售", "rented": "已租"}
+
+
+def _fmt_price(prop: dict) -> str:
+    """价格展示（系统存元）：二手/新房 → '28.37万'，出租 → '1000元/月'"""
+    price = prop.get("price")
+    if price is None:
+        return "未录入"
+    price = float(price)
+    if prop.get("property_type") == "rental":
+        return f"{price:.0f}元/月"
+    wan = price / 10000
+    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.2f}万"
+
+
+def _fmt_field(value) -> str:
+    return str(value) if value not in (None, "") else "未录入"
+
+
+def _prop_brief(prop: dict) -> dict:
+    """候选列表用的房源简短信息（编号/标题/价格/面积/单价/类型/状态）"""
+    return {
+        "id": prop.get("id"), "title": prop.get("title"),
+        "price": prop.get("price"), "area": prop.get("area"),
+        "district": prop.get("district"), "property_type": prop.get("property_type"),
+        "status": prop.get("status"), "unit_price": prop.get("unit_price"),
+    }
+
+
+def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
+    """房源详情的人类可读摘要（模型照抄即可，避免它自己拼表时漏字段）"""
+    lines = [f"【房源】{prop.get('title')}（编号 {prop.get('id')}）"]
+    unit_price = prop.get("unit_price")
+    unit_part = f"单价 {unit_price}元/㎡" if unit_price else "单价 面积缺失，无法计算"
+    lines.append(f"总价 {_fmt_price(prop)} | 面积 {_fmt_field(prop.get('area'))}㎡ | {unit_part}")
+    lines.append(
+        f"类型 {_TYPE_LABELS.get(prop.get('property_type'), prop.get('property_type') or '未录入')}"
+        f" | 状态 {_STATUS_LABELS.get(prop.get('status'), prop.get('status') or '未录入')}"
+    )
+    lines.append(
+        "户型 " + (f"{prop['rooms']}室{prop.get('halls') or 0}厅{prop.get('bathrooms') or 0}卫"
+                   if prop.get("rooms") else "未录入")
+        + f" | 楼层 {_fmt_field(prop.get('floor'))} | 朝向 {_fmt_field(prop.get('orientation'))}"
+        + f" | 装修 {_fmt_field(prop.get('renovation'))} | 年份 {_fmt_field(prop.get('year_built'))}"
+        + f" | 电梯 {'有' if prop.get('has_elevator') else '无'}"
+        + f" | 车位 {'有' if prop.get('parking') else '无'}"
+    )
+    region = " ".join(x for x in [prop.get("district"), prop.get("community"), prop.get("address")] if x)
+    if region:
+        lines.append(f"区域 {region}")
+    if prop.get("tenant_requirements"):
+        lines.append(f"租客要求 {prop['tenant_requirements']}")
+    if owner:
+        line = (f"【业主】{owner.get('name') or '未填姓名'}，电话 {owner.get('phone') or '未录入'}")
+        if owner.get("wechat"):
+            line += f"，微信 {owner['wechat']}"
+        if prop.get("viewing_note"):
+            line += f"，看房方式 {prop['viewing_note']}"
+        lines.append(line)
+    else:
+        lines.append("【业主】该房源未录入业主信息（可用 update_property 传 owner_name/owner_phone/owner_wechat 补录）")
+    lines.append(f"【图片】{image_count} 张" if image_count else "【图片】未关联图片")
+    if history:
+        h = history[0]
+        lines.append(f"【调价】最近一次 调至 {_fmt_price({'price': h.get('new_price'), 'property_type': prop.get('property_type')})}"
+                     f"（原 {_fmt_price({'price': h.get('old_price'), 'property_type': prop.get('property_type')})}）")
+    return "\n".join(lines)
+
+
+def get_property_detail(property_id: int = None, title: str = None, task_id: str = None) -> str:
+    """房源详情（一次给全）：房源全部字段 + 单价 + 业主 + 图片 + 调价记录。
+
+    按编号或标题定位**唯一一套**房源；标题查不到 → not_found + 最接近的候选（不返回单套数据）；
+    标题命中多套 → ambiguous + 候选列表。目的是让"问某套房详情"有确定答案，既不漏业主段，
+    也不会拿别的房源顶替。
+    """
+    db = _get_db()
+    if property_id:
+        prop = db.get_property(int(property_id))
+        if not prop:
+            return json.dumps({"success": False, "not_found": True,
+                               "error": f"没有编号为 {property_id} 的房源"}, ensure_ascii=False)
+    else:
+        title = (title or "").strip()
+        if not title:
+            return json.dumps({"success": False, "error": "请提供 property_id（房源编号）或 title（房源标题）"},
+                              ensure_ascii=False)
+        found = db.find_property_by_title(title)
+        hits = found["exact"] or found["contains"]
+        if not hits:
+            candidates = db.similar_properties_by_title(title)
+            error = f"库里没有找到标题为「{title}」的房源。"
+            if candidates:
+                error += "最接近的是下面这几套，请确认是哪一套（把编号告诉我）："
+            return json.dumps({
+                "success": False, "not_found": True,
+                "candidates": [_prop_brief(c) for c in candidates],
+                "error": error,
+            }, ensure_ascii=False)
+        if len(hits) > 1:
+            return json.dumps({
+                "success": False, "ambiguous": True,
+                "candidates": [_prop_brief(h) for h in hits[:5]],
+                "error": f"标题「{title}」命中 {len(hits)} 套房源，请告诉我要看哪一套（把编号告诉我）",
+            }, ensure_ascii=False)
+        prop = hits[0]
+
+    pid = prop["id"]
+    rows = db.get_property_owners([pid])
+    owner = rows[0].get("owner") if rows else None
+    image_count = len([x for x in (prop.get("images") or "").split(",") if x.strip()])
+    history = db.get_price_history(pid, limit=3)
+    return json.dumps({
+        "success": True,
+        "property": prop,
+        "owner": owner,
+        "images": {"count": image_count},
+        "price_history": history,
+        "message": _detail_message(prop, owner, image_count, history),
+    }, ensure_ascii=False)
+
+
 def match_property(customer_id: int, top_n: int = 5, task_id: str = None) -> str:
     """根据客户需求智能匹配最合适的房源"""
     db = _get_db()
@@ -336,6 +459,18 @@ registry.register(
     toolset="real_estate",
     schema={"name": "batch_match_report", "description": "批量匹配汇报：为全部客户（或按类型/等级/区域筛选）生成逐客户匹配明细与汇总，每个客户一行（无匹配显式标注），完全匹配/接近匹配/无匹配由代码判定，汇总数字由代码统计，禁止自行口算", "parameters": TOOLS[5]["parameters"]},
     handler=TOOLS[5]["handler"],
+)
+registry.register(
+    name="get_property_detail",
+    toolset="real_estate",
+    schema={"name": "get_property_detail", "description": "房源详情（一次给全）：按 房源编号(property_id) 或 标题(title) 查**单套**房源的完整资料——全部字段 + 单价(元/㎡，系统按总价÷面积自动计算) + 业主（姓名/电话/微信/看房方式）+ 图片数量 + 调价记录。经纪人问'某套房源的详细信息/详情/资料/这套房什么情况/XX栋XX房给我看看'时必须用本工具（不要用 search_property 自己拼表，否则容易漏业主段）。标题查不到会返回 not_found 与最接近的候选（绝不返回别的房源充当答案）；命中多套会返回候选列表，需先让经纪人确认编号。", "parameters": {
+        "type": "object",
+        "properties": {
+            "property_id": {"type": "integer", "description": "房源编号（与标题二选一，优先）"},
+            "title": {"type": "string", "description": "房源标题（如 262栋1009）；精确匹配优先，其次包含匹配"},
+        },
+    }},
+    handler=lambda args, **kw: get_property_detail(**args),
 )
 
 
