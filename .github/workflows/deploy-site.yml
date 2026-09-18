@@ -1,18 +1,9 @@
 name: Deploy Site
 
 on:
-  release:
-    types: [published]
-  push:
-    branches: [main]
-    paths:
-      - 'website/**'
-      - 'skills/**'
-      - 'optional-skills/**'
-      # Catalog entry/removal merges must republish /docs/api/plugin-catalog.json —
-      # installed clients fetch it for live catalog refresh.
-      - 'plugin-catalog/**'
-      - '.github/workflows/deploy-site.yml'
+  # Coco 定制：官方版在 release published / push 上触发，但本仓库没有 Vercel 部署钩子，
+  # 每次发版都必红（curl -X POST "" → URL rejected: Malformed input to a URL function）。
+  # 改为仅手动触发；若将来配置了 VERCEL_DEPLOY_HOOK，可 gh workflow run deploy-site.yml 手动部署。
   workflow_dispatch:
     inputs:
       skills_index_run_id:

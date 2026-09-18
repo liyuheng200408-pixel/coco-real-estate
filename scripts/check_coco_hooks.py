@@ -124,6 +124,16 @@ CONTENT_CHECKS = [
         "定时跑必失败、每 12 小时制造一次 CI 红灯，并持续消耗 Actions 配额。\n"
         "处理：删掉 on: 下的 schedule 段，保留 workflow_dispatch 与 push tags（参考提交 e1a42a84）。",
     ),
+    (
+        "11",
+        "文档站部署触发已移除",
+        ".github/workflows/deploy-site.yml",
+        # 反向匹配（! 开头）：这两个触发不能出现
+        [r"!^  release:", r"!^  push:"],
+        "官方 deploy-site 在 release published / push 上触发，靠 VERCEL_DEPLOY_HOOK 部署文档站；\n"
+        "本仓库没有该钩子 → curl -X POST \"\" 报 URL rejected，每次发版必红（与代码无关）。\n"
+        "处理：删掉 on: 下的 release / push 段，只留 workflow_dispatch（参考本次提交）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示

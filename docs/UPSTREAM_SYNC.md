@@ -48,10 +48,11 @@ bash scripts/sync_upstream.sh v2026.9.14   # 换成实际的官方版本 tag
 | 08 | `scripts/sandbox/pick-release-tags.sh` | 挑标签正则要同时认日期式与语义化标签（`v0.21.3-1`） |
 | 09 | `pyproject.toml` | 依赖里必须保留 `ddgs`（web_search 后端） |
 | 10 | `.github/workflows/install-e2e.yml` | **不能带 `schedule:` 定时触发**——该 E2E 测的是 Hermes 本体的安装升级，与 Coco 的 install.sh 分发方式不符，定时跑必失败并持续吃 Actions 配额 |
+| 11 | `.github/workflows/deploy-site.yml` | **不能带 `release:` / `push:` 触发**——官方靠 `VERCEL_DEPLOY_HOOK` 部署文档站，本仓库没有该钩子，每次发版必红；只留 `workflow_dispatch` |
 
 ### 第 4 步｜自检 + 处理部署体系
 ```bash
-python3 scripts/check_coco_hooks.py    # 24 项应全 PASS
+python3 scripts/check_coco_hooks.py    # 应全部 PASS
 ```
 再检查官方是否改动了这些**我们自建**的东西所依赖的机制：
 - [ ] `install.sh` 的网关环境补丁（`setup_gateway_env_patch`）：该补丁给
