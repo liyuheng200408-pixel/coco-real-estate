@@ -40,31 +40,6 @@ warn() { echo "  [提示] $*"; }
 
 [[ "${COCO_SKIP_FONTS:-0}" == "1" ]] && { say "已跳过海报字体安装（COCO_SKIP_FONTS=1），海报将使用系统字体"; exit 0; }
 
-# ---- 先一次性拿到 sudo 授权：避免下载/安装途中再弹密码，看着像卡住 ----
-if [[ "$(id -u)" != "0" ]] && ! sudo -n true 2>/dev/null; then
-  say "海报组件需要系统权限：接下来要输入服务器密码（输入时屏幕不显示字符，属正常）"
-  sudo -v || warn "未获得 sudo 授权，将尽力继续（渲染器/字体可能装不上）"
-fi
-
-# ---- 渲染器 ----
-if ! command -v rsvg-convert >/dev/null 2>&1; then
-  say "安装海报渲染器（librsvg2-bin，约 7MB）..."
-  if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q librsvg2-bin 2>&1 | tail -2; then
-    if command -v rsvg-convert >/dev/null 2>&1; then
-      ok "渲染器就绪：$(rsvg-convert --version 2>/dev/null | head -1)"
-    else
-      warn "渲染器未生效（海报会回落旧版排版引擎）"
-    fi
-  else
-    warn "渲染器安装失败（网络或软件源不可用）——海报会回落旧版排版引擎"
-  fi
-else
-  info "渲染器已就绪：$(rsvg-convert --version 2>/dev/null | head -1)"
-fi
-
-sudo mkdir -p "$FONT_DIR" 2>/dev/null || mkdir -p "$FONT_DIR" 2>/dev/null || true
-mkdir -p "$TMP"
-
 # 字体清单：相对文件名|来源URL（多个 URL 用空格分隔，依次尝试）
 CORE_FONTS=(
   "NotoSansCJKsc-Regular.otf|https://fastly.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf ghapi:https://api.github.com/repos/notofonts/noto-cjk/contents/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
@@ -153,6 +128,55 @@ PY
   return 1
 }
 
+# ---- 先判断"有没有活干"：都已就绪就直接返回，不要密码、不打扰 ----
+# 渲染器是否就绪
+NEED_RENDERER=0
+command -v rsvg-convert >/dev/null 2>&1 || NEED_RENDERER=1
+
+# 字体是否齐（下面主流程会用同一份清单）
+ALL=("${CORE_FONTS[@]}")
+[[ "${COCO_FONTS_EXTRA:-0}" == "1" ]] && ALL+=("${EXTRA_FONTS[@]}")
+count_fonts() { find "$FONT_DIR" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | wc -l | tr -d ' '; }
+count_missing() {
+  local n=0 entry
+  for entry in "${ALL[@]}"; do
+    [[ -s "$FONT_DIR/${entry%%|*}" ]] || n=$((n + 1))
+  done
+  echo "$n"
+}
+NEED_FONTS="$(count_missing)"
+
+if [[ "$NEED_RENDERER" -eq 0 && "$NEED_FONTS" -eq 0 ]]; then
+  info "渲染器已就绪：$(rsvg-convert --version 2>/dev/null | head -1)"
+  ok "海报字体已就绪（$(count_fonts) 个文件，$(du -sh "$FONT_DIR" 2>/dev/null | cut -f1)）"
+  exit 0
+fi
+
+# ---- 确实有活干，才一次性拿 sudo（避免下载/安装途中再弹密码，也避免没事还问密码） ----
+if [[ "$(id -u)" != "0" ]] && ! sudo -n true 2>/dev/null; then
+  say "海报组件需要系统权限：接下来要输入服务器密码（输入时屏幕不显示字符，属正常）"
+  sudo -v || warn "未获得 sudo 授权，将尽力继续（渲染器/字体可能装不上）"
+fi
+
+# ---- 渲染器 ----
+if [[ "$NEED_RENDERER" -eq 1 ]]; then
+  say "安装海报渲染器（librsvg2-bin，约 7MB）..."
+  if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q librsvg2-bin 2>&1 | tail -2; then
+    if command -v rsvg-convert >/dev/null 2>&1; then
+      ok "渲染器就绪：$(rsvg-convert --version 2>/dev/null | head -1)"
+    else
+      warn "渲染器未生效（海报会回落旧版排版引擎）"
+    fi
+  else
+    warn "渲染器安装失败（网络或软件源不可用）——海报会回落旧版排版引擎"
+  fi
+else
+  info "渲染器已就绪：$(rsvg-convert --version 2>/dev/null | head -1)"
+fi
+
+sudo mkdir -p "$FONT_DIR" 2>/dev/null || mkdir -p "$FONT_DIR" 2>/dev/null || true
+mkdir -p "$TMP"
+
 # 返回 0=本次装上；1=失败；2=已存在
 fetch_one() {
   local name="$1" urls="$2" tmpfile url
@@ -188,7 +212,6 @@ fetch_one() {
 }
 
 # ---- 优先走 Gitee 字体包（一个文件，国内服务器更快更稳） ----
-count_fonts() { find "$FONT_DIR" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | wc -l | tr -d ' '; }
 install_bundle() {
   local name="$1" tmp="$TMP/$1" ex="$TMP/bundle_ex" n=0 f
   say "下载字体包 $name ..."
@@ -225,17 +248,6 @@ if command -v curl >/dev/null 2>&1; then
     RAW_OK=1
   fi
 fi
-
-ALL=("${CORE_FONTS[@]}")
-[[ "${COCO_FONTS_EXTRA:-0}" == "1" ]] && ALL+=("${EXTRA_FONTS[@]}")
-
-count_missing() {
-  local n=0 entry
-  for entry in "${ALL[@]}"; do
-    [[ -s "$FONT_DIR/${entry%%|*}" ]] || n=$((n + 1))
-  done
-  echo "$n"
-}
 
 missed=()
 if [[ "$(count_missing)" -eq 0 ]]; then
