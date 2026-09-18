@@ -71,7 +71,7 @@ info "[5/8] 应用数据库迁移（只增不删、事务、失败回滚）"
 "$VENV_PY" scripts/migrate.py
 ok "数据库迁移检查完成（若提示'数据库已是最新'即无表结构变更）"
 
-info "[6/8] 迁移配置文件（官方底座升级后需要，非交互式）"
+info "[6/8] 迁移配置文件（跟随官方版本升级时需要，非交互式）"
 # 官方配置带版本号（_config_version）；底座升级后旧配置会落后（实测 33 → 44）。
 # 官方命令 hermes config migrate 是交互式的，在无人值守更新里会卡住，故走本脚本。
 "$VENV_PY" scripts/migrate_config.py || echo "  警告：配置迁移步骤异常，不阻断更新"
@@ -115,5 +115,5 @@ echo ""
 COCO_VER=$(cat "$REPO_ROOT/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "未知")
 # 版本号形如 0.21.3-1：前半段是官方底座，后半段是 Coco 自己的第 N 次发行
 COCO_BASE="${COCO_VER%%-*}"
-echo -e "版本: \033[1;34mv${COCO_VER}\033[0m  （底座官方 Hermes ${COCO_BASE}）"
+echo -e "版本: \033[1;34mv${COCO_VER}\033[0m  （官方 Hermes ${COCO_BASE} 定制版）"
 ok "无损更新完成。若本次更新涉及表结构，数据库已通过迁移升级，旧数据全部保留。"
