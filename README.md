@@ -2,9 +2,9 @@
 
 > 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
-[![Coco v0.21.3-1](https://img.shields.io/badge/Coco%20AI-v0.21.3--1-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-1)
+[![Coco v0.21.3-2](https://img.shields.io/badge/Coco%20AI-v0.21.3--2-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-2)
 
-> 🏷️ **当前版本：v0.21.3-1**（基于官方 Hermes v0.21.3） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-1)
+> 🏷️ **当前版本：v0.21.3-2**（基于官方 Hermes v0.21.3） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-2)
 
 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
