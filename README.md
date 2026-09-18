@@ -2,9 +2,9 @@
 
 > 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
-[![Coco v0.21.3-3](https://img.shields.io/badge/Coco%20AI-v0.21.3--3-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-3)
+[![Coco v0.21.3-4](https://img.shields.io/badge/Coco%20AI-v0.21.3--4-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-4)
 
-> 🏷️ **当前版本：v0.21.3-3**（基于官方 Hermes v0.21.3） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-3)
+> 🏷️ **当前版本：v0.21.3-4**（基于官方 Hermes v0.21.3） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-4)
 
 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
@@ -163,17 +163,17 @@ journalctl --user -u hermes-gateway -n 50 --no-pager
 
 **手动备份：**
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py backup
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py backup
 ```
 
 **查看备份列表：**
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py list
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py list
 ```
 
 **恢复备份：**
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
 ```
 
 ### 服务器迁移
@@ -189,7 +189,7 @@ cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_esta
 
 **拷贝到新服务器后一键恢复：**
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
 ```
 
 **重启服务（发"你好"即完成迁移）：**
@@ -207,7 +207,7 @@ hermes gateway restart
 
 **备份数据库（强制）：**
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && python3 scripts/backup_db.py backup --force
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py backup --force
 ```
 
 **确认备份文件齐全：**
@@ -240,14 +240,9 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 scp ~/Desktop/coco_migration.tar.gz root@服务器IP:/root/
 ```
 
-**在服务器激活环境：**
-```bash
-cd ~/hermes-agent && source venv/bin/activate
-```
-
 **执行数据恢复：**
 ```bash
-python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
 ```
 
 **重启服务：**
@@ -258,7 +253,7 @@ hermes gateway restart
 **第 5 步：验证**
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/healthcheck.py
 ```
 
 预期：数据库/密钥/备份新鲜度全部 PASS；在飞书给 Coco 发"看下房源统计"，数据完整返回（房源/客户/成交都在，品牌名保留）。

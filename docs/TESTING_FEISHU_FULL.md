@@ -5,12 +5,10 @@
 ## 前置检查（服务器）
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate
-git pull && pip install -e . -q
-sudo systemctl restart hermes-agent
-git log --oneline -1   # 确认版本
-python3 scripts/healthcheck.py        # 预期 PASS 11+ / FAIL 0
-python3 scripts/smoke_test_real_estate.py   # 预期 61 OK + 1 ERR(政策空库)
+git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh   # 更新到最新版并重启服务
+git -C ~/hermes-agent log --oneline -1                                # 确认版本
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/healthcheck.py  # 预期 FAIL 0
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/smoke_test_real_estate.py  # 预期零崩溃
 ```
 
 ## 飞书实测清单（62 工具，分 5 批）
@@ -97,7 +95,7 @@ python3 scripts/smoke_test_real_estate.py   # 预期 61 OK + 1 ERR(政策空库)
 ## 查库验证模板
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate && export $(grep DATABASE_URL .env.db) && python3 -c "
+export $(grep DATABASE_URL ~/hermes-agent/.env.db) && ~/hermes-agent/venv/bin/python -c "
 import sqlalchemy, os
 e = sqlalchemy.create_engine(os.environ['DATABASE_URL'])
 with e.connect() as c:

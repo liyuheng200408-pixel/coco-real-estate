@@ -2,7 +2,7 @@
 """Coco 部署健康自检脚本
 
 用法（在服务器上）:
-    cd ~/hermes-agent && source venv/bin/activate && python3 scripts/healthcheck.py
+    ~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/healthcheck.py
 
 覆盖检查项:
     1. 安装目录与代码版本（是否落后远程）

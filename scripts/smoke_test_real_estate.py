@@ -1,7 +1,7 @@
 """Coco real_estate 工具全量冒烟测试 —— 在 sqlite 上真实调用每个工具的注册 handler
 
 用法（在服务器或本地）:
-    cd ~/hermes-agent && source venv/bin/activate && python3 scripts/smoke_test_real_estate.py
+    ~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/smoke_test_real_estate.py
 
 覆盖: 工具集静态清单全部 62 个工具 + 出租房附加用例。
 输出: 每个工具的 OK/ERR/EXC 汇总 + 未注册/遗漏提示。

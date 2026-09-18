@@ -30,16 +30,14 @@ Coco 的数据由三部分组成，**缺一不可**：
 ### 手动备份（随时执行）
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate
-python3 scripts/backup_db.py backup
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py backup
 ```
 
 ### 查看备份列表
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate
-python3 scripts/backup_db.py list
-python3 scripts/backup_db.py status   # 查看最近备份状态
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py list
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py status   # 查看最近备份状态
 ```
 
 ---
@@ -51,14 +49,12 @@ python3 scripts/backup_db.py status   # 查看最近备份状态
 ### 第 1 步：在旧服务器上打包（重装/迁移前）
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate
 
 # 1. 先手动备份一次，确保数据最新
-python3 scripts/backup_db.py backup
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py backup
 
 # 2. 打包（数据库备份 + 图片备份 + 加密密钥）
-cd ~/backups/real_estate
-tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
+( cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt )
 ls -lh /root/coco_migration.tar.gz
 ```
 
@@ -84,7 +80,6 @@ curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.
 安装完成后按提示做两件配置（安装脚本会打印说明）：
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate
 hermes model    # 配置模型（小米 MiMo，填 API Key）
 hermes setup    # 配置飞书（填 App ID 和 App Secret）
 ```
@@ -98,8 +93,7 @@ hermes setup    # 配置飞书（填 App ID 和 App Secret）
 scp ~/Desktop/coco_migration.tar.gz root@新服务器IP:/root/
 
 # SSH 登录新服务器后执行
-cd ~/hermes-agent && source venv/bin/activate
-python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
 ```
 
 恢复顺序（脚本自动执行，任一步失败即中止并提示）：
@@ -110,9 +104,9 @@ python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migrat
 ### 第 5 步：重启并验证
 
 ```bash
-sudo systemctl restart hermes-agent
+hermes gateway restart
 sleep 10
-sudo systemctl status hermes-agent   # 应显示 active (running)
+hermes gateway status          # 应显示运行中
 ```
 
 然后在飞书里给 Coco 发一条消息（如"查一下房源统计"），确认数据回来了。
@@ -124,17 +118,15 @@ sudo systemctl status hermes-agent   # 应显示 active (running)
 ### 只恢复数据库（比如误删数据）
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate
-python3 scripts/backup_db.py list     # 先看有哪些备份
-python3 scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
-sudo systemctl restart hermes-agent
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py list     # 先看有哪些备份
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
+hermes gateway restart
 ```
 
 ### 只恢复房源图片
 
 ```bash
-cd ~/hermes-agent && source venv/bin/activate
-python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz --images-file real_estate_images_20260101_020000.tar.gz
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz --images-file real_estate_images_20260101_020000.tar.gz
 ```
 
 ### 密钥丢了怎么办
@@ -151,7 +143,7 @@ python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migrat
 **Q1：恢复时报 "认证失败 / password authentication failed"？**
 A：备份脚本从 `.env.db` 读取数据库密码。如果手动改过密码或 `.env.db` 被删，用 `--db-url` 指定：
 ```bash
-python3 scripts/backup_db.py restore --restore-file xxx.dump --db-url "postgresql://hermes:密码@localhost:5432/hermes_agent"
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore --restore-file xxx.dump --db-url "postgresql://hermes:密码@localhost:5432/hermes_agent"
 ```
 
 **Q2：恢复后客户手机号显示乱码/解不开？**
@@ -161,7 +153,7 @@ A：加密密钥不匹配。确认恢复前 `.env.db` 里的 `COCO_ENC_KEY` 和�
 A：打包时确认 `ls ~/backups/real_estate/` 里有 `real_estate_images_*.tar.gz`。没有的话数据库和密钥也能恢复，图片单独再备份。
 
 **Q4：重装后忘了配置飞书/模型？**
-A：服务能启动但机器人不回复。执行 `hermes model` 和 `hermes setup` 重新配置，然后 `sudo systemctl restart hermes-agent`。
+A：服务能启动但机器人不回复。执行 `hermes model` 和 `hermes setup` 重新配置，然后 `hermes gateway restart`。
 
 **Q5：备份文件多久清理？**
 A：自动保留 30 天，更早的自动删除。重要节点（如迁移前）建议手动把 dump 文件下载到本地留档。
@@ -172,8 +164,7 @@ A：自动保留 30 天，更早的自动删除。重要节点（如迁移前）
 
 ```
 # 旧服务器打包
-cd ~/hermes-agent && source venv/bin/activate
-python3 scripts/backup_db.py backup
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py backup
 cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
 
 # 电脑下载
@@ -187,14 +178,12 @@ curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.
 # curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 
 # 新服务器配置（装完提示时做）
-cd ~/hermes-agent && source venv/bin/activate
 hermes model && hermes setup
 
 # 电脑上传迁移包
 scp ~/Desktop/coco_migration.tar.gz root@新IP:/root/
 
 # 新服务器恢复
-cd ~/hermes-agent && source venv/bin/activate
-python3 scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
-sudo systemctl restart hermes-agent
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+hermes gateway restart
 ```
