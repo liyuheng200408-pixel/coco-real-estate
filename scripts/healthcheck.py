@@ -10,12 +10,13 @@
     3. Python 依赖（ddgs 缺失 = web_search 对模型不可见）
     4. web_search 后端可用性（Coco 能否联网查政策）
     5. 数据库连接与数据量
-    6. COCO_ENC_KEY 与密钥备份
-    7. 备份新鲜度（最新 dump 是否 <48h，2026-08-12 加）
-    8. cron 注册（早报/午间/逾期 3 个任务，默认关闭属预期）
-    9. 技能同步
-    10. 磁盘空间
-    11. 网关运行期日志错误（已排除"重启导致飞书长连接正常断开"的噪音）
+    6. 数据库结构是否已是最新（有无待执行迁移）
+    7. COCO_ENC_KEY 与密钥备份
+    8. 备份新鲜度（最新 dump 是否 <48h，2026-08-12 加）
+    9. 定时任务注册（早报/午间/逾期 3 个，默认关闭属预期）
+    10. 技能同步
+    11. 磁盘空间
+    12. 网关运行期日志错误（已排除"重启导致飞书长连接正常断开"的噪音）
 
 退出码: 0 = 全部通过/仅警告; 1 = 存在 FAIL 项
 """
@@ -196,8 +197,8 @@ else:
     warn("未读取到 DATABASE_URL（.env.db 缺失或未配置）",
          "重跑 install.sh 或检查 $INSTALL_DIR/.env.db")
 
-# ---- 5b. 数据库迁移状态 ----
-print("\n[5b] 数据库迁移")
+# ---- 6. 数据库迁移状态 ----
+print("\n[6] 数据库迁移")
 if db_url:
     mig_rc, mig_out = sh(f"{PY} {INSTALL_DIR}/scripts/migrate.py --database-url {__import__('shlex').quote(db_url)} --status", timeout=20)
     if mig_rc and "待执行: 0" in mig_out:
@@ -210,8 +211,8 @@ if db_url:
 else:
     warn("跳过迁移检查（无 DATABASE_URL）")
 
-# ---- 6. 加密密钥 ----
-print("\n[6] 加密密钥")
+# ---- 7. 加密密钥 ----
+print("\n[7] 加密密钥")
 enc_key = env_file_get(env_path, "COCO_ENC_KEY") if os.path.isfile(env_path) else None
 if enc_key:
     ok("COCO_ENC_KEY 已配置（客户手机号/微信加密正常）")
@@ -223,8 +224,8 @@ if os.path.isfile(key_backup):
 else:
     warn("密钥备份不存在", "密钥丢失将无法解密客户手机号，尽快备份到安全位置")
 
-# ---- 7. 备份新鲜度 ----（2026-08-12 加）
-print("\n[7] 备份新鲜度")
+# ---- 8. 备份新鲜度 ----（2026-08-12 加）
+print("\n[8] 备份新鲜度")
 backup_dir = os.path.expanduser("~/backups/real_estate")
 dumps = []
 if os.path.isdir(backup_dir):
@@ -240,24 +241,24 @@ else:
         warn(f"备份已过期（最新 {newest}，{age_h:.0f} 小时前 > 48h）",
              "立即执行: python3 scripts/backup_db.py backup --force；检查每日自动备份任务是否失效")
 
-# ---- 8. cron 注册 ----
-print("\n[8] 定时任务（cron）")
+# ---- 9. cron 注册 ----
+print("\n[9] 定时任务（cron）")
 marker = os.path.join(HERMES_HOME, ".coco_cron_registered")
 if os.path.isfile(marker):
     ok("定时任务已注册（早报 09:00 / 午间 13:00 / 逾期每 30 分钟）")
 else:
     ok("定时任务默认关闭（省 token，属预期；需要时对 Coco 说一句「开启定时任务」即可）")
 
-# ---- 9. 技能同步 ----
-print("\n[9] 技能同步")
+# ---- 10. 技能同步 ----
+print("\n[10] 技能同步")
 skill = os.path.join(HERMES_HOME, "skills", "real_estate", "SKILL.md")
 if os.path.isfile(skill):
     ok("Coco 操作手册技能已同步")
 else:
     warn("技能未同步", "重启 gateway 服务后会自动同步（hermes gateway restart）")
 
-# ---- 10. 磁盘空间 ----
-print("\n[10] 磁盘空间")
+# ---- 11. 磁盘空间 ----
+print("\n[11] 磁盘空间")
 rc, out = sh("df -P / | awk 'NR==2{print $4}'")
 if rc and out.isdigit():
     free_mb = int(out) // 1024
@@ -268,8 +269,8 @@ if rc and out.isdigit():
 else:
     warn("无法读取磁盘空间")
 
-# ---- 11. 网关日志 ----
-print("\n[11] 网关运行期错误（已排除重启噪音）")
+# ---- 12. 网关日志 ----
+print("\n[12] 网关运行期错误（已排除重启噪音）")
 _user = "--user " if SERVICE_USER else ""
 rc, out = sh(f"journalctl {_user}-u {SERVICE} -n 200 --no-pager 2>/dev/null")
 
