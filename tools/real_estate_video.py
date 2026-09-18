@@ -71,12 +71,7 @@ def generate_short_video_script(property_id: int, platform: str = "douyin", task
     结构：0-3s 钩子 → 3-20s 亮点 → 20-25s 价格 → 25-30s 行动号召
     """
     db = _get_db()
-    properties = db.search_properties()
-    p = None
-    for item in properties:
-        if item.get('id') == property_id:
-            p = item
-            break
+    p = db.get_available_property(property_id)
     if p is None:
         return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
 

@@ -298,7 +298,7 @@ def match_property(customer_id: int, top_n: int = 5, task_id: str = None) -> str
         "success": True, "customer": customer.get('name'),
         "customer_tier": customer.get('tier'),
         "matched": True,
-        "total_properties": len(db.search_properties()),
+        "total_properties": db.count_available_properties(),
         "matches": [{k: v for k, v in m.items() if k in ('id','title','community','price','area','rooms','halls','district','score','match_reasons')} for m in matches],
     }, ensure_ascii=False)
 
@@ -320,7 +320,7 @@ def batch_match_report(
                                     tier=tier, district=district)
     return json.dumps({
         "success": True,
-        "total_properties": len(db.search_properties(limit=10000)),
+        "total_properties": db.count_available_properties(),
         "summary": result['summary'],
         "customers": result['customers'],
     }, ensure_ascii=False)

@@ -1334,6 +1334,34 @@ class RealEstateDB:
             p = s.query(Property).get(property_id)
             return p.to_dict() if p else None
 
+    def count_available_properties(self) -> int:
+        """在售房源总数（SQL count，不受任何 limit 影响）"""
+        with self.get_session() as s:
+            return s.query(Property).filter(Property.status == 'available').count()
+
+    def get_available_property(self, property_id):
+        """按编号取单套**在售**房源（一次命中，不依赖"前 N 条"）
+
+        海报/文案/短视频/图片类工具原先用 search_properties() 捞一把再找编号，
+        而 search_properties 默认只返回 50 条 —— 房源一多（实测 6 万条）就报"房源不存在"。
+        """
+        if property_id is None:
+            return None
+        with self.get_session() as s:
+            p = s.query(Property).filter(Property.id == property_id,
+                                         Property.status == 'available').first()
+            return p.to_dict() if p else None
+
+    def find_available_property_by_title(self, title, limit=10):
+        """按标题包含匹配取在售房源列表（供"按标题找那套房"的场景，不再受默认 50 条限制）"""
+        title = (title or '').strip()
+        if not title:
+            return []
+        with self.get_session() as s:
+            rows = s.query(Property).filter(Property.status == 'available',
+                                            Property.title.contains(title)).limit(limit).all()
+            return [p.to_dict() for p in rows]
+
     def find_property_by_title(self, title):
         """按标题定位单套房源：先"完全一致"，再"包含"。
 

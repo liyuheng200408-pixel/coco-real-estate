@@ -443,20 +443,11 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
         return json.dumps({"success": False, "error": "缺少 Pillow 依赖，请执行 pip install Pillow"}, ensure_ascii=False)
 
     db = _get_db()
-    properties = db.search_properties()
-    p = None
-    if property_id is not None:
-        for item in properties:
-            if item.get('id') == property_id:
-                p = item
-                break
-    elif title:
-        # 标题模糊匹配：包含关系，返回第一个命中（2026-08-12 加：Coco 曾用标题搜索失败）
-        tl = str(title).strip()
-        for item in properties:
-            if tl and tl in (item.get('title') or ''):
-                p = item
-                break
+    # 按编号直接取 / 按标题包含匹配（2026-09-18 修：原先前 50 条内查找，房源一多就报"房源不存在"）
+    p = db.get_available_property(property_id) if property_id is not None else None
+    if p is None and title:
+        hits = db.find_available_property_by_title(title)
+        p = hits[0] if hits else None
     if p is None:
         return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
 
@@ -509,9 +500,9 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, task_id: str
         return json.dumps({"success": False, "error": "缺少 Pillow 依赖，请执行 pip install Pillow"}, ensure_ascii=False)
 
     db = _get_db()
-    properties = db.search_properties()
-    by_id = {p['id']: p for p in properties}
+    # 2026-09-18 修：九宫格原先只在前 50 条里找编号，房源一多就报"房源不存在"
     ids = [int(x.strip()) for x in property_ids.split(',') if x.strip()][:9]
+    by_id = {i: q for i in ids if (q := db.get_available_property(i)) is not None}
     if not ids:
         return json.dumps({"success": False, "error": "请提供房源ID列表（逗号分隔，最多9个）"}, ensure_ascii=False)
 

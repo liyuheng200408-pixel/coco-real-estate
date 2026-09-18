@@ -53,12 +53,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
     platform: friends(朋友圈) / beike(贝壳) / anjuke(安居客) / 58
     """
     db = _get_db()
-    properties = db.search_properties()
-    p = None
-    for item in properties:
-        if item.get('id') == property_id:
-            p = item
-            break
+    p = db.get_available_property(property_id)
     if p is None:
         # 尝试直接查（可能非在售）
         return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)

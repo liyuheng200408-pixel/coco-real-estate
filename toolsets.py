@@ -259,6 +259,10 @@ TOOLSETS = {
             "generate_report",
             "generate_property_poster", "generate_poster_grid",
             "save_agent_brand", "get_agent_brand", "get_coco_version",
+            # 调价/阶段/转介绍/预警/税费等（2026-09-18 补：此前注册了但未列入任何工具集，模型看不到）
+            "price_history", "price_drop_alerts", "update_customer_stage", "stage_stagnation",
+            "churn_warning", "find_alternatives", "clear_defect_tag", "add_referral", "referral_stats",
+            "loan_compare", "tax_breakdown_report", "market_brief",
             "enable_cron", "disable_cron",
         ],
     ),

@@ -272,7 +272,16 @@ else:
 # ---- 12. 网关日志 ----
 print("\n[12] 网关运行期错误（已排除重启噪音）")
 _user = "--user " if SERVICE_USER else ""
+# 统计窗口 = 当前这次服务启动之后：老进程的报错（例如已经修好的历史故障）不该再报警。
+# （2026-09-18 老板实测：更新后仍报 5 处错误，全是修复前那次调用失败留下的日志。）
+rc_st, started = sh(f"systemctl {_user}show -p ActiveEnterTimestamp --value {SERVICE}")
+_window = "最近 200 行"
 rc, out = sh(f"journalctl {_user}-u {SERVICE} -n 200 --no-pager 2>/dev/null")
+if rc_st and started.strip():
+    rc2, out2 = sh(f"journalctl {_user}-u {SERVICE} --since '{started.strip()}' --no-pager 2>/dev/null")
+    if rc2 and out2.strip():
+        rc, out = rc2, out2
+        _window = f"本次服务启动以来（{started.strip()}）"
 
 # 重启会让飞书长连接正常断开（websocket code 1000），lark 库把"正常断开"也记成 ERROR 并附一条
 # traceback —— 每次重启固定产生 4 行这类噪音。不排除掉，这一项每次更新后必然 WARN，反而盖住
@@ -311,12 +320,12 @@ def _scan_gateway_log(text: str):
 if rc and out:
     errs = _scan_gateway_log(out)
     if errs:
-        warn(f"近期日志有 {len(errs)} 处运行期错误",
+        warn(f"近期日志有 {len(errs)} 处运行期错误（窗口: {_window}）",
              f"完整日志: journalctl {_user}-u {SERVICE} -n 200 --no-pager")
         for line in errs[-3:]:
             print(f"         {line.strip()[:150]}")
     else:
-        ok("近期日志无运行期错误（重启时的飞书断开噪音已排除）")
+        ok(f"近期日志无运行期错误（窗口: {_window}；重启时的飞书断开噪音已排除）")
 else:
     warn("无法读取服务日志")
 

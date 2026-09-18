@@ -54,6 +54,10 @@ STATIC_TOOLS = [
     "save_agent_brand","get_agent_brand","get_coco_version",
     "enable_cron","disable_cron",
     "add_owner","get_owner","list_owners","owner_portfolio","exclusive_expiring","get_property_owners","find_person_by_name",
+    # 2026-09-18：此前注册了却没进工具集（模型看不到），补进清单一起冒烟
+    "price_history","price_drop_alerts","update_customer_stage","stage_stagnation",
+    "churn_warning","find_alternatives","clear_defect_tag","add_referral","referral_stats",
+    "loan_compare","tax_breakdown_report","market_brief",
 ]
 
 # ---------- 造一张测试图片 ----------
@@ -191,6 +195,18 @@ CASES = [
     ("generate_poster_grid", {"property_ids":str(pid2)}),
     ("get_agent_brand", {}),
     ("get_coco_version", {}),
+    ("price_history", {"property_id": pid2}),
+    ("price_drop_alerts", {"days": 30}),
+    ("update_customer_stage", {"customer_id": cid, "stage": "interested"}),
+    ("stage_stagnation", {}),
+    ("churn_warning", {}),
+    ("find_alternatives", {"property_id": pid2}),
+    ("clear_defect_tag", {"property_id": pid2, "tag": "采光差"}),
+    ("add_referral", {"referrer_customer_id": cid, "referred_name": "被介绍人甲", "referred_phone": "13700137000"}),
+    ("referral_stats", {}),
+    ("loan_compare", {"price": 1500000}),
+    ("tax_breakdown_report", {"price": 1500000, "area": 100.0}),
+    ("market_brief", {"district": "美兰"}),
     ("enable_cron", {"chat_id":"oc_test"}),
     ("disable_cron", {}),
     ("get_owner", {"owner_id":oid}),

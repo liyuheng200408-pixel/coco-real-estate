@@ -13,12 +13,7 @@ def _get_db():
 def add_property_images(property_id: int, images: str, task_id: str = None) -> str:
     """为房源添加图片（多个用逗号分隔）"""
     db = _get_db()
-    properties = db.search_properties()
-    p = None
-    for item in properties:
-        if item.get('id') == property_id:
-            p = item
-            break
+    p = db.get_available_property(property_id)
     if p is None:
         return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
     existing = (p.get('images') or '').strip()
@@ -39,12 +34,7 @@ def add_property_images(property_id: int, images: str, task_id: str = None) -> s
 def list_property_images(property_id: int, task_id: str = None) -> str:
     """查看房源图片列表"""
     db = _get_db()
-    properties = db.search_properties()
-    p = None
-    for item in properties:
-        if item.get('id') == property_id:
-            p = item
-            break
+    p = db.get_available_property(property_id)
     if p is None:
         return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
     images = [x.strip() for x in (p.get('images') or '').split(',') if x.strip()]
