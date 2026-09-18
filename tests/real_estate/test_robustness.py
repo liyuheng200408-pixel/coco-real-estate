@@ -66,3 +66,63 @@ class TestFailuresAreNotSwallowed:
         out = json.loads(tp.update_property(property_id=p["id"], owner_name="某业主"))
         assert out["success"] is True
         assert "warning_owner" in out, out
+
+
+class TestWarningsOnPartialFailure:
+    """统计/匹配类失败必须出现在返回里（不能静默当成 0 或无声跳过）"""
+
+    def test_add_customer_match_failure_warns(self, db, monkeypatch):
+        import tools.real_estate_customer as tc
+        monkeypatch.setattr(tc, "_get_db", lambda: db)
+        def boom(*a, **kw):
+            raise RuntimeError("模拟匹配失败")
+        monkeypatch.setattr(db, "match_property", boom)
+        out = json.loads(tc.add_customer(name="警告客户", customer_type="buy_second_hand"))
+        assert out["success"] is True
+        assert "warning_match" in out and "自动匹配房源失败" in out["warning_match"], out
+
+    def test_report_warns_when_stats_fail(self, db, monkeypatch):
+        import tools.real_estate_report as trp
+        monkeypatch.setattr(trp, "_get_db", lambda: db)
+        def boom(*a, **kw):
+            raise RuntimeError("模拟统计失败")
+        monkeypatch.setattr(db, "viewing_stats", boom)
+        out = json.loads(trp.generate_report(period="week"))
+        assert out["success"] is True
+        assert "warning_stats" in out, out
+        assert "带看统计获取失败" in out["warning_stats"]
+
+    def test_market_brief_warns_when_stats_fail(self, db, monkeypatch):
+        """自家盘况统计失败时：标注"统计失败"、不基于假 0 给建议、返回带 warning_stats"""
+        import tools.real_estate_analytics as ta
+        import agent.real_estate_db as redb
+        monkeypatch.setattr(ta, "_get_db", lambda: db)
+
+        class _Boom:
+            def __ge__(self, other):
+                raise RuntimeError("模拟统计失败")
+
+        class _FakeViewing:
+            viewing_time = _Boom()
+
+        monkeypatch.setattr(redb, "Viewing", _FakeViewing)
+        out = json.loads(ta.market_brief())
+        assert out["success"] is True, out
+        assert "warning_stats" in out, out
+        assert "统计失败" in out["message"]
+
+    def test_intent_ranking_warns_on_partial_failure(self, db, monkeypatch):
+        import tools.real_estate_intent as tin
+        monkeypatch.setattr(tin, "_get_db", lambda: db)
+        c1 = db.add_customer(name="能算分的", customer_type="buy_second_hand", tier="A")
+        db.add_customer(name="算分失败的", customer_type="buy_second_hand", tier="A")
+        real = db.customer_intent_score
+        def flaky(cid):
+            if cid == 2:
+                raise RuntimeError("模拟算分失败")
+            return real(cid)
+        monkeypatch.setattr(db, "customer_intent_score", flaky)
+        out = json.loads(tin.list_intent_scores())
+        assert out["success"] is True
+        assert "warning_scores" in out, out
+        assert "算分失败的" in out["warning_scores"]

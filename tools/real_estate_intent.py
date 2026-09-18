@@ -33,15 +33,21 @@ def list_intent_scores(tier: str = None, limit: int = 20, task_id: str = None) -
     db = _get_db()
     customers = db.list_customers(tier=tier, status='active', limit=limit)
     scored = []
+    failed = []
     for c in customers:
         try:
             s = db.customer_intent_score(c['id'])
             if s:
                 scored.append(s)
-        except Exception:
-            continue
-    scored.sort(key=lambda x: x['score'], reverse=True)
-    return json.dumps({"success": True, "rankings": scored, "count": len(scored)}, ensure_ascii=False)
+        except Exception as exc:
+            # 单个客户算分失败不能悄悄跳过：否则排名少人，经纪人以为这些客户不在库里
+            failed.append(f"{c.get('name') or c['id']}（{type(exc).__name__}）")
+    # 安全排序：个别客户的 score 可能为空（数据不足），不能让整个排名崩掉
+    scored.sort(key=lambda x: (x.get('score') if x.get('score') is not None else 0), reverse=True)
+    out = {"success": True, "rankings": scored, "count": len(scored)}
+    if failed:
+        out["warning_scores"] = f"{len(failed)} 位客户意向评分计算失败，未计入排名：" + "、".join(failed[:5])
+    return json.dumps(out, ensure_ascii=False)
 
 
 registry.register(

@@ -72,14 +72,19 @@ def add_customer(
     )
     # 录入后自动匹配（2026-08-29 加）：新客户 → 自动找匹配房源，随返回主动报告
     matched_properties = []
+    match_warning = None
     try:
         matched_properties = db.match_property(result['id'], top_n=5)
-    except Exception:
+    except Exception as exc:
+        # 失败不能悄悄咽掉：否则界面显示"无匹配"，经纪人以为库里没合适房源
         matched_properties = []
+        match_warning = f"自动匹配房源失败：{type(exc).__name__}: {exc}（可稍后重跑匹配）"
     response = {"success": True, "customer": result}
     if matched_properties:
         response["matched_properties"] = matched_properties
         response["message"] = f"客户已添加，有 {len(matched_properties)} 套房源可能符合需求"
+    if match_warning:
+        response["warning_match"] = match_warning
     return json.dumps(response, ensure_ascii=False)
 
 

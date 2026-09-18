@@ -100,18 +100,21 @@ def weekly_market_report(
     # 本周新增房源真实统计（2026-08-28 修硬编码）
     from datetime import datetime, timedelta
     week_ago = datetime.now() - timedelta(days=7)
+    _warn_new_listings = None
     try:
         with db.get_session() as s:
             from agent.real_estate_db import Property
             new_listings = s.query(Property).filter(
                 Property.created_at >= week_ago).count()
-    except Exception:
-        new_listings = 0
+    except Exception as exc:
+        # 静默当 0 会让"本周新增房源 0 套"这种假数据进入报告
+        new_listings = None
+        _warn_new_listings = f"新增房源统计失败（{type(exc).__name__}: {exc}）"
 
     result = {
         "报告周期": "本周",
         "区域": district or "全部",
-        "新增房源": f"{new_listings}套",
+        "新增房源": f"{new_listings}套" if new_listings is not None else "统计失败",
         "在售房源": stats.get('available_properties', 0),
         "客户总数": stats.get('total_customers', 0),
         "逾期跟进": stats.get('overdue_followups', 0),
@@ -122,7 +125,10 @@ def weekly_market_report(
         ],
     }
     
-    return json.dumps({"success": True, "report": result}, ensure_ascii=False)
+    out = {"success": True, "report": result}
+    if _warn_new_listings:
+        out["warning_stats"] = _warn_new_listings
+    return json.dumps(out, ensure_ascii=False)
 
 
 registry.register(
@@ -195,6 +201,7 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
     week_ago = datetime.now() - timedelta(days=7)
 
     # ① 自家盘况（真实统计）
+    _brief_warning = None
     try:
         with db.get_session() as s:
             from agent.real_estate_db import Property, Viewing, Deal
@@ -202,17 +209,20 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
             avail = s.query(Property).filter(Property.status == 'available').count()
             viewings_week = s.query(Viewing).filter(Viewing.viewing_time >= week_ago).count()
             deals_week = s.query(Deal).filter(Deal.created_at >= week_ago).count()
-    except Exception:
-        new_props = avail = viewings_week = deals_week = 0
+    except Exception as exc:
+        # 同上：失败要标出来，不能假装是 0
+        new_props = avail = viewings_week = deals_week = None
+        _brief_warning = f"自家盘况统计失败（{type(exc).__name__}: {exc}），下面的数字不可信"
 
     conversion = f"{deals_week / viewings_week * 100:.0f}%" if viewings_week else "暂无数据"
+    _d = lambda v: "统计失败" if v is None else v      # 失败时显示“统计失败”，不显示 None 也不假装 0
 
     own_section = [
         "一、自家盘况（系统数据）",
-        f"· 本周新增房源: {new_props} 套",
-        f"· 当前在售: {avail} 套",
-        f"· 本周带看: {viewings_week} 次",
-        f"· 本周成交: {deals_week} 单（带看转化率 {conversion}）",
+        f"· 本周新增房源: {_d(new_props)} 套",
+        f"· 当前在售: {_d(avail)} 套",
+        f"· 本周带看: {_d(viewings_week)} 次",
+        f"· 本周成交: {_d(deals_week)} 单（带看转化率 {conversion}）",
     ]
 
     # ② 联网行情（标注来源；失败不阻塞）
@@ -237,9 +247,11 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
 
     # ③ 行动建议（基于自家数据生成）
     advice = ["\n三、本周行动建议"]
-    if deals_week == 0 and viewings_week > 0:
+    if _brief_warning:
+        advice.append("· 自家盘况统计失败，本周建议暂依据人工判断（可稍后重跑本工具）")
+    elif deals_week == 0 and viewings_week > 0:
         advice.append("· 有带看无成交：回访本周带看客户，用 intent_score 找接近成交的推进")
-    if avail < 10:
+    if avail is not None and avail < 10:
         advice.append("· 在售房源偏少：联系房东补盘，可用 exclusive_expiring 找委托到期房源谈续期")
     high = db.churn_risk_customers(min_risk=60)
     if high:
@@ -248,13 +260,16 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
         advice.append("· 节奏健康，按日常跟进计划执行即可")
 
     report = "\n".join(own_section + news_section + advice)
-    return json.dumps({
+    out = {
         "success": True,
         "city": city, "district": district,
         "stats": {"new_listings": new_props, "available": avail,
                   "viewings": viewings_week, "deals": deals_week},
         "message": report,
-    }, ensure_ascii=False)
+    }
+    if _brief_warning:
+        out["warning_stats"] = _brief_warning
+    return json.dumps(out, ensure_ascii=False)
 
 
 registry.register(

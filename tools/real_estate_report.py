@@ -31,16 +31,18 @@ def generate_report(period: str = "week", task_id: str = None) -> str:
 
     # 客户统计
     stats = db.get_stats()
-    # 带看统计
+    # 带看统计 / 成交统计：失败时不能静默当成 0（报告会显示成"本周 0 次带看"误导判断）
+    warnings = []
     try:
         viewing_stats = db.viewing_stats()
-    except Exception:
+    except Exception as exc:
         viewing_stats = {}
-    # 成交统计
+        warnings.append(f"带看统计获取失败（{type(exc).__name__}: {exc}）")
     try:
         deal_stats = db.deal_stats()
-    except Exception:
+    except Exception as exc:
         deal_stats = {}
+        warnings.append(f"成交统计获取失败（{type(exc).__name__}: {exc}）")
     # 逾期
     overdue = db.get_overdue()
 
@@ -90,8 +92,14 @@ def generate_report(period: str = "week", task_id: str = None) -> str:
     if tier_counts.get('S', 0) > 0 and len(overdue) > 0:
         lines.append("注意：存在逾期跟进，S级客户务必 2 天内完成跟进。")
 
+    if warnings:
+        lines.append("")
+        lines.append("⚠️ 数据缺口：" + "；".join(warnings) + "（这几项统计失败，报告里的相关数字可能偏低，建议稍后重跑）")
     report = "\n".join(lines)
-    return json.dumps({"success": True, "period": period, "title": title, "report": report}, ensure_ascii=False)
+    out = {"success": True, "period": period, "title": title, "report": report}
+    if warnings:
+        out["warning_stats"] = "；".join(warnings)
+    return json.dumps(out, ensure_ascii=False)
 
 
 registry.register(
