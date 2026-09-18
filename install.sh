@@ -105,14 +105,39 @@ setup_python() {
 COCO_SOURCE="${COCO_SOURCE:-auto}"
 PROBE_DIR=""
 
-# 单源探测：成功则把耗时（毫秒）写入 $PROBE_DIR/<tag>
-probe_one() {
-    local url="$1" tag="$2" t0 t1
-    t0=$(date +%s%N)
-    if timeout 8 git ls-remote "$url" HEAD >/dev/null 2>&1; then
-        t1=$(date +%s%N)
-        echo $(( (t1 - t0) / 1000000 )) > "$PROBE_DIR/$tag" 2>/dev/null || true
+# 当前毫秒时间戳：优先用 bash 内置 $EPOCHREALTIME（不依赖外部命令，bash 5+ 自带）；
+# 退回 GNU date +%s%N（校验输出确实是数字）；都不可用时返回空 = "计时不可用"，绝不误判成不可达。
+now_ms() {
+    if [[ -n "${EPOCHREALTIME:-}" ]]; then
+        local s="${EPOCHREALTIME%%.*}" us="${EPOCHREALTIME#*.}" ms3
+        ms3="${us:0:3}"
+        while [[ ${#ms3} -lt 3 ]]; do ms3="${ms3}0"; done
+        [[ "$s" =~ ^[0-9]+$ && "$ms3" =~ ^[0-9]+$ ]] && { printf '%s' "$(( s * 1000 + 10#$ms3 ))"; return 0; }
     fi
+    local n
+    n=$(date +%s%N 2>/dev/null || true)
+    if [[ "$n" =~ ^[0-9]{10,}$ ]]; then
+        printf '%s' "$(( n / 1000000 ))"
+        return 0
+    fi
+    printf ''
+    return 1
+}
+
+# 单源探测：可达则把耗时（毫秒）写入 $PROBE_DIR/<tag>；计时不可用时写 999999（可达但排在有时者的后面）
+probe_one() {
+    local url="$1" tag="$2" t0 t1 ms
+    t0=$(now_ms || true)
+    if timeout 8 git ls-remote "$url" HEAD >/dev/null 2>&1; then
+        t1=$(now_ms || true)
+        if [[ -n "$t0" && -n "$t1" ]]; then
+            ms=$(( t1 - t0 ))
+        else
+            ms=999999
+        fi
+        printf '%s' "$ms" > "$PROBE_DIR/$tag" 2>/dev/null || true
+    fi
+    return 0
 }
 
 # 探测两个源（并行测延迟），返回 gitee / github / none

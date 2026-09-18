@@ -190,16 +190,29 @@ fetch_one() {
 # ---- 优先走 Gitee 字体包（一个文件，国内服务器更快更稳） ----
 count_fonts() { find "$FONT_DIR" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | wc -l | tr -d ' '; }
 install_bundle() {
-  local name="$1" tmp="$TMP/$1"
+  local name="$1" tmp="$TMP/$1" ex="$TMP/bundle_ex" n=0 f
   say "下载字体包 $name ..."
   if dl_one "$BUNDLE_BASE/$name" "$tmp"; then
-    if sudo tar xzf "$tmp" -C /usr/local/share/fonts 2>/dev/null || tar xzf "$tmp" -C /usr/local/share/fonts 2>/dev/null; then
-      ok "字体包已解压（当前 $(count_fonts) 个字体文件）"
-      return 0
+    rm -rf "$ex"; mkdir -p "$ex"
+    if tar xzf "$tmp" -C "$ex" 2>/dev/null; then
+      # 不假设包内目录层级：把解出来的字体统一装进 FONT_DIR
+      while IFS= read -r f; do
+        [[ -s "$f" ]] || continue
+        if sudo cp -f "$f" "$FONT_DIR/$(basename "$f")" 2>/dev/null || cp -f "$f" "$FONT_DIR/$(basename "$f")" 2>/dev/null; then
+          n=$((n + 1))
+        fi
+      done < <(find "$ex" -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null)
+      if [[ $n -gt 0 ]]; then
+        fc-cache -f >/dev/null 2>&1 || true
+        ok "字体包已安装 $n 个字体（当前共 $(count_fonts) 个文件）"
+        return 0
+      fi
+      DL_ERR="字体包内没有字体文件"
+    else
+      DL_ERR="字体包解压失败"
     fi
-    DL_ERR="字体包解压失败"
   fi
-  warn "字体包下载失败（${DL_ERR}），改用逐个字体下载"
+  warn "字体包不可用（${DL_ERR}），改用逐个字体下载"
   return 1
 }
 
