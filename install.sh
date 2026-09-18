@@ -4,6 +4,7 @@
 # 基于 Hermes Agent 定制版
 # 用法(国内): curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 # 用法(海外): curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
+# 强制指定源: COCO_SOURCE=github bash install.sh   （不指定则并行探测，谁快用谁）
 # 脚本自动探测网络：Gitee 不通时自动切换 GitHub 源
 #
 set -euo pipefail
@@ -99,15 +100,76 @@ setup_python() {
 }
 
 # ==================== 克隆项目 ====================
-# 探测可用的源：优先 Gitee（国内快），不通自动切换 GitHub
-probe_source() {
-    if timeout 8 git ls-remote "$GITEE_REPO_URL" HEAD >/dev/null 2>&1; then
-        echo "gitee"
-    elif timeout 8 git ls-remote "$GITHUB_REPO_URL" HEAD >/dev/null 2>&1; then
-        echo "github"
-    else
-        echo "none"
+# 探测可用的源：并行测两个源，**谁先响应就用谁**（国内 Gitee 快、海外 GitHub 快）
+# 可用 COCO_SOURCE=gitee|github 强制指定（该源不可达时才退回另一个）
+COCO_SOURCE="${COCO_SOURCE:-auto}"
+PROBE_DIR=""
+
+# 单源探测：成功则把耗时（毫秒）写入 $PROBE_DIR/<tag>
+probe_one() {
+    local url="$1" tag="$2" t0 t1
+    t0=$(date +%s%N)
+    if timeout 8 git ls-remote "$url" HEAD >/dev/null 2>&1; then
+        t1=$(date +%s%N)
+        echo $(( (t1 - t0) / 1000000 )) > "$PROBE_DIR/$tag" 2>/dev/null || true
     fi
+}
+
+# 探测两个源（并行测延迟），返回 gitee / github / none
+# - 默认（auto）：谁响应快用谁（国内 Gitee 快、海外 GitHub 快）
+# - COCO_SOURCE=gitee|github：强制指定，该源不可达时才退回另一个
+probe_source() {
+    local forced="$COCO_SOURCE" g_ms="" h_ms="" pick=""
+    PROBE_DIR="$(mktemp -d)"
+    probe_one "$GITEE_REPO_URL" gitee &
+    probe_one "$GITHUB_REPO_URL" github &
+    wait
+    [[ -s "$PROBE_DIR/gitee" ]] && g_ms="$(cat "$PROBE_DIR/gitee")"
+    [[ -s "$PROBE_DIR/github" ]] && h_ms="$(cat "$PROBE_DIR/github")"
+    rm -rf "$PROBE_DIR"
+
+    case "$forced" in
+        gitee)  pick="gitee" ;;
+        github) pick="github" ;;
+        *)      pick="" ;;
+    esac
+
+    # 强制模式：指定的源不通则退回另一个并告知
+    if [[ "$pick" == "gitee" && -z "$g_ms" ]]; then
+        [[ -n "$h_ms" ]] && { warn "指定的 Gitee 源不可达（${h_ms}ms 的 GitHub 可用），自动改用 GitHub 源"; echo "github"; return; }
+        echo "none"; return
+    fi
+    if [[ "$pick" == "github" && -z "$h_ms" ]]; then
+        [[ -n "$g_ms" ]] && { warn "指定的 GitHub 源不可达，自动改用 Gitee 源"; echo "gitee"; return; }
+        echo "none"; return
+    fi
+    if [[ -n "$pick" ]]; then echo "$pick"; return; fi
+
+    # 自动模式：两个都通取更快；只通一个用它
+    if [[ -n "$g_ms" && -n "$h_ms" ]]; then
+        if (( g_ms <= h_ms )); then echo "gitee"; else echo "github"; fi
+        return
+    fi
+    [[ -n "$g_ms" ]] && { echo "gitee"; return; }
+    [[ -n "$h_ms" ]] && { echo "github"; return; }
+    echo "none"
+}
+
+# zip 兜底后补建 git 仓库：否则该实例的「一键更新」(git pull) 会失败
+make_instance_updatable() {
+    local url="$1"
+    ( cd "$INSTALL_DIR" && git init -q 2>/dev/null ) || { warn "未安装 git，该实例后续无法一键更新（建议安装 git 后重装）"; return 0; }
+    (
+        cd "$INSTALL_DIR" || exit 1
+        git remote remove origin >/dev/null 2>&1 || true
+        git remote add origin "$url" >/dev/null 2>&1 || true
+        git fetch -q --depth=1 origin master >/dev/null 2>&1 || exit 1
+        git checkout -q -B master FETCH_HEAD >/dev/null 2>&1 || git reset -q --hard FETCH_HEAD >/dev/null 2>&1 || exit 1
+        git config branch.master.remote origin
+        git config branch.master.merge refs/heads/master
+    ) && ok "已关联更新源，该实例可直接用一键更新命令" \
+      || warn "未能关联更新源（不影响使用，但一键更新会失败）"
+    return 0
 }
 
 clone_project() {
@@ -120,23 +182,25 @@ clone_project() {
     src=$(probe_source)
     case "$src" in
         gitee)
-            info "使用 Gitee 源..."
+            info "使用 Gitee 源（响应更快）..."
             git clone "$GITEE_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
-                warn "git clone 失败，尝试下载 zip..."
+                warn "git clone 失败，改用 zip 包..."
                 curl -fsSL "$GITEE_ZIP_URL" -o /tmp/coco.zip
                 unzip -q /tmp/coco.zip -d /tmp/
                 mv /tmp/coco-real-estate-master "$INSTALL_DIR"
                 rm -f /tmp/coco.zip
+                make_instance_updatable "$GITEE_REPO_URL"
             }
             ;;
         github)
-            info "Gitee 不可达，切换 GitHub 源..."
+            info "使用 GitHub 源（响应更快或已指定）..."
             git clone "$GITHUB_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
-                warn "git clone 失败，尝试下载 zip..."
+                warn "git clone 失败，改用 zip 包..."
                 curl -fsSL "$GITHUB_ZIP_URL" -o /tmp/coco.zip
                 unzip -q /tmp/coco.zip -d /tmp/
                 mv /tmp/coco-real-estate-master "$INSTALL_DIR"
                 rm -f /tmp/coco.zip
+                make_instance_updatable "$GITHUB_REPO_URL"
             }
             ;;
         *)

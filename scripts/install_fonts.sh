@@ -203,41 +203,72 @@ install_bundle() {
   return 1
 }
 
-if [[ "$(count_fonts)" -lt 12 ]]; then
-  install_bundle "$BUNDLE_CORE" || true
-  [[ "${COCO_FONTS_EXTRA:-0}" == "1" ]] && install_bundle "$BUNDLE_EXTRA" || true
+# ---- 先探测 GitHub raw 是否可达，决定"优先哪个源" ----
+# 可达（海外网络）→ 先逐个下载（快）；不可达（国内常见：raw 域名被污染）→ 先试 Gitee 字体包
+RAW_OK=0
+if command -v curl >/dev/null 2>&1; then
+  if timeout 8 curl -fsS -o /dev/null --max-time 8 \
+       "https://raw.githubusercontent.com/wordshub/free-font/master/README.md" 2>/dev/null; then
+    RAW_OK=1
+  fi
 fi
 
 ALL=("${CORE_FONTS[@]}")
 [[ "${COCO_FONTS_EXTRA:-0}" == "1" ]] && ALL+=("${EXTRA_FONTS[@]}")
 
-todo=0
-for entry in "${ALL[@]}"; do
-  [[ -s "$FONT_DIR/${entry%%|*}" ]] || todo=$((todo + 1))
-done
+count_missing() {
+  local n=0 entry
+  for entry in "${ALL[@]}"; do
+    [[ -s "$FONT_DIR/${entry%%|*}" ]] || n=$((n + 1))
+  done
+  echo "$n"
+}
 
 missed=()
-if [[ $todo -eq 0 ]]; then
-  info "海报字体已就绪（$(find "$FONT_DIR" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf' \) | wc -l | tr -d ' ') 个文件，$(du -sh "$FONT_DIR" 2>/dev/null | cut -f1)）"
+if [[ "$(count_missing)" -eq 0 ]]; then
+  info "海报字体已就绪（$(count_fonts) 个文件，$(du -sh "$FONT_DIR" 2>/dev/null | cut -f1)）"
 else
-  say "下载海报字体：缺 $todo 个（合计约 $((todo * 12))MB，视网速 2~10 分钟；可 Ctrl+C 中断，下次重跑会跳过已装部分）"
-  i=0
-  for entry in "${ALL[@]}"; do
-    name="${entry%%|*}"; urls="${entry#*|}"
-    [[ -s "$FONT_DIR/$name" ]] && continue      # 已装好：安静跳过，不刷屏
-    i=$((i + 1))
-    if fetch_one "$name" "$urls"; then
-      say "  [$i/$todo] $name ... 已安装（$(du -h "$FONT_DIR/$name" 2>/dev/null | cut -f1)）"
-    else
-      # 直连失败 → 探测本机代理再试一次
-      if [[ -z "$PROXY" ]] && detect_proxy; then
-        say "  [$i/$todo] $name ... 直连失败，改用本机代理 $PROXY 重试"
-        fetch_one "$name" "$urls" && { say "      → 代理下载成功（$(du -h "$FONT_DIR/$name" 2>/dev/null | cut -f1)）"; continue; }
+  if [[ $RAW_OK -eq 0 ]]; then
+    say "GitHub raw 不可达（国内常见）→ 优先使用 Gitee 字体包"
+    install_bundle "$BUNDLE_CORE" || true
+    [[ "${COCO_FONTS_EXTRA:-0}" == "1" ]] && install_bundle "$BUNDLE_EXTRA" || true
+    fc-cache -f >/dev/null 2>&1 || true
+  else
+    say "GitHub 源可达（海外网络）→ 优先逐个下载字体"
+  fi
+
+  todo=$(count_missing)
+  if [[ "$todo" -gt 0 ]]; then
+    say "下载海报字体：缺 $todo 个（合计约 $((todo * 12))MB，视网速 2~10 分钟；可 Ctrl+C 中断，下次重跑会跳过已装部分）"
+    i=0
+    for entry in "${ALL[@]}"; do
+      name="${entry%%|*}"; urls="${entry#*|}"
+      [[ -s "$FONT_DIR/$name" ]] && continue      # 已装好：安静跳过，不刷屏
+      i=$((i + 1))
+      if fetch_one "$name" "$urls"; then
+        say "  [$i/$todo] $name ... 已安装（$(du -h "$FONT_DIR/$name" 2>/dev/null | cut -f1)）"
+      else
+        # 直连失败 → 探测本机代理再试一次
+        if [[ -z "$PROXY" ]] && detect_proxy; then
+          say "  [$i/$todo] $name ... 直连失败，改用本机代理 $PROXY 重试"
+          fetch_one "$name" "$urls" && { say "      → 代理下载成功（$(du -h "$FONT_DIR/$name" 2>/dev/null | cut -f1)）"; continue; }
+        fi
+        say "  [$i/$todo] $name ... 未装成功：${DL_ERR}"
+        missed+=("$name")
       fi
-      say "  [$i/$todo] $name ... 未装成功：${DL_ERR}"
-      missed+=("$name")
-    fi
-  done
+    done
+  fi
+fi
+
+# 逐个下载仍失败 → 兜底再试 Gitee 字体包（海外也可能个别源不通）
+if [[ ${#missed[@]} -gt 0 && $RAW_OK -eq 1 ]]; then
+  info "逐个下载有失败项，兜底尝试 Gitee 字体包..."
+  if install_bundle "$BUNDLE_CORE"; then
+    missed=()
+    for entry in "${ALL[@]}"; do
+      [[ -s "$FONT_DIR/${entry%%|*}" ]] || missed+=("${entry%%|*}")
+    done
+  fi
 fi
 
 fc-cache -f >/dev/null 2>&1 || true
