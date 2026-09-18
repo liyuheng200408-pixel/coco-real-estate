@@ -15,7 +15,7 @@
     8. cron 注册（4 个定时任务）
     9. 技能同步
     10. 磁盘空间
-    11. 网关近期日志错误
+    11. 网关运行期日志错误（已排除"重启导致飞书长连接正常断开"的噪音）
 
 退出码: 0 = 全部通过/仅警告; 1 = 存在 FAIL 项
 """
@@ -246,16 +246,16 @@ marker = os.path.join(HERMES_HOME, ".coco_cron_registered")
 if os.path.isfile(marker):
     ok("cron 已注册（标记文件存在），含早报/午间/逾期/生日 4 个任务")
 else:
-    warn("cron 未注册（无标记文件）",
-         "重启服务后 gateway 会自动注册: sudo systemctl restart hermes-agent")
+    warn("定时任务未注册（默认关闭，省 token，属预期）",
+         "需要时对 Coco 说一句「开启定时任务」，她会自行注册，不用登服务器")
 
-# ---- 8. 技能同步 ----
-print("\n[8] 技能同步")
+# ---- 9. 技能同步 ----
+print("\n[9] 技能同步")
 skill = os.path.join(HERMES_HOME, "skills", "real_estate", "SKILL.md")
 if os.path.isfile(skill):
     ok("Coco 操作手册技能已同步")
 else:
-    warn("技能未同步", "重启服务后 gateway 自动同步: sudo systemctl restart hermes-agent")
+    warn("技能未同步", "重启 gateway 服务后会自动同步（hermes gateway restart）")
 
 # ---- 10. 磁盘空间 ----
 print("\n[10] 磁盘空间")
@@ -270,15 +270,53 @@ else:
     warn("无法读取磁盘空间")
 
 # ---- 11. 网关日志 ----
-print("\n[11] 网关近期日志（最近 200 行）")
+print("\n[11] 网关运行期错误（已排除重启噪音）")
 _user = "--user " if SERVICE_USER else ""
 rc, out = sh(f"journalctl {_user}-u {SERVICE} -n 200 --no-pager 2>/dev/null")
+
+# 重启会让飞书长连接正常断开（websocket code 1000），lark 库把"正常断开"也记成 ERROR 并附一条
+# traceback —— 每次重启固定产生 4 行这类噪音。不排除掉，这一项每次更新后必然 WARN，反而盖住
+# 真正的运行期错误（2026-09-18 老板追问"为什么老有这条"后改的口径）。
+_LOG_NOISE = (
+    "receive message loop exit",
+    "ConnectionClosed",
+    "Task exception was never retrieved",
+    "Shutdown context: signal=",
+    "1000 (OK)",
+    "Main process exited",
+    "Stopping hermes-gateway",
+)
+
+
+def _log_noise(line: str) -> bool:
+    return any(p in line for p in _LOG_NOISE)
+
+
+def _scan_gateway_log(text: str):
+    """挑出真正的运行期错误行；紧跟噪音的 Traceback 块整块跳过"""
+    lines = text.splitlines()
+    hits = []
+    for i, line in enumerate(lines):
+        if _log_noise(line):
+            continue
+        if "Traceback" in line:
+            if _log_noise("\n".join(lines[i:i + 12])):
+                continue
+            hits.append(line)
+        elif "ERROR" in line:
+            hits.append(line)
+    return hits
+
+
 if rc and out:
-    errs = [l for l in out.splitlines() if "ERROR" in l or "Traceback" in l]
+    errs = _scan_gateway_log(out)
     if errs:
-        warn(f"近期日志有 {len(errs)} 处错误/异常", f"journalctl {_user}-u {SERVICE} -n 100 --no-pager 查看详情并发给技术顾问")
+        warn(f"近期日志有 {len(errs)} 处运行期错误",
+             f"完整日志: journalctl {_user}-u {SERVICE} -n 200 --no-pager")
+        for line in errs[-3:]:
+            print(f"         {line.strip()[:150]}")
     else:
-        ok("近期日志无错误")
+        ok("近期日志无运行期错误（重启时的飞书断开噪音已排除）")
 else:
     warn("无法读取服务日志")
 
