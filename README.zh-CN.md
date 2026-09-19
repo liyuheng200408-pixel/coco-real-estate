@@ -4,7 +4,7 @@
 
 [![Coco AI](https://img.shields.io/github/v/release/liyuheng200408-pixel/coco-real-estate?label=Coco%20AI)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/latest)
 
-> 🏷️ **当前版本：v0.21.3-48**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-48)
+> 🏷️ **当前版本：v0.21.3-49**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-49)
 
 ## ⚠️ 免责声明
 
@@ -132,7 +132,7 @@ git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
 
 
 ```bash
-coco version     # 输出形如：Coco v0.21.3-48（官方 Hermes 0.21.3 定制版）
+coco version     # 输出形如：Coco v0.21.3-49（官方 Hermes 0.21.3 定制版）
 coco help        # 查看全部可用命令（version / check / backup）
 ```
 
@@ -237,7 +237,9 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 
 **第 2 步：重装服务器系统**
 
-在云服务器控制台选择「重装系统」，镜像选 Ubuntu 24.04，确认执行。这一步会把服务器清空，恢复成一台全新的机器。
+在云服务器控制台选择「重装系统」，镜像选 Ubuntu 24.04（或 26.04），确认执行。这一步会把服务器清空，恢复成一台全新的机器。
+
+推荐 Ubuntu **24.04 LTS 或 26.04 LTS**。
 
 **第 3 步：在服务器上安装 Coco**
 
