@@ -323,9 +323,6 @@ setup_config() {
     echo "5. 首次在飞书给智能体发消息会收到配对码，在服务器执行以下命令完成配对:"
     echo "   hermes pairing approve feishu <配对码>"
     echo ""
-    echo "提示: 若执行第 1 步后仍提示 hermes: command not found，手动补一次命令入口:"
-    echo "   sudo ln -sf $INSTALL_DIR/venv/bin/hermes /usr/local/bin/hermes"
-    echo ""
     
     # 复制 SOUL.md 身份文件（确保 ~/.hermes 存在）
     mkdir -p "$HOME/.hermes"
