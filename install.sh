@@ -25,6 +25,8 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+TMPDIR_C="$(mktemp -d 2>/dev/null || echo /tmp)"
+
 info()  { echo -e "${BLUE}[INFO]${NC} $*"; }
 ok()    { echo -e "${GREEN}[OK]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -601,6 +603,84 @@ setup_coco_config() {
     fi
 }
 
+# ==================== Node.js（浏览器工具 / TUI 需要，2026-09-19 加） ====================
+# 官方要求：Node 22.22+ / 24.11+ / 26+；不满足则装托管的 Node 到 $HERMES_HOME/node。
+# 下载源国内优先（客户多在国内服务器），官方源兜底；失败不阻塞安装（核心功能不依赖 Node）。
+NODE_VERSION_LINE="26"
+NODE_MIRRORS="https://mirrors.aliyun.com/nodejs-release https://mirrors.cloud.tencent.com/nodejs-release https://mirrors.tuna.tsinghua.edu.cn/nodejs-release https://nodejs.org/dist"
+
+node_is_ok() {
+    command -v node >/dev/null 2>&1 || return 1
+    local v major minor
+    v="$(node --version 2>/dev/null | sed 's/^v//')"
+    major="${v%%.*}"; minor="$(echo "$v" | cut -d. -f2)"
+    [[ -n "$major" && -n "$minor" ]] || return 1
+    if [[ "$major" -gt 26 ]]; then return 0; fi
+    if [[ "$major" -eq 26 ]]; then return 0; fi
+    if [[ "$major" -eq 24 && "$minor" -ge 11 ]]; then return 0; fi
+    if [[ "$major" -eq 22 && "$minor" -ge 22 ]]; then return 0; fi
+    return 1
+}
+
+pick_node_version() {
+    local idx="$TMPDIR_C/idx.json" m v
+    for m in $NODE_MIRRORS; do
+        if timeout 25 curl -fsSL "$m/index.json" -o "$idx" 2>/dev/null; then
+            v="$(python3 - "$idx" <<'PY' 2>/dev/null
+import json, sys, re
+d = json.load(open(sys.argv[1]))
+vers = [x["version"] for x in d if re.match(r"^v26\.\d+\.\d+$", x["version"])]
+def key(s): return tuple(int(n) for n in s.lstrip("v").split("."))
+print(sorted(vers, key=key)[-1] if vers else "")
+PY
+)"
+            [[ -n "$v" ]] && { echo "$v"; return 0; }
+        fi
+    done
+    echo "v26.9.0"
+}
+
+install_node() {
+    info "检查 Node.js（浏览器工具 / TUI 需要）"
+    if [[ "${COCO_SKIP_NODE:-0}" == "1" ]]; then
+        warn "已跳过（COCO_SKIP_NODE=1），浏览器工具与 TUI 将不可用"
+        return 0
+    fi
+    if node_is_ok; then
+        ok "Node.js $(node --version) 已满足要求"
+        return 0
+    fi
+    local arch ver name m node_dir
+    case "$(uname -m)" in
+        x86_64|amd64) arch="x64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) warn "不支持的架构 $(uname -m)，跳过 Node"; return 0 ;;
+    esac
+    node_dir="${HERMES_HOME:-$HOME/.hermes}/node"
+    ver="$(pick_node_version)"
+    name="node-$ver-linux-$arch.tar.xz"
+    for m in $NODE_MIRRORS; do
+        info "下载 Node $ver（$(echo "$m" | cut -d/ -f3)）..."
+        if timeout 900 curl -fsSL "$m/$ver/$name" -o "$TMPDIR_C/$name" 2>/dev/null; then
+            mkdir -p "$node_dir"
+            if tar -xJf "$TMPDIR_C/$name" -C "$node_dir" --strip-components=1 2>/dev/null; then
+                rm -f "$TMPDIR_C/$name"
+                # 软链进 /usr/local/bin：让所有 shell 与 gateway 服务都能直接用到 node/npm/npx
+                for b in node npm npx; do
+                    [[ -e "$node_dir/bin/$b" ]] && sudo ln -sf "$node_dir/bin/$b" "/usr/local/bin/$b" 2>/dev/null || true
+                done
+                export PATH="$node_dir/bin:$PATH"
+                ok "Node.js $("$node_dir/bin/node" --version) 已安装（$node_dir，并已链接到 /usr/local/bin）"
+                return 0
+            fi
+            warn "解压失败，换下一个源"
+        else
+            warn "该源下载失败，换下一个源"
+        fi
+    done
+    warn "Node 安装未完成，可重跑安装脚本重试（不影响飞书聊天与房产功能）"
+}
+
 # ==================== 海报渲染器与字体（2026-09-19 加） ====================
 # 海报要用 librsvg + 中文商用字体才有"专业感"。失败不阻塞安装：海报会回落旧引擎/系统字体。
 install_poster_fonts() {
@@ -630,6 +710,7 @@ main() {
     check_system
     setup_timezone
     install_deps
+    install_node
     clone_project
     setup_python
     install_packages
