@@ -64,7 +64,7 @@ install_deps() {
     case $PKG_MANAGER in
         apt)
             sudo apt-get update -qq
-            sudo apt-get install -y -qq python3 python3-pip python3-venv git curl build-essential libpq-dev postgresql postgresql-contrib fonts-wqy-zenhei
+            sudo apt-get install -y -qq python3 python3-pip python3-venv git curl build-essential libpq-dev postgresql postgresql-contrib fonts-wqy-zenhei ripgrep ffmpeg
             ;;
         yum|dnf)
             sudo $PKG_MANAGER install -y python3 python3-pip git curl gcc gcc-c++ postgresql-server postgresql-devel
