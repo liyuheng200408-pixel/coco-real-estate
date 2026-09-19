@@ -2,9 +2,9 @@
 
 > 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
-[![Coco v0.21.3-42](https://img.shields.io/badge/Coco%20AI-v0.21.3-42-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-42)
+[![Coco v0.21.3-43](https://img.shields.io/badge/Coco%20AI-v0.21.3-43-blue)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-43)
 
-> 🏷️ **当前版本：v0.21.3-42**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-42)
+> 🏷️ **当前版本：v0.21.3-43**（官方 Hermes v0.21.3 定制版） · [GitHub Release](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-43)
 
 ## ⚠️ 免责声明
 
@@ -27,7 +27,7 @@
 | 模块 | 说明 |
 |------|------|
 | 🎯 客户管理 | S/A/B/C 四级分类，自动计算跟进周期；客户画像管理（预算、户型、区域、装修偏好）；一键添加、查询、更新客户；客户生日管理 |
-| 🏠 智能匹配 | 多维度加权评分算法：价格 30% + 户型 25% + 面积 20% + 区域 15% + 装修 10%，自动推荐最合适房源；新房源自动反匹配 S/A 级客户 |
+| 🏠 智能匹配 | 多维度加权评分算法：价格 30% + 户型 25% + 面积 20% + 区域 15% + 装修 10%，自动推荐最合适房源；预算略差一点的房源也能拿到分数，不会被直接埋没；客户反馈过缺陷（采光差、临街吵等）的房源自动降权并在匹配理由中标注；客户指定区域时，区域相符的房源一律排在前面；新房源入库自动反匹配所有活跃客户 |
 | 🏠 房源详情 | 问某套房源（给编号或标题均可）一次返回全部字段 + 自动计算的单价（总价÷面积，保留两位小数）+ 业主联系方式 + 图片、调价记录；标题对不上时列出最接近的候选请你确认 |
 | ⏰ 跟进提醒 | 定时任务默认关闭；需要时对 Coco 说一句「开启定时任务」即可（早报 09:00 / 午间检查 13:00 / 逾期提醒每 30 分钟）。S 级客户 2 天内跟进 |
 | 🏠 带看管理 | 预约带看、记录带看结果、客户反馈、自动 1 小时回访提醒 |
@@ -43,18 +43,18 @@
 
 SSH 重新连接后，按顺序执行：
 
-**1. 安装 Node.js 22**：
-```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-```
+**前置条件**：只需一台 Linux 服务器（Ubuntu / Debian 系，带 sudo 权限）并能联网，其余依赖由安装脚本自动处理：
 
-**2. 验证 Node 版本**（应显示 v22.x）：
-```bash
-node -v
-```
+- PostgreSQL（业务数据存储）
+- Python 3.11 ~ 3.13（脚本用系统 Python 创建虚拟环境；版本不合适时会自动准备兼容版本）
+- Node.js（浏览器工具需要，脚本按 26 → 24 → 22 取最新可用版本）
+- ripgrep（快速文件搜索）
+- ffmpeg（语音消息的音频格式转换）
+- 海报字体与渲染器（约 140MB，可跳过：COCO_SKIP_FONTS=1）
 
-**3. 执行一键安装**（按服务器所在地区选一条）：
+> 你无需手动安装 Python、Node.js、ripgrep、ffmpeg 或 PostgreSQL；安装脚本会检测缺失的依赖并自动安装。只需确认服务器有 sudo 权限、并能正常联网。
+
+**执行一键安装**（按服务器所在位置选一条）：
 
 **国内服务器（Gitee 源）：**
 ```bash
@@ -132,7 +132,7 @@ git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
 
 
 ```bash
-coco version     # 输出形如：Coco v0.21.3-42（官方 Hermes 0.21.3 定制版）
+coco version     # 输出形如：Coco v0.21.3-43（官方 Hermes 0.21.3 定制版）
 coco help        # 查看全部可用命令（version / check / backup）
 ```
 
