@@ -609,7 +609,13 @@ install_poster_fonts() {
         warn "已跳过（COCO_SKIP_FONTS=1），海报将使用系统自带字体"
         return 0
     fi
-    bash "$INSTALL_DIR/scripts/install_fonts.sh" || warn "字体安装未完成，可稍后重跑 scripts/install_fonts.sh（不影响出图）"
+    # 防御：脚本不存在说明前面的代码下载没成功（历史上这一步排错过顺序，导致含糊报错）
+    if [[ ! -f "$INSTALL_DIR/scripts/install_fonts.sh" ]]; then
+        warn "找不到 $INSTALL_DIR/scripts/install_fonts.sh —— 代码似乎没下载完整，请重跑 install.sh 或先确认目录内容"
+        return 0
+    fi
+    bash "$INSTALL_DIR/scripts/install_fonts.sh" \
+        || warn "字体安装未完成，可稍后重跑：bash $INSTALL_DIR/scripts/install_fonts.sh（不影响出图）"
 }
 
 # ==================== 主函数 ====================
@@ -624,10 +630,10 @@ main() {
     check_system
     setup_timezone
     install_deps
-    install_poster_fonts
     clone_project
     setup_python
     install_packages
+    install_poster_fonts    # 必须放在 clone_project + install_packages 之后（脚本在那时才存在、依赖也已装好）
     setup_database
     setup_config
     setup_coco_config
