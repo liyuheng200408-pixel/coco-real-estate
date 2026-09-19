@@ -92,8 +92,9 @@ setup_python() {
     PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
     info "Python 版本: $PYTHON_VERSION"
 
-    # Hermes 需要 Python 3.11 及以上（与官方前置条件一致；Ubuntu 22.04 自带 3.10 偏低）
-    _py_ok() { "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; }
+    # Hermes 需要 3.11 <= Python < 3.14（见 pyproject.toml 的 requires-python）
+    # 上限原因：3.14 上 pydantic-core 等 Rust 依赖暂无 cp314 轮子；Ubuntu 26.04 默认即 3.14
+    _py_ok() { "$1" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 14) else 1)' 2>/dev/null; }
     if ! _py_ok "$PYTHON_CMD"; then
         for _cand in python3.13 python3.12 python3.11; do
             if command -v "$_cand" &> /dev/null && _py_ok "$_cand"; then
@@ -104,8 +105,39 @@ setup_python() {
             fi
         done
     fi
+    if ! _py_ok "$PYTHON_CMD" && command -v apt-get &> /dev/null; then
+        info "当前 Python $PYTHON_VERSION 不在 3.11~3.13 范围内，尝试安装 python3.13..."
+        sudo apt-get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1 || true
+        if command -v python3.13 &> /dev/null && _py_ok python3.13; then
+            PYTHON_CMD="python3.13"
+            PYTHON_VERSION="$(python3.13 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+            info "已安装并使用 python3.13"
+        fi
+    fi
     if ! _py_ok "$PYTHON_CMD"; then
-        error "Python 版本过低（当前 $PYTHON_VERSION，需要 3.11 及以上）。建议：① 系统换成 Ubuntu 24.04 LTS 后重跑本脚本；或 ② 自行安装 python3.11（含 python3.11-venv）后重跑。"
+        info "尝试用 uv 准备 Python 3.13（与官方安装方式一致）..."
+        if ! command -v uv &> /dev/null; then
+            curl -fsSL https://astral.sh/uv/install.sh 2>/dev/null | sh >/dev/null 2>&1 || true
+            export PATH="$HOME/.local/bin:$PATH"
+            command -v uv &> /dev/null || pip install -q uv >/dev/null 2>&1 || true
+            export PATH="$HOME/.local/bin:$PATH"
+        fi
+        if command -v uv &> /dev/null; then
+            uv python install 3.13 >/dev/null 2>&1 || true
+            _uvpy="$(uv python find 3.13 2>/dev/null || true)"
+            if [ -n "$_uvpy" ] && _py_ok "$_uvpy"; then
+                PYTHON_CMD="$_uvpy"
+                PYTHON_VERSION="$($_uvpy --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+                info "已通过 uv 准备 Python $PYTHON_VERSION"
+            fi
+        fi
+    fi
+    if ! _py_ok "$PYTHON_CMD"; then
+        error "Python 版本不合适（当前 $PYTHON_VERSION，需要 3.11 ~ 3.13）。建议：① 系统换成 Ubuntu 24.04 LTS 后重跑本脚本；或 ② 自行安装 python3.13（含 python3.13-venv）后重跑。"
+    fi
+    if [[ -d "$INSTALL_DIR/venv" ]] && ! _py_ok "$INSTALL_DIR/venv/bin/python"; then
+        warn "已有虚拟环境的 Python 版本不合适，重新创建"
+        rm -rf "$INSTALL_DIR/venv"
     fi
     
     if [[ ! -d "$INSTALL_DIR/venv" ]]; then
