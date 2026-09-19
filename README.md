@@ -4,7 +4,7 @@
 
 [![Coco AI](https://img.shields.io/github/v/release/liyuheng200408-pixel/coco-real-estate?label=Coco%20AI)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/latest)
 
-> 🏷️ **当前版本：v0.21.3-50**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-50)
+> 🏷️ **当前版本：v0.21.3-51**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-51)
 
 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
@@ -45,7 +45,7 @@
 
 SSH 重新连接后，按顺序执行：
 
-**前置条件**：只需一台 Linux 服务器（Ubuntu / Debian 系，带 sudo 权限）并能联网，其余依赖由安装脚本自动处理：
+**前置条件**：只需一台 Linux 服务器（Ubuntu 系统，带 sudo 权限）并能联网，其余依赖由安装脚本自动处理：
 
 - PostgreSQL（业务数据存储）
 - Python 3.11 ~ 3.13（脚本用系统 Python 创建虚拟环境；版本不合适时会自动准备兼容版本）
@@ -134,7 +134,7 @@ git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
 
 
 ```bash
-coco version     # 输出形如：Coco v0.21.3-50（官方 Hermes 0.21.3 定制版）
+coco version     # 输出形如：Coco v0.21.3-51（官方 Hermes 0.21.3 定制版）
 coco help        # 查看全部可用命令（version / check / backup）
 ```
 
