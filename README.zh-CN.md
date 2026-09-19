@@ -4,7 +4,7 @@
 
 [![Coco AI](https://img.shields.io/github/v/release/liyuheng200408-pixel/coco-real-estate?label=Coco%20AI)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/latest)
 
-> 🏷️ **当前版本：v0.21.3-51**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-51)
+> 🏷️ **当前版本：v0.21.3-52**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-52)
 
 ## ⚠️ 免责声明
 
@@ -81,7 +81,7 @@ source ~/.bashrc
 **2. 验证安装**：
 
 ```bash
-hermes --version
+coco version
 ```
 
 如果能看到版本号（例如 hermes v0.21.3），就说明核心程序安装成功了。
@@ -132,11 +132,11 @@ git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
 
 
 ```bash
-coco version     # 输出形如：Coco v0.21.3-51（官方 Hermes 0.21.3 定制版）
+coco version     # 输出形如：Coco v0.21.3-52（官方 Hermes 0.21.3 定制版）
 coco help        # 查看全部可用命令（version / check / backup）
 ```
 
-注意：`hermes --version` 显示的是**底座（官方 Hermes）版本**，不是 Coco 版本。
+注意：`coco version` 输出的括号里会注明对应的官方 Hermes 版本；想单独查底座版本可用 `hermes --version`。
 
 ### 服务管理
 
