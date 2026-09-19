@@ -28,7 +28,8 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    # COCO-PATCH：关闭自动版本更新 PR（CI 动作版本由我们按需自行升级；机器人 PR 长期未通过必需检查，只堆噪音）。恢复：把下面 0 改回 5。
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "github-actions"
