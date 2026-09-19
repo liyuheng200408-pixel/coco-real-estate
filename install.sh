@@ -729,6 +729,7 @@ install_node_line() {
 }
 
 install_node() {
+    sudo -v 2>/dev/null || true   # 续一次 sudo 凭据（apt 那步耗时较久，前面预取的已可能过期）
     info "检查 Node.js（浏览器工具 / TUI 需要，要求 22.22+ / 24.11+ / 26+）"
     if [[ "${COCO_SKIP_NODE:-0}" == "1" ]]; then
         warn "已跳过（COCO_SKIP_NODE=1），浏览器工具与 TUI 将不可用"
