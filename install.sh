@@ -91,6 +91,22 @@ setup_python() {
     fi
     PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
     info "Python 版本: $PYTHON_VERSION"
+
+    # Hermes 需要 Python 3.11 及以上（与官方前置条件一致；Ubuntu 22.04 自带 3.10 偏低）
+    _py_ok() { "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; }
+    if ! _py_ok "$PYTHON_CMD"; then
+        for _cand in python3.13 python3.12 python3.11; do
+            if command -v "$_cand" &> /dev/null && _py_ok "$_cand"; then
+                PYTHON_CMD="$_cand"
+                PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+                info "改用已安装的 $PYTHON_CMD（$PYTHON_VERSION）"
+                break
+            fi
+        done
+    fi
+    if ! _py_ok "$PYTHON_CMD"; then
+        error "Python 版本过低（当前 $PYTHON_VERSION，需要 3.11 及以上）。建议：① 系统换成 Ubuntu 24.04 LTS 后重跑本脚本；或 ② 自行安装 python3.11（含 python3.11-venv）后重跑。"
+    fi
     
     if [[ ! -d "$INSTALL_DIR/venv" ]]; then
         $PYTHON_CMD -m venv "$INSTALL_DIR/venv"
