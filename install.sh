@@ -245,11 +245,15 @@ install_packages() {
     
     # 安装 Hermes 核心依赖（使用 pyproject.toml）
     cd "$INSTALL_DIR"
-    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -e . -q 2>/dev/null || pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt -q 2>/dev/null || true
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -e . -q 2>/dev/null \
+        || pip install -e . -q 2>/dev/null \
+        || pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt -q 2>/dev/null \
+        || pip install -r requirements.txt -q 2>/dev/null || true
     
     # 安装房产专用依赖（含海报生成所需 qrcode；Pillow 为核心依赖由 -e . 安装；
     # ddgs 为 web_search 的免费搜索后端（DuckDuckGo，无需 API Key））
-    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple sqlalchemy psycopg2-binary lark-oapi apscheduler qrcode ddgs -q
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple sqlalchemy psycopg2-binary lark-oapi apscheduler qrcode ddgs -q 2>/dev/null \
+        || pip install sqlalchemy psycopg2-binary lark-oapi apscheduler qrcode ddgs -q
     
     ok "依赖安装完成"
 }
@@ -609,6 +613,18 @@ setup_coco_config() {
 NODE_VERSION_LINE="26"
 NODE_MIRRORS="https://mirrors.aliyun.com/nodejs-release https://mirrors.cloud.tencent.com/nodejs-release https://mirrors.tuna.tsinghua.edu.cn/nodejs-release https://nodejs.org/dist"
 
+# 按各镜像 index.json 的实际响应速度排序（快的在前）：
+# 国内服务器会把阿里/腾讯排前，海外服务器会把官方源 nodejs.org 排前 —— 无需人工判断，也不用设置变量。
+node_mirror_order() {
+    local m t out=""
+    for m in $NODE_MIRRORS; do
+        t="$(curl -s -o /dev/null --max-time 8 -w '%{time_total}' "$m/index.json" 2>/dev/null)"
+        case "$t" in ""|0|0.000000) t=99 ;; esac
+        out="${out}${t} ${m}"$'\n'
+    done
+    printf '%s' "$out" | sort -n | awk '{print $2}'
+}
+
 node_is_ok() {
     command -v node >/dev/null 2>&1 || return 1
     local v major minor
@@ -624,7 +640,7 @@ node_is_ok() {
 
 pick_node_version() {
     local idx="$TMPDIR_C/idx.json" m v
-    for m in $NODE_MIRRORS; do
+    for m in $(node_mirror_order); do
         if timeout 25 curl -fsSL "$m/index.json" -o "$idx" 2>/dev/null; then
             v="$(python3 - "$idx" <<'PY' 2>/dev/null
 import json, sys, re
@@ -659,7 +675,7 @@ install_node() {
     node_dir="${HERMES_HOME:-$HOME/.hermes}/node"
     ver="$(pick_node_version)"
     name="node-$ver-linux-$arch.tar.xz"
-    for m in $NODE_MIRRORS; do
+    for m in $(node_mirror_order); do
         info "下载 Node $ver（$(echo "$m" | cut -d/ -f3)）..."
         if timeout 900 curl -fsSL "$m/$ver/$name" -o "$TMPDIR_C/$name" 2>/dev/null; then
             mkdir -p "$node_dir"
