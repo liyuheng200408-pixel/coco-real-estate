@@ -66,9 +66,7 @@ CONTRIBUTING.es.md
 CONTRIBUTING.md
 Dockerfile
 LICENSE
-README.es.md
 README.md
-README.ur-pk.md
 README.zh-CN.md
 SECURITY.es.md
 SECURITY.md
