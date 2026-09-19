@@ -608,13 +608,14 @@ setup_coco_config() {
 }
 
 # ==================== Node.js（浏览器工具 / TUI 需要，2026-09-19 加） ====================
-# 官方要求：Node 22.22+ / 24.11+ / 26+；不满足则装托管的 Node 到 $HERMES_HOME/node。
-# 下载源国内优先（客户多在国内服务器），官方源兜底；失败不阻塞安装（核心功能不依赖 Node）。
-NODE_VERSION_LINE="26"
+# 与官方标准流程对齐：
+#   ① 版本要求 22.22+ / 24.11+ / 26+（官方原文：Hermes requires Node 22.22+, 24.11+, or 26+）
+#   ② 装到托管的 $HERMES_HOME/node
+#   ③ 写 $HERMES_HOME/node/etc/npmrc 的 prefix（npm 全局包落到 PATH 上的目录，升级 Node 也不丢）
+#   ④ 候选版本依次回退（26 → 24 → 22），且新版本通过自检前不替换磁盘上的旧版本
+#   ⑤ 下载源按实测响应速度排序（国内→国内镜像，海外→nodejs.org），失败不阻塞安装
 NODE_MIRRORS="https://mirrors.aliyun.com/nodejs-release https://mirrors.cloud.tencent.com/nodejs-release https://mirrors.tuna.tsinghua.edu.cn/nodejs-release https://nodejs.org/dist"
 
-# 按各镜像 index.json 的实际响应速度排序（快的在前）：
-# 国内服务器会把阿里/腾讯排前，海外服务器会把官方源 nodejs.org 排前 —— 无需人工判断，也不用设置变量。
 node_mirror_order() {
     local m t out=""
     for m in $NODE_MIRRORS; do
@@ -638,14 +639,15 @@ node_is_ok() {
     return 1
 }
 
+# 取某个大版本线上最新的版本号（如 26 → v26.9.0）；该版本在所有镜像都找不到时返回失败
 pick_node_version() {
-    local idx="$TMPDIR_C/idx.json" m v
+    local line="$1" idx="$TMPDIR_C/idx.json" m v
     for m in $(node_mirror_order); do
         if timeout 25 curl -fsSL "$m/index.json" -o "$idx" 2>/dev/null; then
-            v="$(python3 - "$idx" <<'PY' 2>/dev/null
+            v="$(python3 - "$idx" "$line" <<'PY' 2>/dev/null
 import json, sys, re
-d = json.load(open(sys.argv[1]))
-vers = [x["version"] for x in d if re.match(r"^v26\.\d+\.\d+$", x["version"])]
+d = json.load(open(sys.argv[1])); line = sys.argv[2]
+vers = [x["version"] for x in d if re.match(r"^v%s\.\d+\.\d+$" % line, x["version"])]
 def key(s): return tuple(int(n) for n in s.lstrip("v").split("."))
 print(sorted(vers, key=key)[-1] if vers else "")
 PY
@@ -653,11 +655,42 @@ PY
             [[ -n "$v" ]] && { echo "$v"; return 0; }
         fi
     done
-    echo "v26.9.0"
+    return 1
+}
+
+# 装某一个大版本：先下到临时目录并自检，通过后才替换 $node_dir（与官方一致：失败不动旧版本）
+install_node_line() {
+    local line="$1" ver name m arch_node
+    ver="$(pick_node_version "$line")" || return 1
+    [[ -n "$ver" ]] || return 1
+    case "$(uname -m)" in
+        x86_64|amd64) arch_node="x64" ;;
+        aarch64|arm64) arch_node="arm64" ;;
+        *) return 1 ;;
+    esac
+    name="node-$ver-linux-$arch_node.tar.xz"
+    for m in $(node_mirror_order); do
+        info "下载 Node $ver（$(echo "$m" | cut -d/ -f3)）..."
+        if timeout 900 curl -fsSL "$m/$ver/$name" -o "$TMPDIR_C/$name" 2>/dev/null; then
+            rm -rf "$node_dir.tmp"; mkdir -p "$node_dir.tmp"
+            if tar -xJf "$TMPDIR_C/$name" -C "$node_dir.tmp" --strip-components=1 2>/dev/null \
+               && [[ -x "$node_dir.tmp/bin/node" ]] \
+               && "$node_dir.tmp/bin/node" --version >/dev/null 2>&1; then
+                rm -f "$TMPDIR_C/$name"
+                rm -rf "$node_dir"; mv "$node_dir.tmp" "$node_dir"
+                return 0
+            fi
+            warn "解压或自检失败，换个源再试"
+        else
+            warn "该源下载失败，换下一个源"
+        fi
+    done
+    rm -rf "$node_dir.tmp"
+    return 1
 }
 
 install_node() {
-    info "检查 Node.js（浏览器工具 / TUI 需要）"
+    info "检查 Node.js（浏览器工具 / TUI 需要，要求 22.22+ / 24.11+ / 26+）"
     if [[ "${COCO_SKIP_NODE:-0}" == "1" ]]; then
         warn "已跳过（COCO_SKIP_NODE=1），浏览器工具与 TUI 将不可用"
         return 0
@@ -666,35 +699,21 @@ install_node() {
         ok "Node.js $(node --version) 已满足要求"
         return 0
     fi
-    local arch ver name m node_dir
-    case "$(uname -m)" in
-        x86_64|amd64) arch="x64" ;;
-        aarch64|arm64) arch="arm64" ;;
-        *) warn "不支持的架构 $(uname -m)，跳过 Node"; return 0 ;;
-    esac
     node_dir="${HERMES_HOME:-$HOME/.hermes}/node"
-    ver="$(pick_node_version)"
-    name="node-$ver-linux-$arch.tar.xz"
-    for m in $(node_mirror_order); do
-        info "下载 Node $ver（$(echo "$m" | cut -d/ -f3)）..."
-        if timeout 900 curl -fsSL "$m/$ver/$name" -o "$TMPDIR_C/$name" 2>/dev/null; then
-            mkdir -p "$node_dir"
-            if tar -xJf "$TMPDIR_C/$name" -C "$node_dir" --strip-components=1 2>/dev/null; then
-                rm -f "$TMPDIR_C/$name"
-                # 软链进 /usr/local/bin：让所有 shell 与 gateway 服务都能直接用到 node/npm/npx
-                for b in node npm npx; do
-                    [[ -e "$node_dir/bin/$b" ]] && sudo ln -sf "$node_dir/bin/$b" "/usr/local/bin/$b" 2>/dev/null || true
-                done
-                export PATH="$node_dir/bin:$PATH"
-                ok "Node.js $("$node_dir/bin/node" --version) 已安装（$node_dir，并已链接到 /usr/local/bin）"
-                return 0
-            fi
-            warn "解压失败，换下一个源"
-        else
-            warn "该源下载失败，换下一个源"
+    local line
+    for line in 26 24 22; do                     # 候选版本依次回退（官方同款策略）
+        if install_node_line "$line"; then
+            for b in node npm npx; do            # 链接到 /usr/local/bin，所有 shell 与 gateway 服务可直接用
+                [[ -e "$node_dir/bin/$b" ]] && sudo ln -sf "$node_dir/bin/$b" "/usr/local/bin/$b" 2>/dev/null || true
+            done
+            mkdir -p "$node_dir/etc"
+            printf 'prefix=%s\n' "/usr/local/bin" > "$node_dir/etc/npmrc"   # npm 全局包落到 PATH 上且升级不丢
+            export PATH="$node_dir/bin:$PATH"
+            ok "Node.js $("$node_dir/bin/node" --version) 已安装（$node_dir；npm 全局目录已指向 /usr/local/bin）"
+            return 0
         fi
     done
-    warn "Node 安装未完成，可重跑安装脚本重试（不影响飞书聊天与房产功能）"
+    warn "Node 安装未完成（26/24/22 三个版本都没装上），可重跑安装脚本重试（不影响飞书聊天与房产功能）"
 }
 
 # ==================== 海报渲染器与字体（2026-09-19 加） ====================
