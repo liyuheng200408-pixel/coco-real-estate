@@ -215,6 +215,13 @@ CONTENT_CHECKS = [
         [r"!cd ~/hermes-agent"],
         "同第 12 项：前置检查与查库模板都用自定位写法（查库用 `export $(grep DATABASE_URL ~/hermes-agent/.env.db)` 或一次性取值）。",
     ),
+    (
+        "B01",
+        "安装默认通道",
+        "install.sh",
+        [r'COCO_CHANNEL="\$\{COCO_CHANNEL:-master\}"'],
+        "install.sh 默认通道不是 master —— 别人一条命令就会装到未验收的测试版。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示
@@ -238,6 +245,10 @@ PATH_CHECKS = [
     ("A17", "飞书实测清单", "docs/TESTING_FEISHU_FULL.md", "file", 1, "飞书全量实测清单丢失"),
     ("A18", "官方残留清理脚本", "scripts/prune_official_deleted.sh", "file", 1, "官方已删残留的清理脚本丢失（同步时无法顺带清理）"),
     ("A19", "楼层回填脚本", "scripts/backfill_floor_from_title.py", "file", 1, "历史房源楼层回填脚本丢失（老数据无法批量补楼层）"),
+    ("A20", "通道守卫工作流", ".github/workflows/channel-guard.yml", "file", 1, "通道守卫丢失（默认分支被改成测试分支时没人拦，别人会装到测试版）"),
+    ("A21", "通道工具", "scripts/coco_channel.sh", "file", 1, "通道工具丢失（稳定版/测试版切换与显示失效）"),
+    ("A22", "晋升脚本", "scripts/promote_release.sh", "file", 1, "晋升脚本丢失（测试版无法安全转为正式版）"),
+    ("A23", "验收登记脚本", "scripts/mark_verified.sh", "file", 1, "验收登记脚本丢失（无法记录老板的实测评语，晋升闸门形同虚设）"),
                     ]
 
 
