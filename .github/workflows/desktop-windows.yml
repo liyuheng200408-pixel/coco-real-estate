@@ -91,6 +91,19 @@ jobs:
         shell: pwsh
         run: node apps/desktop/scripts/write-build-stamp.mjs
 
+      # COCO-PATCH: 安装包的文件名来自 apps/desktop/package.json 的 version
+      # （artifactName 用 ${version}），而 Coco 的版本权威是仓库根 VERSION —— 两处不同步时，
+      # 打出来的包会带着上一次手改的旧号（实测：VERSION 已是 0.21.3-55，包名却是
+      # Coco-0.21.3-53-win-x64.exe）。构建时统一盖章，避免以后每发一版都要记得手改这里。
+      - name: Stamp the Coco version into the desktop package
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$') { throw "VERSION 格式异常：$v" }
+          node -e "const fs=require('fs');const p='apps/desktop/package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version=process.argv[1];fs.writeFileSync(p,JSON.stringify(j,null,2)+String.fromCharCode(10));console.log('desktop version ->',j.version)" $v
+          $stamped = node -e "console.log(require('./apps/desktop/package.json').version)"
+          if ($stamped.Trim() -ne $v) { throw "盖章失败：package.json=$stamped VERSION=$v" }
+
       # prebuild -> assert-root-install + tsc clean; build -> vite build +
       # esbuild bundle of the electron main + native dep staging; postbuild ->
       # assert dist/ is actually there.

@@ -45,3 +45,27 @@ class TestCocoVersion:
         """必须在 real_estate 工具集清单里，否则模型看不到这个工具"""
         from toolsets import TOOLSETS
         assert "get_coco_version" in TOOLSETS["real_estate"]["tools"]
+
+
+class TestReleaseVersionConsistency:
+    """发版一致性：安装包名与 README 的版本行都必须跟着仓库根 VERSION 走。
+
+    为什么要有：桌面版安装包的文件名取 apps/desktop/package.json 的 version
+    （electron-builder 的 artifactName 用 ${version}），而版本权威是仓库根 VERSION ——
+    实测打出来的包叫 Coco-0.21.3-53-win-x64.exe，而当时 VERSION 已经是 0.21.3-55，
+    用户会以为装到了旧版。构建时也会从 VERSION 盖章（desktop-windows.yml），
+    这条测试守住仓库里的两处不被忘掉。
+    """
+
+    def test_desktop_package_version_matches_repo_version(self):
+        import json as _json
+
+        ver = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        pkg = _json.loads((REPO_ROOT / "apps" / "desktop" / "package.json").read_text(encoding="utf-8"))
+        assert pkg["version"] == ver, f"apps/desktop/package.json 是 {pkg['version']}，VERSION 是 {ver}"
+
+    def test_readmes_advertise_the_repo_version(self):
+        ver = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        for name in ("README.md", "README.zh-CN.md"):
+            text = (REPO_ROOT / name).read_text(encoding="utf-8")
+            assert f"v{ver}" in text, f"{name} 里没有当前版本 v{ver}（发版时漏改）"

@@ -2,7 +2,7 @@
   "name": "hermes",
   "productName": "Coco",
   "private": true,
-  "version": "0.21.3-53",
+  "version": "0.21.3-55",
   "description": "Native desktop shell for Hermes Agent.",
   "author": "Nous Research",
   "repository": {
