@@ -20,7 +20,9 @@ on:
       - feat/desktop-local-pg
     paths:
       - 'apps/desktop/scripts/portable-postgres.ps1'
+      - 'apps/desktop/scripts/local-backup.ps1'
       - 'apps/desktop/scripts/tests/portable-postgres-windows-selfcheck.ps1'
+      - 'scripts/backup_db.py'
       - '.github/workflows/desktop-local-pg-windows.yml'
   workflow_dispatch:
 
