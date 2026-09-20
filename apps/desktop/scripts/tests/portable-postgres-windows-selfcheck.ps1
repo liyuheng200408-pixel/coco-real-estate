@@ -3,11 +3,12 @@
   本机模式便携 PostgreSQL 的 Windows 自检（给真机用，双击或一行命令即可跑）。
 
 .DESCRIPTION
-  做三件事，然后把结论连同日志路径一起打印出来，方便把输出直接发回给技术顾问：
+  做四件事，然后把结论连同日志路径一起打印出来，方便把输出直接发回给技术顾问：
     1. 跑一遍引导脚本的 setup（幂等：已经装好/已在跑就只做「确保在跑」）
     2. 跑引导脚本的 selftest（11 项：二进制、数据目录、只监听回环、端口自洽、pg_hba、
        回环可连、非回环连不上、口令认证生效、业务库存在、.env.db 权限、pg_dump 链路）
     3. 用 .env.db 里的 DATABASE_URL 直接连一次库，确认连接串真的可用
+    4. 检查每日备份是否已注册、最近一次备份是否新鲜（本机模式下这是唯一的安全网）
 
   它不修改系统：不装服务、不改注册表、不需要管理员权限；数据都在用户目录下。
 
@@ -30,7 +31,9 @@ param(
     [string]$EnvFile = '',
     [string]$ZipPath = '',
     [switch]$SkipDownload,
-    [switch]$KeepGoing
+    [switch]$KeepGoing,
+    # CI 里「备份」由专门的一步验证（先建 venv 再注册），这里跳过避免顺序打架
+    [switch]$SkipBackupCheck
 )
 
 $ErrorActionPreference = 'Continue'
@@ -166,6 +169,27 @@ if (Test-Path -LiteralPath $EnvFile) {
 } else {
     $script:Problems++
     Say "  找不到 .env.db：$EnvFile" 'Red'
+}
+
+Say ""
+if ($SkipBackupCheck) {
+    Say "== [4/4] 每日备份（本次跳过：由外部步骤单独验证）==" 'Cyan'
+} else {
+Say "== [4/4] 每日备份 ==" 'Cyan'
+$backupScript = Join-Path (Split-Path -Parent (Split-Path -Parent $self)) 'local-backup.ps1'
+if (Test-Path -LiteralPath $backupScript) {
+    & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $backupScript -Action status `
+        -InstallDir (Split-Path -Parent $EnvFile) -DataRoot $DataRoot 2>&1 |
+        ForEach-Object { Write-Host "  $_"; Add-Content -LiteralPath $report -Value "  $_" -Encoding UTF8 }
+    if ($LASTEXITCODE -ne 0) {
+        $script:Problems++
+        Say '  备份未就绪。跑下面这条即可注册（注册时会立刻备份一次）：' 'Yellow'
+        Say "    pwsh -File `"$backupScript`" -Action register" 'Yellow'
+    }
+} else {
+    $script:Problems++
+    Say "  找不到备份脚本：$backupScript" 'Red'
+}
 }
 
 Say ""

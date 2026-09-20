@@ -54,8 +54,13 @@ function hermesManagedPostgresPathEntries(hermesHome: any, { platform = process.
   return root ? [pathModule.join(root, 'bin')] : []
 }
 
-function portablePostgresScriptPath(repoRoot: any) {
+function portablePostgresScriptPath(repoRoot) {
   return repoRoot ? path.join(String(repoRoot), SCRIPT_RELATIVE_PATH) : null
+}
+
+/** 随应用分发的其它脚本（本机备份等）在仓库里的位置。 */
+function desktopScriptPath(repoRoot, name, { pathModule = path }: any = {}) {
+  return repoRoot ? pathModule.join(String(repoRoot), 'apps', 'desktop', 'scripts', name) : null
 }
 
 /** 解析 dotenv 风格文本：忽略空行与注释，去掉包裹引号，允许 `export` 前缀。 */
@@ -141,50 +146,40 @@ function isLocalPostgresSupported({ platform = process.platform }: any = {}) {
 }
 
 /**
- * 调用引导脚本。幂等：已经在跑就立刻返回 0，端口与口令都不动，所以应用每次启动
- * 都可以安全地调一次。
+ * 跑一个随应用分发的 PowerShell 脚本。Windows-only：其它平台返回说明而不是假装成功。
+ * 抽出来是为了让「准备数据库」与「注册备份」共用同一套超时/错误处理。
  */
-function runLocalPostgresSetup({
-  hermesHome,
-  installDir,
-  repoRoot,
+function runDesktopScript({
+  script,
+  args = [],
   platform = process.platform,
   timeoutMs = 20 * 60 * 1000,
+  timeoutMessage = '脚本执行超时。',
+  describeExit = describeSetupExitCode,
   spawnImpl = spawn,
   existsSync = fs.existsSync
 }: any = {}) {
-  const script = portablePostgresScriptPath(repoRoot)
-
   if (!isLocalPostgresSupported({ platform })) {
-    return Promise.resolve({ ok: false, exitCode: null, stdout: '', stderr: '', message: '当前系统暂不支持内置本机数据库。' })
+    return Promise.resolve({ ok: false, exitCode: null, stdout: '', stderr: '', message: '当前系统暂不支持该操作。' })
   }
 
   if (!script || !existsSync(script)) {
-    return Promise.resolve({ ok: false, exitCode: null, stdout: '', stderr: '', message: `找不到本机数据库引导脚本：${script || '(未提供仓库路径)'}` })
+    return Promise.resolve({ ok: false, exitCode: null, stdout: '', stderr: '', message: `找不到脚本：${script || '(未提供仓库路径)'}` })
   }
 
-  const pathModule = pathModuleForPlatform(platform)
-  const args = ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Action', 'setup', '-Quiet']
-
-  if (hermesHome) {
-    args.push('-DataRoot', pathModule.join(String(hermesHome), 'pgsql'), '-DataDir', pathModule.join(String(hermesHome), 'pgsql-data'))
-  }
-
-  if (installDir) {
-    args.push('-EnvFile', pathModule.join(String(installDir), '.env.db'))
-  }
+  const fullArgs = ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...args]
 
   return new Promise(resolve => {
     let stdout = ''
     let stderr = ''
     let settled = false
-    const child = spawnImpl('pwsh', args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawnImpl('pwsh', fullArgs, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true
         child.kill?.()
-        resolve({ ok: false, exitCode: null, stdout, stderr, message: '本机数据库初始化超时（超过 20 分钟），请检查网络后重试。' })
+        resolve({ ok: false, exitCode: null, stdout, stderr, message: timeoutMessage })
       }
     }, timeoutMs)
 
@@ -205,14 +200,72 @@ function runLocalPostgresSetup({
       if (!settled) {
         settled = true
         clearTimeout(timer)
-        resolve({ ok: code === 0, exitCode: code, stdout, stderr, message: describeSetupExitCode(code) })
+        resolve({ ok: code === 0, exitCode: code, stdout, stderr, message: describeExit(code) })
       }
     })
   })
 }
 
+/**
+ * 准备/确保本机数据库在跑。幂等：已经在跑就立刻返回 0，端口与口令都不动，
+ * 所以应用每次启动都可以安全地调一次。
+ */
+function runLocalPostgresSetup({ hermesHome, installDir, repoRoot, platform = process.platform, timeoutMs = 20 * 60 * 1000, spawnImpl = spawn, existsSync = fs.existsSync }: any = {}) {
+  const pathModule = pathModuleForPlatform(platform)
+  const args = ['-Action', 'setup', '-Quiet']
+
+  if (hermesHome) {
+    args.push('-DataRoot', pathModule.join(String(hermesHome), 'pgsql'), '-DataDir', pathModule.join(String(hermesHome), 'pgsql-data'))
+  }
+
+  if (installDir) {
+    args.push('-EnvFile', pathModule.join(String(installDir), '.env.db'))
+  }
+
+  return runDesktopScript({
+    args,
+    describeExit: describeSetupExitCode,
+    existsSync,
+    platform,
+    script: desktopScriptPath(repoRoot, 'portable-postgres.ps1', { pathModule }),
+    spawnImpl,
+    timeoutMessage: '本机数据库初始化超时（超过 20 分钟），请检查网络后重试。',
+    timeoutMs
+  })
+}
+
+/**
+ * 注册「每日备份」计划任务（幂等），注册完会立刻跑一次备份。
+ * 本机模式的数据在用户自己电脑上，没有服务器那份每日 cron 兜底，所以这一步很关键；
+ * 但它失败**不该阻断启动** —— 调用方只记日志。
+ */
+function runLocalBackupRegister({ hermesHome, installDir, repoRoot, platform = process.platform, spawnImpl = spawn, existsSync = fs.existsSync }: any = {}) {
+  const pathModule = pathModuleForPlatform(platform)
+  const args = ['-Action', 'register']
+
+  if (installDir) {
+    args.push('-InstallDir', String(installDir))
+  }
+
+  if (hermesHome) {
+    args.push('-DataRoot', pathModule.join(String(hermesHome), 'pgsql'))
+  }
+
+  return runDesktopScript({
+    args,
+    describeExit: code => (code === 0 ? '备份任务已就绪。' : `备份任务注册失败（退出码 ${code}），数据暂时没有自动备份。`),
+    existsSync,
+    platform,
+    script: desktopScriptPath(repoRoot, 'local-backup.ps1', { pathModule }),
+    spawnImpl,
+    timeoutMessage: '注册备份任务超时。',
+    timeoutMs: 5 * 60 * 1000
+  })
+}
+
 export {
   describeSetupExitCode,
+  desktopScriptPath,
   hermesManagedPostgresPathEntries,
   isLocalPostgresSupported,
   isLoopbackPostgresUrl,
@@ -220,6 +273,8 @@ export {
   portablePostgresRoot,
   portablePostgresScriptPath,
   readDatabaseUrlFromEnvFile,
+  runLocalBackupRegister,
   runLocalPostgresSetup,
+  runDesktopScript,
   SETUP_EXIT_MESSAGES
 }

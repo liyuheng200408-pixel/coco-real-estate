@@ -14,6 +14,8 @@ import { notify, notifyError } from '@/store/notifications'
 import { $desktopOnboarding } from '@/store/onboarding'
 
 import type { RemoteReauth } from './boot-failure-reauth'
+// COCO-PATCH: 本机模式的便携数据库失败 → 具体说法与下一步（按引导脚本退出码）
+import { localDbFailureCopy } from './boot-failure-local-db'
 import {
   deriveProviderShape,
   isRemoteConfig,
@@ -228,6 +230,8 @@ export function BootFailureOverlay() {
 
   const openLogs = () => void window.hermesDesktop?.revealLogs().catch(() => undefined)
   const copy = t.boot.failure
+  // 本机数据库准备失败时，用更具体的标题/说明/提示覆盖通用文案（拿不到就返回 null，行为不变）
+  const localDb = localDbFailureCopy(boot.error, t)
 
   const label = signInLabel(remoteReauth, {
     identityProvider: copy.identityProvider,
@@ -337,7 +341,7 @@ export function BootFailureOverlay() {
       },
       { ...settingsAction, variant: 'ghost' }
     ]
-    hint = copy.repairHint
+    hint = localDb ? localDb.hint : copy.repairHint
   }
 
   if (view === 'connect') {
@@ -381,18 +385,32 @@ export function BootFailureOverlay() {
           <ErrorIcon className="mt-0.5" size="1.25rem" />
           <div>
             <h2 className="text-[0.9375rem] font-semibold tracking-tight">
-              {remoteReauth ? copy.remoteTitle : cloudDown ? copy.cloudDownTitle : copy.title}
+              {remoteReauth
+                ? copy.remoteTitle
+                : cloudDown
+                  ? copy.cloudDownTitle
+                  : localDb
+                    ? localDb.title
+                    : copy.title}
             </h2>
             <p className="mt-1 text-[0.8125rem] leading-5 text-(--ui-text-tertiary)">
-              {remoteReauth ? copy.remoteDescription : cloudDown ? copy.cloudDownDescription : copy.description}
+              {remoteReauth
+                ? copy.remoteDescription
+                : cloudDown
+                  ? copy.cloudDownDescription
+                  : localDb
+                    ? localDb.description
+                    : copy.description}
             </p>
           </div>
         </div>
 
         <div className="grid gap-4 p-5 pt-0">
-          <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive">
-            {sshFailureMessage(connectionConfig, boot.error, t.settings.gateway)}
-          </div>
+          {localDb || sshFailureMessage(connectionConfig, boot.error, t.settings.gateway) ? (
+            <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive">
+              {localDb ? localDb.description : sshFailureMessage(connectionConfig, boot.error, t.settings.gateway)}
+            </div>
+          ) : null}
 
           <div className="grid gap-2">
             <div className="flex flex-wrap gap-2">

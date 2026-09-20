@@ -13,6 +13,7 @@ import { test } from 'vitest'
 import { buildDesktopBackendEnv, buildDesktopBackendPath } from './backend-env'
 import {
   describeSetupExitCode,
+  desktopScriptPath,
   hermesManagedPostgresPathEntries,
   isLocalPostgresSupported,
   isLoopbackPostgresUrl,
@@ -20,6 +21,7 @@ import {
   portablePostgresRoot,
   portablePostgresScriptPath,
   readDatabaseUrlFromEnvFile,
+  runLocalBackupRegister,
   runLocalPostgresSetup
 } from './portable-postgres'
 
@@ -163,6 +165,67 @@ test('backend env gets DATABASE_URL only when the caller supplies a loopback URL
   assert.equal(withoutDb.PYTHONUTF8, '1')
 })
 
+test('desktopScriptPath points at the shipped scripts folder', () => {
+  assert.equal(
+    desktopScriptPath('C:\\repo', 'local-backup.ps1', { pathModule: path.win32 }),
+    path.win32.join('C:\\repo', 'apps', 'desktop', 'scripts', 'local-backup.ps1')
+  )
+  assert.equal(desktopScriptPath(null, 'local-backup.ps1'), null)
+})
+
+test('runLocalBackupRegister calls the backup script with -Action register on Windows', async () => {
+  const calls: any[] = []
+  const spawnImpl = (command: string, args: string[]) => {
+    calls.push({ command, args })
+    const child = new EventEmitter() as any
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => undefined
+    setImmediate(() => child.emit('close', 0))
+
+    return child
+  }
+
+  const result = await runLocalBackupRegister({
+    hermesHome: 'C:\\Users\\me\\AppData\\Local\\hermes',
+    installDir: 'C:\\Users\\me\\AppData\\Local\\hermes\\hermes-agent',
+    repoRoot: 'C:\\repo',
+    platform: 'win32',
+    existsSync: () => true,
+    spawnImpl
+  })
+
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].args.includes(path.win32.join('C:\\repo', 'apps', 'desktop', 'scripts', 'local-backup.ps1')))
+  assert.ok(calls[0].args.includes('-Action') && calls[0].args.includes('register'))
+  assert.ok(calls[0].args.includes('-InstallDir'))
+  assert.equal(result.ok, true)
+  assert.match(result.message, /备份任务已就绪/)
+})
+
+test('runLocalBackupRegister reports a readable message when it fails', async () => {
+  const spawnImpl = () => {
+    const child = new EventEmitter() as any
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => undefined
+    setImmediate(() => child.emit('close', 8))
+
+    return child
+  }
+
+  const result = await runLocalBackupRegister({
+    installDir: 'C:\\hermes-agent',
+    repoRoot: 'C:\\repo',
+    platform: 'win32',
+    existsSync: () => true,
+    spawnImpl
+  })
+
+  assert.equal(result.ok, false)
+  assert.match(result.message, /没有自动备份/)
+})
+
 test('runLocalPostgresSetup refuses to run off Windows without spawning anything', async () => {
   let spawned = false
   const result = await runLocalPostgresSetup({
@@ -192,7 +255,9 @@ test('runLocalPostgresSetup reports a missing bootstrap script instead of spawni
   })
 
   assert.equal(result.ok, false)
-  assert.match(result.message, /找不到本机数据库引导脚本/)
+  assert.match(result.message, /找不到脚本/)
+  // 路径要按目标平台拼（Windows 上不能出现 C:\repo/apps/... 这种混搭）
+  assert.ok(result.message.includes('apps\\desktop\\scripts\\portable-postgres.ps1'))
 })
 
 test('runLocalPostgresSetup passes explicit paths to the script and maps the exit code', async () => {
