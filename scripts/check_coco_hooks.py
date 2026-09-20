@@ -237,6 +237,7 @@ PATH_CHECKS = [
     ("A16", "迁移/备份文档", "docs/BACKUP_MIGRATION.md", "file", 1, "备份迁移文档丢失"),
     ("A17", "飞书实测清单", "docs/TESTING_FEISHU_FULL.md", "file", 1, "飞书全量实测清单丢失"),
     ("A18", "官方残留清理脚本", "scripts/prune_official_deleted.sh", "file", 1, "官方已删残留的清理脚本丢失（同步时无法顺带清理）"),
+    ("A19", "楼层回填脚本", "scripts/backfill_floor_from_title.py", "file", 1, "历史房源楼层回填脚本丢失（老数据无法批量补楼层）"),
                     ]
 
 

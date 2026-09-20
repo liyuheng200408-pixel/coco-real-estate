@@ -50,6 +50,11 @@ def add_property(
         if src:
             img_list.extend([x.strip() for x in src.split(',') if x.strip()])
     merged_images = ','.join(img_list) if img_list else None
+    inferred = {}
+    if floor is None:
+        guess, why = infer_floor(title, address)
+        if guess:
+            floor, inferred["floor"] = guess, f"{guess}（按{why}推断，不对请直接纠正）"
     result = db.add_property(
         title=title, price=price, area=area, community=community,
         district=district, address=address,
@@ -97,6 +102,10 @@ def add_property(
     except Exception:
         duplicate_warning = None
     response = {"success": True, "property": result}
+    if inferred:
+        response["inferred"] = inferred
+        response["note_inferred"] = ("上列字段是系统按房号自动推断的，请如实转述依据并请经纪人核对"
+                                     "（不对就直接说新值）")
     if owner:
         response["owner"] = owner
     if owner_warning:
@@ -128,6 +137,12 @@ def update_property(
     详细地址(address)、建造年份(year_built)、电梯(has_elevator)、车位(parking)、标签(tags)。
     """
     db = _get_db()
+    inferred = {}
+    if floor is None:
+        _old = db.get_available_property(property_id) or db.get_property(property_id) or {}
+        guess, why = infer_floor(title or _old.get("title"), address or _old.get("address"))
+        if guess:
+            floor, inferred["floor"] = guess, f"{guess}（按{why}推断，不对请直接纠正）"
     kwargs = {k: v for k, v in {
         'title': title, 'price': price, 'area': area, 'status': status,
         'community': community, 'district': district, 'renovation': renovation,
@@ -148,6 +163,10 @@ def update_property(
             owner = None
             owner_warning = f"业主信息登记失败：{type(exc).__name__}: {exc}（房源已更新，可重试补录业主）"
     response = {"success": True, "property": result}
+    if inferred:
+        response["inferred"] = inferred
+        response["note_inferred"] = ("上列字段是系统按房号自动推断的，请如实转述依据并请经纪人核对"
+                                     "（不对就直接说新值）")
     if owner:
         response["owner"] = owner
     if owner_warning:
@@ -228,6 +247,44 @@ def _norm_floor(value):
         n = _cn_to_int(m.group(1))
         return f"{n}层" if n else s
     return s
+
+
+_ROOM_NO_RE = re.compile(r"(?:(?:号楼|栋|幢|座|单元|室|房)\s*)?(\d{3,4})(?!\d)")
+_NOT_ROOM_SUFFIX = ("平", "㎡", "万", "元", "年", "月", "日", "%", "层", "楼", "米")
+
+
+def infer_floor(title, address=None):
+    """从房号推断楼层（L2 依据）。返回 (值, 依据) 或 (None, None)。
+
+    依据：国内住宅房号普遍是「楼层+户号」——3 位取首位（301→3层），4 位取前两位（1602→16层）。
+    只认「楼栋/单元/室之后」或「整串末尾」的 3~4 位数字，并做三重排除：
+    ① 后面紧跟 平/㎡/万/元/年/月/日/%/层/楼/米 的不是房号（面积、价格、年份、别的楼层写法）；
+    ② 推得的楼层必须在 1~60 之间（年份 2015 这类直接被挡掉）；
+    ③ 从末尾往前找第一个成立的，避免标题中部的干扰数字。
+    推不出来就返回 (None, None) —— **绝不臆造**。
+    """
+    for text in (title, address):
+        if not text:
+            continue
+        norm = str(text).replace("／", "/").replace("　", " ").strip()
+        # 先看有没有明写（顶楼/高层/低楼层…）—— 这比房号推断更可靠
+        for kw, val in (("顶楼", "顶层"), ("顶层", "顶层"), ("高楼层", "高楼层"),
+                        ("中楼层", "中楼层"), ("低楼层", "低楼层"), ("底层", "底层")):
+            if kw in norm:
+                return val, f"标题/地址里的「{kw}」"
+        cands = list(_ROOM_NO_RE.finditer(norm))
+        for m in reversed(cands):
+            room = m.group(1)
+            tail = norm[m.end():m.end() + 2]
+            if any(tail.startswith(sfx) for sfx in _NOT_ROOM_SUFFIX):
+                continue
+            if len(room) == 4:
+                floor = int(room[:2])
+            else:
+                floor = int(room[0])
+            if 1 <= floor <= 60:
+                return f"{floor}层", f"房号 {room}"
+    return None, None
 
 
 def _norm_orientation(value):

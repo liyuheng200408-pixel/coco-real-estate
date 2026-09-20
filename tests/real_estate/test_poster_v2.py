@@ -148,7 +148,8 @@ def test_template_b_with_photo_renders(wired, tmp_path):
 
     Image.new("RGB", (400, 300), (120, 90, 60)).save(photo)
     _save_card()
-    pid = _prop(wired, images=str(photo))["id"]
+    # B 款需要 照片+楼层+朝向（2026-09-21 起出图前会校验）；这里直接写库，所以楼层要显式给
+    pid = _prop(wired, images=str(photo), floor="10层", orientation="北")["id"]
     res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推", template="B"))
     assert res["success"] is True
     assert res["template"] == "B"
@@ -216,7 +217,7 @@ def test_template_auto_pick_prefers_b_for_high_end_with_photo(wired, tmp_path):
 
     Image.new("RGB", (300, 300), (30, 30, 30)).save(photo)
     _save_card()
-    pid = _prop(wired, area=140.0, renovation="豪装", images=str(photo))["id"]
+    pid = _prop(wired, area=140.0, renovation="豪装", images=str(photo), floor="10层", orientation="朝南")["id"]
     res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推"))
     assert res["template"] == "B"
     assert res["success"] is True

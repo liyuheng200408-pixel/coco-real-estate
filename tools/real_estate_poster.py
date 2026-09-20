@@ -451,8 +451,13 @@ def _property_photo(p) -> str:
     return ''
 
 
-def _missing_poster_info(p, card, need_photo: bool) -> list:
-    """出图前的信息齐全校验：返回缺失项清单（空列表 = 信息齐全，可以出图）"""
+def _missing_poster_info(p, card, need_photo: bool, need_floor: bool = False,
+                         need_orientation: bool = False) -> list:
+    """出图前的信息齐全校验：返回缺失项清单（空列表 = 信息齐全，可以出图）
+
+    need_floor / need_orientation：所选模板会显示这两栏（目前是 B 极简高级款）。
+    **先问清再出图**，别等图做完了才发现两栏是「—」（2026-09-21 老板要求）。
+    """
     miss = []
     if not (p.get('title') or p.get('community')):
         miss.append("房源名称/房号（如 262栋1009）")
@@ -466,6 +471,10 @@ def _missing_poster_info(p, card, need_photo: bool) -> list:
         miss.append("您的联系方式（姓名 / 电话 / 微信 至少一项，海报名片区使用）")
     if need_photo:
         miss.append("房源照片（所选模板需要照片；也可以改用不需要照片的模板）")
+    if need_floor and not p.get('floor'):
+        miss.append("楼层（如 11层；标题或地址里带房号如 301/1602 时系统会自动按房号推断，不必您提供）")
+    if need_orientation and not p.get('orientation'):
+        miss.append("朝向（如 朝南 / 南北通透；房号推不出朝向，需要您告知）")
     return miss
 
 
@@ -534,16 +543,22 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
         if allow_missing:
             tpl, reason = "A", "无照片（经纪人同意先出图）→ 改为不需要照片的促销款"
         else:
+            _need = ["房源照片"] + _missing_poster_info(p, card, need_photo=False,
+                                                       need_floor=True, need_orientation=True)
             return json.dumps({
                 "success": False,
                 "need_photo": True,
-                "missing": ["房源照片"],
-                "ask": ("所选模板需要房源照片。请二选一：①请经纪人发一张房源照片；"
-                        "②改用不需要照片的模板（A 红金促销款），或说「先出图」我再生成。"),
+                "missing": _need,
+                "ask": ("所选模板（B 极简高级款）需要这些信息，请**一次问清后再出图**："
+                        + "；".join(_need) + "。若经纪人不想发照片，可改用 A 红金促销款，或说「先出图」我再生成。"),
                 "templates_without_photo": ["A"],
             }, ensure_ascii=False)
 
-    missing = _missing_poster_info(p, card, need_photo=False) if not allow_missing else []
+    # B 款会显示「楼层 / 朝向」两栏 —— 缺了就先问清，不要等出图后再补问
+    _need_extras = tpl == "B"
+    missing = (_missing_poster_info(p, card, need_photo=False,
+                                    need_floor=_need_extras, need_orientation=_need_extras)
+               if not allow_missing else [])
     cands = _title_candidates(p) if not poster_title else []
     if missing or cands:
         payload = {
@@ -711,7 +726,7 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, task_id: str
 registry.register(
     name="generate_property_poster",
     toolset="real_estate",
-    schema={"name": "generate_property_poster", "description": "生成房源海报图（1080x1920）。信息不齐会拒绝出图并返回 missing 清单（先问清再出）；未提供主标题会返回 2~3 个候选让经纪人挑。模板 A 红金促销/B 极简高级(需照片)，不传自动选。返回图片路径，用 MEDIA:路径 发送", "parameters": {
+    schema={"name": "generate_property_poster", "description": "生成房源海报图（1080x1920）。**出图前必须先把信息问齐**：B 极简高级款需要 照片+楼层+朝向，缺任一项都会拒绝出图并返回 missing 清单（一次问清，不要先出图再补问）；楼层若标题/地址带房号会自动推断。未提供主标题会返回 2~3 个候选让经纪人挑。模板 A 红金促销/B 极简高级(需照片)，不传自动选。返回图片路径，用 MEDIA:路径 发送", "parameters": {
         "type": "object",
         "properties": {
             "property_id": {"type": "integer", "description": "房源ID（与 title 二选一，优先用 ID）"},
