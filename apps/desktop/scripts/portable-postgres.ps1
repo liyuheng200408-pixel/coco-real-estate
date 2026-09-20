@@ -640,6 +640,44 @@ function Invoke-InitDb {
     }
 }
 
+function Invoke-PgCtl {
+    <#
+      调用 pg_ctl，带硬超时。
+
+      Windows 上必须走 Start-Process + 文件重定向，不能用 `& pg_ctl ... 2>&1`：
+      postgres.exe 会继承父进程的 stdout 句柄，而 PowerShell 捕获输出时会一直读到管道 EOF
+      —— 即使 pg_ctl 早就退出了也不会返回。实测：真机 CI 上「启动 PostgreSQL」这一步静默
+      卡了 35 分钟（解压 1.7 秒、initdb 1.1 秒都正常，就卡在这一行），两次运行都这样。
+      重定向到文件则不会被后端进程攥住我们的管道。
+    #>
+    [CmdletBinding()]
+    param([string[]]$Arguments, [int]$TimeoutSec = 120)
+
+    $exe = Get-ToolPath 'pg_ctl'
+
+    if (-not $script:IsWin) {
+        $outText = & $exe @Arguments 2>&1 | Out-String
+        return @{ Code = $LASTEXITCODE; Out = $outText.Trim(); TimedOut = $false }
+    }
+
+    $tmpOut = Join-Path ([System.IO.Path]::GetTempPath()) ('coco-pgctl-' + [Guid]::NewGuid().ToString('N') + '.out')
+    $tmpErr = "$tmpOut.err"
+    try {
+        $proc = Start-Process -FilePath $exe -ArgumentList $Arguments -NoNewWindow -PassThru `
+            -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+        if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
+            try { $proc.Kill() } catch { }
+            return @{ Code = 124; Out = "pg_ctl 超过 $TimeoutSec 秒仍未返回（已终止）"; TimedOut = $true }
+        }
+        $text = ''
+        if (Test-Path -LiteralPath $tmpOut) { $text += (Get-Content -LiteralPath $tmpOut -Raw) }
+        if (Test-Path -LiteralPath $tmpErr) { $text += (Get-Content -LiteralPath $tmpErr -Raw) }
+        return @{ Code = $proc.ExitCode; Out = "$text".Trim(); TimedOut = $false }
+    } finally {
+        Remove-Item -LiteralPath $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Start-PgServer {
     $status = Get-PgStatus
     if ($status -eq 'running') { Ok 'PostgreSQL 已在运行'; return $true }
@@ -647,23 +685,34 @@ function Start-PgServer {
     if ($status -eq 'missing') { Die "找不到 pg_ctl（$($script:RBindir)）" $script:Exit.BinMissing }
 
     Info "启动 PostgreSQL（PGDATA=$($script:RDataDir)，日志 $($script:RLog)）"
-    $out = & (Get-ToolPath 'pg_ctl') -D $script:RDataDir -l $script:RLog -w -t 60 start 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $r = Invoke-PgCtl -Arguments @('-D', $script:RDataDir, '-l', $script:RLog, '-w', '-t', '60', 'start') -TimeoutSec 120
+    if ($r.Code -ne 0 -or -not (Test-PgServerUp)) {
         $tail = ''
         if (Test-Path -LiteralPath $script:RLog) {
             $tail = (@([System.IO.File]::ReadAllLines($script:RLog)) | Select-Object -Last 15) -join [Environment]::NewLine
         }
-        Die "PostgreSQL 启动失败（退出码 $LASTEXITCODE）：`n$(($out | Out-String).Trim())`n日志尾部：`n$tail" $script:Exit.Start
+        Die "PostgreSQL 启动失败（pg_ctl 退出码 $($r.Code)）：`n$($r.Out)`n日志尾部：`n$tail" $script:Exit.Start
     }
     Ok 'PostgreSQL 已启动'
     return $true
 }
 
+function Test-PgServerUp {
+    # pg_ctl status 只证明 postmaster 在跑（可能是别的实例），再用 pg_isready 确认能接受连接
+    if ((Get-PgStatus) -ne 'running') { return $false }
+    $ready = Get-ToolPath 'pg_isready'
+    if (-not (Test-Path -LiteralPath $ready)) { return $true }
+    $port = Get-ConfValue -Path (Join-Path $script:RDataDir 'postgresql.conf') -Key 'port'
+    if (-not $port) { return $true }
+    & $ready -h 127.0.0.1 -p $port -q *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Stop-PgServer {
     $status = Get-PgStatus
     if ($status -ne 'running') { Ok 'PostgreSQL 未在运行，无需停止'; return }
-    $out = & (Get-ToolPath 'pg_ctl') -D $script:RDataDir -m fast -w -t 60 stop 2>&1
-    if ($LASTEXITCODE -ne 0) { Warn "停止失败：$(($out | Out-String).Trim())" } else { Ok 'PostgreSQL 已停止' }
+    $r = Invoke-PgCtl -Arguments @('-D', $script:RDataDir, '-m', 'fast', '-w', '-t', '60', 'stop') -TimeoutSec 120
+    if ($r.Code -ne 0) { Warn "停止失败（pg_ctl 退出码 $($r.Code)）：$($r.Out)" } else { Ok 'PostgreSQL 已停止' }
 }
 
 function Invoke-Psql {
