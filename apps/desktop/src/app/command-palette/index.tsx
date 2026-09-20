@@ -1210,7 +1210,8 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
       })
     }
 
-    if (settingsCatalog.credentialEntries.length > 0) {
+    // Coco 中介界面：工具与密钥已收起，密钥类检索行也不再出现 —— lib/coco-ui-profile.ts。
+    if (cocoEntryVisible(COCO_ENTRY.settingsKeys) && settingsCatalog.credentialEntries.length > 0) {
       result.push({
         heading: t.settings.nav.apiKeys,
         items: settingsCatalog.credentialEntries.map(settingsEntryItem)
@@ -1315,7 +1316,8 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
         items: [...settingsCatalog.appearanceEntries, ...settingsCatalog.configEntries].map(settingsEntryItem)
       })
 
-      if (settingsCatalog.credentialEntries.length > 0) {
+      // Coco 中介界面：工具与密钥已收起，密钥类检索行也不再出现 —— lib/coco-ui-profile.ts。
+      if (cocoEntryVisible(COCO_ENTRY.settingsKeys) && settingsCatalog.credentialEntries.length > 0) {
         result.push({
           heading: t.settings.nav.apiKeys,
           items: settingsCatalog.credentialEntries.map(settingsEntryItem)
