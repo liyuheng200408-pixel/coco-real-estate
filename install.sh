@@ -257,7 +257,6 @@ clone_project() {
     src=$(probe_source)
     case "$src" in
         gitee)
-            info "使用 Gitee 源..."
             git clone "$GITEE_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
                 warn "git clone 失败，改用 zip 包..."
                 curl -fsSL "$GITEE_ZIP_URL" -o /tmp/coco.zip
@@ -268,11 +267,6 @@ clone_project() {
             }
             ;;
         github)
-            if [[ "$COCO_SOURCE" == "github" ]]; then
-                info "使用 GitHub 源（已指定）..."
-            else
-                info "使用 GitHub 源..."
-            fi
             git clone "$GITHUB_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
                 warn "git clone 失败，改用 zip 包..."
                 curl -fsSL "$GITHUB_ZIP_URL" -o /tmp/coco.zip
