@@ -214,6 +214,24 @@ CONTENT_CHECKS = [
         [r"!cd ~/hermes-agent"],
         "同第 12 项：前置检查与查库模板都用自定位写法（查库用 `export $(grep DATABASE_URL ~/hermes-agent/.env.db)` 或一次性取值）。",
     ),
+    (
+        "17",
+        "桌面版本机数据库 PATH 接线",
+        "apps/desktop/electron/backend-env.ts",
+        [r"COCO-PATCH", r"hermesManagedPostgresPathEntries", r"pgsql"],
+        "官方快照覆盖后，便携 PostgreSQL 的 bin 不再进后端 PATH → scripts/backup_db.py 与\n"
+        "scripts/healthcheck.py 找不到 pg_dump/psql（本机模式的备份与体检直接失败）。\n"
+        "处理：按 patches/09-desktop-local-pg.patch 恢复（PATH 里加 <hermesHome>\\pgsql\\bin）。",
+    ),
+    (
+        "18",
+        "桌面版本机数据库启停接线",
+        "apps/desktop/electron/main.ts",
+        [r"COCO-PATCH", r"ensureLocalPostgres", r"readDatabaseUrlFromEnvFile"],
+        "官方快照覆盖后，后端进程拿不到 DATABASE_URL，启动前也不再「先把数据库备好」→\n"
+        "本机模式后端会以「未配置 DATABASE_URL 环境变量，拒绝初始化数据库」失败。\n"
+        "处理：按 patches/09-desktop-local-pg.patch 恢复（ensureLocalPostgres 必须早于后端拉起）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示
@@ -235,6 +253,9 @@ PATH_CHECKS = [
     ("A15", "房产 CI 工作流", ".github/workflows/real-estate-tests.yml", "file", 1, "房产测试 CI 丢失"),
     ("A16", "迁移/备份文档", "docs/BACKUP_MIGRATION.md", "file", 1, "备份迁移文档丢失"),
     ("A17", "飞书实测清单", "docs/TESTING_FEISHU_FULL.md", "file", 1, "飞书全量实测清单丢失"),
+    ("A18", "便携数据库引导脚本", "apps/desktop/scripts/portable-postgres.ps1", "file", 1, "本机模式的数据库引导脚本丢失（本机装不出数据库）"),
+    ("A19", "便携数据库接线模块", "apps/desktop/electron/portable-postgres.ts", "file", 1, "桌面版与本机数据库的接线模块丢失（PATH/连接串都不再注入）"),
+    ("A20", "便携数据库等价验证夹具", "apps/desktop/scripts/tests/portable-postgres-linux-e2e.sh", "file", 1, "本机数据库的 Linux 等价验证夹具丢失"),
 ]
 
 
