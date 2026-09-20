@@ -70,9 +70,10 @@ if ($ZipPath) { $commonArgs += @('-ZipPath', $ZipPath) }
 if ($SkipDownload) { $commonArgs += '-SkipDownload' }
 
 Say "== [1/3] 准备数据库（setup，幂等）==" 'Cyan'
-$setupOut = & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap @commonArgs -Action setup 2>&1
+# 实时透传子进程输出（同时写进报告）：下载进度必须看得见，不能等它跑完才吐出来
+& pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap @commonArgs -Action setup 2>&1 |
+    Tee-Object -FilePath $report -Append | ForEach-Object { Write-Host "  $_" }
 $setupCode = $LASTEXITCODE
-foreach ($line in $setupOut) { Say "  $line" }
 Say "  退出码：$setupCode"
 if ($setupCode -ne 0) {
     $script:Problems++
@@ -88,9 +89,9 @@ if ($setupCode -ne 0) {
 
 Say ""
 Say "== [2/3] 自检（selftest）==" 'Cyan'
-$selfOut = & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap @commonArgs -Action selftest 2>&1
+& pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap @commonArgs -Action selftest 2>&1 |
+    Tee-Object -FilePath $report -Append | ForEach-Object { Write-Host "  $_" }
 $selfCode = $LASTEXITCODE
-foreach ($line in $selfOut) { Say "  $line" }
 Say "  退出码：$selfCode"
 if ($selfCode -ne 0) { $script:Problems++ }
 
