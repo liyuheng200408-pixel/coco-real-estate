@@ -6,10 +6,15 @@
 
 ## 0. 拿到安装包
 
-安装包由 CI 在 windows runner 上打出（本机是 1 核小机，打不了 Electron 包）：
+直接下载（大小约 118MB）：
 
-- Actions 页面：`Desktop Windows installer` 工作流最近一次成功运行 → Artifacts → `coco-desktop-windows-installer`
-- 或命令行：`gh run download <run-id> -n coco-desktop-windows-installer --repo liyuheng200408-pixel/coco-real-estate`
+```
+https://www.liyuheng.cn/static/dl-6e98b9/Coco-0.21.3-55-win-x64.exe
+```
+
+- sha256（下完可核对）：`b546c218c043f912a91ab65fbb86aadc033509f06ecce30b43496fe828b81f1a`
+- 备用入口：Actions 页面 `Desktop Windows installer` 最近一次成功运行 → Artifacts → `coco-desktop-windows-installer`，
+  或 `gh run download <run-id> -n coco-desktop-windows-installer --repo liyuheng200408-pixel/coco-real-estate`
 
 已知前置：**Git for Windows**（官方也要求）。首启 bootstrap 的 `Stage-Git` 会尝试自动装便携 Git 到
 `%LOCALAPPDATA%\hermes\git\`；上一版（0.21.3-53）在 Windows 上实测卡在
