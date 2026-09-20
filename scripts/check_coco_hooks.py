@@ -245,7 +245,7 @@ CONTENT_CHECKS = [
         "20",
         "首启装的是 Coco 而不是官方 Hermes",
         "scripts/install.ps1",
-        [r"COCO-PATCH", r"coco-real-estate"],
+        [r"COCO-PATCH", r"coco-real-estate", r"registry\.npmmirror\.com/-/binary/git-for-windows"],
         "官方快照覆盖后，首启会去克隆 NousResearch/hermes-agent → 装出来是官方 Hermes：\n"
         "没有 real_estate 工具集、没有身份定制，等于白装。\n"
         "处理：按 patches/10-install-ps1-coco-patches.patch 恢复（源顺序 Gitee → GitHub，-RepoUrl 可覆盖）。",

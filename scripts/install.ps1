@@ -1540,13 +1540,41 @@ function Install-Git {
             $downloadIsZip = $false
         }
 
-        $downloadUrl = "https://github.com/git-for-windows/git/releases/download/$gitTag/$assetName"
+        # COCO-PATCH: 多源 + 按实测延迟排序。官方 GitHub release 资产会重定向到
+        # objects.githubusercontent.com（国内常被挡），首启会卡在「装 Git」这一步；
+        # npmmirror 镜像了 git-for-windows 的全部 release 资产（同名同版本，已核对）。
+        # 只取 1 字节探延迟（最多 6 秒），快的排前面 —— 国内自然走镜像、海外自然走官方。
+        $gitMirrorBase = "https://registry.npmmirror.com/-/binary/git-for-windows/$gitTag"
+        $gitOfficialBase = "https://github.com/git-for-windows/git/releases/download/$gitTag"
+        $gitSources = @("$gitMirrorBase/$assetName", "$gitOfficialBase/$assetName")
+        $scored = foreach ($u in $gitSources) {
+            $secs = 99
+            try {
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                $null = Invoke-WebRequest -Uri $u -Method Head -TimeoutSec 6 -UseBasicParsing -ErrorAction Stop
+                $sw.Stop()
+                $secs = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+            } catch { $secs = 99 }
+            [pscustomobject]@{ Url = $u; Secs = $secs }
+        }
+        $downloadUrl = $null
         $downloadExt = if ($downloadIsZip) { "zip" } else { "7z.exe" }
         $tmpFile = "$env:TEMP\$assetName"
         $gitDir = "$HermesHome\git"
 
-        Write-Info "Downloading $assetName (Git for Windows $gitVerTag)..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing
+        foreach ($candidate in ($scored | Sort-Object Secs | ForEach-Object { $_.Url })) {
+            Write-Info "Downloading $assetName (Git for Windows $gitVerTag) from $candidate ..."
+            try {
+                Invoke-WebRequest -Uri $candidate -OutFile $tmpFile -UseBasicParsing -ErrorAction Stop
+                $downloadUrl = $candidate
+                break
+            } catch {
+                Write-Warn "Git 下载失败（$candidate）：$($_.Exception.Message)"
+            }
+        }
+        if (-not $downloadUrl) {
+            throw "PortableGit 下载失败（已试：$($gitSources -join ', ')）。排查：1) 网络/代理；2) 镜像是否可达（registry.npmmirror.com）；3) 手动下载 $assetName 放到 $tmpFile 后重跑。"
+        }
 
         if (Test-Path $gitDir) {
             Write-Info "Removing previous Git install at $gitDir ..."

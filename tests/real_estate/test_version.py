@@ -75,6 +75,16 @@ class TestReleaseVersionConsistency:
         assert "coco-real-estate.git" in text, "install.ps1 没有指向 Coco 仓库"
         assert "NousResearch/hermes-agent" not in text, "install.ps1 仍在克隆官方 Hermes 仓库"
 
+    def test_git_download_has_a_china_mirror(self):
+        """便携 Git 不能只从 GitHub release 下：release 资产会重定向到
+        objects.githubusercontent.com，国内常被挡，首启就卡在「装 Git」这一步。
+
+        现状：npmmirror 镜像 + 官方源，按实测延迟选（已核对 npmmirror 同名同版本资产）。
+        """
+        text = (REPO_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
+        assert "registry.npmmirror.com/-/binary/git-for-windows" in text, "便携 Git 缺少国内镜像源"
+        assert "git-for-windows/git/releases/download" in text, "便携 Git 缺少官方源兜底"
+
     def test_readmes_advertise_the_repo_version(self):
         ver = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
         for name in ("README.md", "README.zh-CN.md"):
