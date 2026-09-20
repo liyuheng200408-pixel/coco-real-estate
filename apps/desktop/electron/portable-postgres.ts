@@ -39,7 +39,7 @@ const SETUP_EXIT_MESSAGES = Object.freeze({
   9: '本机数据库组件出现未预期的错误。请点「打开日志」把最后几行发给我们。'
 })
 
-function portablePostgresRoot(hermesHome, { pathModule = path }: any = {}) {
+function portablePostgresRoot(hermesHome: any, { pathModule = path }: any = {}) {
   return hermesHome ? pathModule.join(String(hermesHome), 'pgsql') : null
 }
 
@@ -48,19 +48,19 @@ function portablePostgresRoot(hermesHome, { pathModule = path }: any = {}) {
  * 与 `hermesManagedNodePathEntries` 同一套路：hermesHome 为空时返回空数组，
  * 让调用方原样拼 PATH。
  */
-function hermesManagedPostgresPathEntries(hermesHome, { platform = process.platform, pathModule = path }: any = {}) {
+function hermesManagedPostgresPathEntries(hermesHome: any, { platform = process.platform, pathModule = path }: any = {}) {
   const root = portablePostgresRoot(hermesHome, { pathModule })
 
   return root ? [pathModule.join(root, 'bin')] : []
 }
 
-function portablePostgresScriptPath(repoRoot) {
+function portablePostgresScriptPath(repoRoot: any) {
   return repoRoot ? path.join(String(repoRoot), SCRIPT_RELATIVE_PATH) : null
 }
 
 /** 解析 dotenv 风格文本：忽略空行与注释，去掉包裹引号，允许 `export` 前缀。 */
-function parseEnvText(text) {
-  const out = {}
+function parseEnvText(text: any) {
+  const out: Record<string, string> = {}
 
   for (const rawLine of String(text ?? '').split(/\r?\n/)) {
     const line = rawLine.trim()
@@ -95,7 +95,7 @@ function parseEnvText(text) {
  * 只接受「本机回环 + postgres 协议」的连接串。其余（空、sqlite、远程主机）一律
  * 返回 null —— 本机模式注入错了地址，比不注入更难排查。
  */
-function isLoopbackPostgresUrl(value) {
+function isLoopbackPostgresUrl(value: any) {
   if (typeof value !== 'string' || !value.trim()) {
     return false
   }
@@ -106,12 +106,12 @@ function isLoopbackPostgresUrl(value) {
     return false
   }
 
-  const host = trimmed.replace(/^postgres(ql)?:\/\//i, '').split('@').pop().split('/')[0].replace(/:\d+$/, '')
+  const host = String(trimmed.replace(/^postgres(ql)?:\/\//i, '').split('@').pop() || '').split('/')[0].replace(/:\d+$/, '')
 
   return host === '127.0.0.1' || host === 'localhost' || host === '[::1]'
 }
 
-function readDatabaseUrlFromEnvFile(envFilePath, { readFileSync = fs.readFileSync }: any = {}) {
+function readDatabaseUrlFromEnvFile(envFilePath: any, { readFileSync = fs.readFileSync }: any = {}) {
   if (!envFilePath) {
     return null
   }
@@ -119,18 +119,20 @@ function readDatabaseUrlFromEnvFile(envFilePath, { readFileSync = fs.readFileSyn
   try {
     const url = parseEnvText(readFileSync(envFilePath, 'utf8')).DATABASE_URL
 
-    return isLoopbackPostgresUrl(url) ? url.trim() : null
+    return isLoopbackPostgresUrl(url) ? String(url).trim() : null
   } catch {
     return null
   }
 }
 
-function describeSetupExitCode(exitCode) {
+function describeSetupExitCode(exitCode: any) {
   if (exitCode === 0) {
     return '本机数据库已就绪。'
   }
 
-  return SETUP_EXIT_MESSAGES[exitCode] || `本机数据库初始化失败（退出码 ${exitCode}）。请把日志发给技术顾问。`
+  const messages: Record<string, string> = SETUP_EXIT_MESSAGES as any
+
+  return messages[exitCode] || `本机数据库初始化失败（退出码 ${exitCode}）。请把日志发给技术顾问。`
 }
 
 /** 只有 Windows 支持内置便携 PostgreSQL（macOS 二期，Linux 走文档里的安装脚本）。 */
@@ -186,20 +188,20 @@ function runLocalPostgresSetup({
       }
     }, timeoutMs)
 
-    child.stdout?.on('data', chunk => {
+    child.stdout?.on('data', (chunk: any) => {
       stdout += String(chunk)
     })
-    child.stderr?.on('data', chunk => {
+    child.stderr?.on('data', (chunk: any) => {
       stderr += String(chunk)
     })
-    child.on('error', error => {
+    child.on('error', (error: any) => {
       if (!settled) {
         settled = true
         clearTimeout(timer)
         resolve({ ok: false, exitCode: null, stdout, stderr, message: `无法启动本机数据库脚本：${error.message}` })
       }
     })
-    child.on('close', code => {
+    child.on('close', (code: any) => {
       if (!settled) {
         settled = true
         clearTimeout(timer)
