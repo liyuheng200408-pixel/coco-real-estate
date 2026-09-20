@@ -21,10 +21,11 @@ fi
 REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 COCO_VER="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION" 2>/dev/null || echo "未知")"
 COCO_BASE="${COCO_VER%%-*}"
+COCO_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "未知")"
 
 case "${1:-version}" in
   version|--version|-v|"")
-    echo "Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）"
+    echo "Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）· 提交 ${COCO_COMMIT}"
     ;;
   check)
     exec "$REPO_ROOT/venv/bin/python" "$REPO_ROOT/scripts/healthcheck.py"

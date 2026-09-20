@@ -577,6 +577,9 @@ print_result() {
     # 版本号形如 0.21.3-1：前半段是官方底座，后半段是 Coco 自己的第 N 次发行
     COCO_BASE="${COCO_VER%%-*}"
     echo -e "版本: ${BLUE}v${COCO_VER}${NC}  （官方 Hermes ${COCO_BASE} 定制版）"
+    # 提交号：出问题时凭它就能对上"到底是哪一次提交"，不必猜版本
+    COCO_COMMIT=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "未知")
+    echo -e "提交: ${BLUE}${COCO_COMMIT}${NC}"
     echo -e "安装目录: ${BLUE}$INSTALL_DIR${NC}"
     echo -e "配置文件: ${BLUE}$INSTALL_DIR/.env${NC}"
     echo ""

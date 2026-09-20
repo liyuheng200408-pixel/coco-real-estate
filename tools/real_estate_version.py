@@ -19,17 +19,31 @@ def _read_first_line(path: Path) -> str:
         return ""
 
 
+def _git_short_commit() -> str:
+    """当前代码的提交短哈希（对上"到底是哪一次提交"，排查时最有用）。"""
+    import subprocess
+
+    try:
+        out = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() or "未知"
+    except Exception:
+        return "未知"
+
+
 def get_coco_version(task_id: str = None) -> str:
     """查询 Coco 当前版本号（含所基于的官方 Hermes 版本）"""
     ver = _read_first_line(REPO_ROOT / "VERSION") or "未知"
     base = ver.split("-")[0] if "-" in ver else ver
     upstream = _read_first_line(REPO_ROOT / "UPSTREAM_VERSION").splitlines()
+    commit = _git_short_commit()
     return json.dumps({
         "success": True,
         "coco_version": ver,
         "hermes_base": base,
+        "commit": commit,
         "upstream_tag": upstream[0] if upstream else None,
-        "message": f"Coco v{ver}（官方 Hermes {base} 定制版）",
+        "message": f"Coco v{ver}（官方 Hermes {base} 定制版）· 提交 {commit}",
     }, ensure_ascii=False)
 
 

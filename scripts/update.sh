@@ -12,12 +12,33 @@
 #   ① 更新前强制备份（可回滚）
 #   ② git 只 pull，绝不跑 git clean（会删 .env.db / 加密密钥）
 #   ③ 迁移只增不删、事务内执行失败回滚（由 scripts/migrate.py 校验器硬约束）
+# 另有两个防混乱的措施（2026-09-21 加）：
+#   · 并发保护：flock 独占锁，同一实例不会同时跑两次更新；
+#   · 结尾打印「版本 + 提交号」，任何一台机器都能对上"到底是哪一次提交"。
 # =============================================================================
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 VENV_PY="$REPO_ROOT/venv/bin/python"
+
+# 并发保护（2026-09-21 加）：同一实例同时跑两次更新会互相踩 —— git 索引锁冲突、
+# 依赖安装与迁移交叠、服务被重复重启。这里用 flock 拿独占锁，拿不到就明确退出。
+# 锁文件是未跟踪文件（不进 git），上面的工作区检查会忽略它。
+if command -v flock >/dev/null 2>&1; then
+    LOCK_FILE="$REPO_ROOT/.coco-update.lock"
+    if exec 9>"$LOCK_FILE"; then
+        if ! flock -n 9; then
+            echo "另一个 Coco 更新正在进行中（锁文件 $LOCK_FILE）—— 等它跑完再执行；"
+            echo "若确认没有任何更新在跑（例如上次被强杀），删除该锁文件后重试即可。"
+            exit 1
+        fi
+    else
+        echo "提示: 无法创建更新锁 $LOCK_FILE，本次跳过并发保护。"
+    fi
+else
+    echo "提示: 系统没有 flock，跳过并发保护（请勿同时跑两次更新）。"
+fi
 
 SKIP_BACKUP=0
 NO_RESTART=0
@@ -201,4 +222,7 @@ COCO_VER=$(cat "$REPO_ROOT/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "未
 # 版本号形如 0.21.3-1：前半段是官方底座，后半段是 Coco 自己的第 N 次发行
 COCO_BASE="${COCO_VER%%-*}"
 echo -e "版本: \033[1;34mv${COCO_VER}\033[0m  （官方 Hermes ${COCO_BASE} 定制版）"
+# 提交号：与安装提示一致，便于任何一台机器对齐"哪一次提交"
+COCO_COMMIT=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "未知")
+echo -e "提交: \033[1;34m${COCO_COMMIT}\033[0m"
 ok "无损更新完成。若本次更新涉及表结构，数据库已通过迁移升级，旧数据全部保留。"

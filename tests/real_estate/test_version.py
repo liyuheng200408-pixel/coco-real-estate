@@ -20,10 +20,10 @@ class TestCocoVersion:
         assert data["hermes_base"] == ver.split("-")[0]
 
     def test_message_is_user_facing_wording(self):
-        """对外措辞统一为「官方 Hermes X 定制版」"""
+        """对外措辞统一为「官方 Hermes X 定制版」，并附提交号（便于对上"哪一次提交"，2026-09-21 加）"""
         import tools.real_estate_version as vmod
         data = json.loads(vmod.get_coco_version())
-        assert re.match(r"^Coco v[\d.]+-\d+（官方 Hermes [\d.]+ 定制版）$", data["message"])
+        assert re.match(r"^Coco v[\d.]+-\d+（官方 Hermes [\d.]+ 定制版）· 提交 [0-9a-f]{6,}$", data["message"]), data["message"]
 
     def test_upstream_tag_reported(self):
         """同时回报所基于的官方 tag（供排查用）"""
