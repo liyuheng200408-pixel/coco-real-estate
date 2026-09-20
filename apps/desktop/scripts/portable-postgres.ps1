@@ -94,7 +94,7 @@ $script:ManagedEnvKeys = @('DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSW
 # 退出码：桌面版按码给不同提示文案
 $script:Exit = @{
     Ok = 0; Usage = 1; Download = 2; BinMissing = 3; InitDb = 4; Start = 5
-    CredLost = 6; SelfTest = 7; Config = 8
+    CredLost = 6; SelfTest = 7; Config = 8; Unexpected = 9
 }
 
 # ============================================================================
@@ -288,23 +288,14 @@ function Get-PgArchive {
         }
         $sw.Stop()
 
-        # 校验：zip 魔数 + 体积下限 —— 防止把错误页/半截文件当安装包解出去
-        if (-not (Test-Path -LiteralPath $part)) { Warn '下载后未找到文件；换下一个源'; continue }
-        $len = (Get-Item -LiteralPath $part).Length
-        $fs = [System.IO.File]::OpenRead($part)
-        $sig = New-Object byte[] 2
-        [void]$fs.Read($sig, 0, 2)
-        $fs.Close()
-        if ($sig[0] -ne 0x50 -or $sig[1] -ne 0x4B) {
-            Warn "文件不是 zip（$len 字节）；换下一个源"
-            Remove-Item -LiteralPath $part -Force
+        # 校验：存在 + 魔数 + 体积下限 + 能打开目录（防错误页/半截文件被当安装包）
+        $st = Get-ZipStatus -Path $part
+        if ($st -ne 'ok') {
+            Warn "下载结果不可用（$st）；换下一个源"
+            Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
             continue
         }
-        if ($len -lt 150MB) {
-            Warn "文件偏小（$([math]::Round($len / 1MB, 1)) MB），可能不完整；换下一个源"
-            Remove-Item -LiteralPath $part -Force
-            continue
-        }
+        $len = (Get-Item -LiteralPath $part -Force).Length
         Move-Item -LiteralPath $part -Destination $Destination -Force
         $mb = [math]::Round($len / 1MB, 1)
         $secs = [math]::Max($sw.Elapsed.TotalSeconds, 0.1)
@@ -312,6 +303,39 @@ function Get-PgArchive {
         return $true
     }
     return $false
+}
+
+function Get-ZipStatus {
+    <#
+      便携包体检：存在 → 体积下限 → zip 魔数 → 目录能打开 → 含 bin/initdb。
+      全是廉价检查（不读全文件），但能挡住三类真实事故：
+        ① 下载中断留下的半截包；② 代理/网关返回的错误页（几十字节 HTML）；
+        ③ 版本/架构不对的包（解出来才发现没有 initdb.exe，用户已经白等十分钟）。
+      只判「文件存在」就解压的写法，会把 .NET 的
+      "End of Central Directory record could not be found" 直接甩给用户（实测）。
+    #>
+    [CmdletBinding()]
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return 'missing' }
+    try { $len = (Get-Item -LiteralPath $Path -Force).Length } catch { return 'missing' }
+    if ($len -lt 150MB) { return "truncated:$([math]::Round($len / 1MB, 1))MB" }
+    $fs = [System.IO.File]::OpenRead($Path)
+    try {
+        $sig = New-Object byte[] 2
+        if ($fs.Read($sig, 0, 2) -lt 2) { return 'notzip' }
+    } finally { $fs.Close() }
+    if ($sig[0] -ne 0x50 -or $sig[1] -ne 0x4B) { return 'notzip' }
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
+        $z = [System.IO.Compression.ZipFile]::OpenRead($Path)
+        try {
+            if ($z.Entries.Count -lt 1000) { return "toofew:$($z.Entries.Count)" }
+            foreach ($e in $z.Entries) {
+                if ($e.FullName -match '(^|/)bin/initdb(\.exe)?$') { return 'ok' }
+            }
+            return 'noinitdb'
+        } finally { $z.Dispose() }
+    } catch { return 'corrupt' }
 }
 
 function Expand-PgArchive {
@@ -378,26 +402,27 @@ function Invoke-Fetch {
         return
     }
 
-    if ($ZipPath) {
-        if (-not (Test-Path -LiteralPath $ZipPath)) { Die "指定的压缩包不存在：$ZipPath" $script:Exit.Download }
-        $zip = $ZipPath
+    # -ZipPath 优先；其次是 COCO_PG_ZIP（安装包内置分发时用，完全离线）
+    $localZip = $ZipPath
+    if (-not $localZip -and $env:COCO_PG_ZIP) { $localZip = $env:COCO_PG_ZIP; Info "使用 COCO_PG_ZIP：$localZip" }
+    if ($localZip) {
+        $st = Get-ZipStatus -Path $localZip
+        if ($st -ne 'ok') { Die "指定的压缩包不可用（$st）：$localZip。请重新下载后再试。" $script:Exit.Download }
+        $zip = $localZip
         Ok "使用本地压缩包：$zip"
     } else {
         $zip = Join-Path ([System.IO.Path]::GetTempPath()) $script:PgZipName
-        # 复用缓存前必须校验：下载中断（国内网络常见）会在 %TEMP% 留下半截文件或错误页，
-        # 只判存在的写法会让之后每次重试都撞在 OpenRead 上抛
-        # 「End of Central Directory record could not be found」，用户无从下手（实测）。
-        if (Test-Path -LiteralPath $zip) {
-            if (Test-PostgresArchive $zip) {
-                Info "复用已下载的压缩包：$zip（要重新下载请先删除它）"
-            } else {
-                Warn "缓存压缩包不可用（$([math]::Round((Get-Item -LiteralPath $zip -Force).Length / 1MB, 1)) MB，不是完整的便携包），已尝试删除并重新下载"
-                Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-                if (Test-Path -LiteralPath $zip) {
-                    # 删不掉（文件被占用 / 权限不足）时也不能拿它去解压：换一个新的缓存文件名
-                    $zip = Join-Path ([System.IO.Path]::GetTempPath()) ("postgresql-$($script:PgVersion)-windows-x64-" + ([Guid]::NewGuid().ToString('N').Substring(0, 8)) + ".zip")
-                    Warn "原缓存文件删不掉，改用新文件下载：$zip"
-                }
+        # 复用缓存前必须校验：下载中断（国内网络常见）会在 %TEMP% 留下半截文件或错误页
+        $st = Get-ZipStatus -Path $zip
+        if ($st -eq 'ok') {
+            Info "复用已下载的压缩包：$zip（要重新下载请先删除它）"
+        } elseif ($st -ne 'missing') {
+            Warn "缓存压缩包不可用（$st），删除后重新下载：$zip"
+            Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $zip) {
+                # 删不掉（被占用 / 权限不足）也不能拿它去解压：换一个新的缓存文件名
+                $zip = Join-Path ([System.IO.Path]::GetTempPath()) ("postgresql-$($script:PgVersion)-windows-x64-" + ([Guid]::NewGuid().ToString('N').Substring(0, 8)) + ".zip")
+                Warn "原缓存文件删不掉，改用新文件下载：$zip"
             }
         }
         if (-not (Test-Path -LiteralPath $zip)) {
@@ -410,34 +435,6 @@ function Invoke-Fetch {
         }
     }
     Expand-PgArchive -ZipFile $zip -Root $script:RDataRoot
-}
-
-function Test-PostgresArchive {
-    <#
-      判断一个文件是不是「看起来完整的便携 PG zip」：zip 魔数 + 体积下限 + 关键条目存在。
-      三条都只是廉价体检（不读全文件），目的是别把错误页/半截包喂给解压器。
-    #>
-    [CmdletBinding()]
-    param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) { return $false }
-    $len = (Get-Item -LiteralPath $Path -Force).Length
-    if ($len -lt 150MB) { return $false }
-    $fs = [System.IO.File]::OpenRead($Path)
-    try {
-        $sig = New-Object byte[] 2
-        if ($fs.Read($sig, 0, 2) -lt 2) { return $false }
-        if ($sig[0] -ne 0x50 -or $sig[1] -ne 0x4B) { return $false }
-    } finally { $fs.Close() }
-    try {
-        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue | Out-Null
-        $probe = [System.IO.Compression.ZipFile]::OpenRead($Path)
-        try {
-            foreach ($e in $probe.Entries) {
-                if ($e.FullName -match '(^|/)bin/initdb(\.exe)?$') { return $true }
-            }
-            return $false
-        } finally { $probe.Dispose() }
-    } catch { return $false }
 }
 
 # ============================================================================
@@ -574,6 +571,7 @@ function Set-ManagedConfBlock {
         'shared_buffers = 128MB'
         'max_connections = 50'
         'logging_collector = off'
+        "unix_socket_directories = ''"
         "log_line_prefix = '%m [%p] '"
         "log_timezone = 'Asia/Shanghai'"
         "timezone = 'Asia/Shanghai'"
@@ -1017,6 +1015,7 @@ function Invoke-ResetPassword {
 # ============================================================================
 Resolve-Config
 
+try {
 switch ($Action) {
     'setup' { Invoke-Setup }
     'fetch' {
@@ -1054,5 +1053,10 @@ switch ($Action) {
         "PATH_PREPEND=$($script:RBindir)"
     }
     'reset-password' { Invoke-ResetPassword }
+}
+} catch {
+    Die ("未预期的错误（$($_.Exception.GetType().Name)）：$($_.Exception.Message)`n" +
+         "位置：$($_.InvocationInfo.PositionMessage)`n" +
+         "请把以上信息发给技术顾问，或删掉 $($script:RDataRoot) 后重跑。") $script:Exit.Unexpected
 }
 exit $script:Exit.Ok

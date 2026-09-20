@@ -32,7 +32,8 @@
 补充约定：
 
 - `.env.db` 里还可能有经纪人的其它配置（`COCO_ENABLE_CRON`、`COCO_CHAT_ID`…）——
-  本机模式的写入必须**只改自己管的 7 个键、其余逐行原样保留**（改坏等于抹掉经纪人自定义）。
+  本机模式的写入**只改自己管的 6 个键（`DB_*` + `DATABASE_URL`），其余逐行原样保留**；
+  `COCO_ENC_KEY` 只在缺失时补一个，已存在绝不覆盖（改坏等于抹掉经纪人自定义，或让旧数据解不开）。
 - 文件权限：`install.sh` 用 `chmod 600`；Windows 等价物是去掉继承、只授权当前用户。
 - 任何读取方都遵循「环境变量 `DATABASE_URL` > 文件」的优先级。
 
@@ -60,13 +61,20 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 | `-DataDir` | `%LOCALAPPDATA%\hermes\pgsql-data` | PGDATA |
 | `-EnvFile` | `<HermesHome>\hermes-agent\.env.db` | 写连接串的目标 |
 | `-PgBinDir` | 空 | 用已有 PG 的 bin（离线内置 / 非 Windows 等价验证） |
-| `-ZipPath` / `COCO_PG_ZIP` | 空 | 本地 zip（安装包内置分发，不联网） |
+| `-ZipPath` / `COCO_PG_ZIP` | 空 | 本地 zip（安装包内置分发，不联网；`COCO_PG_ZIP` 供安装器设环境变量） |
 | `COCO_PG_MIRROR` | 空 | 自建镜像前缀（Gitee Release 附件等），排在官方源之前 |
 | `-Port` / `-DbUser` / `-DbName` | 0 / `hermes` / `hermes_agent` | 覆盖 |
 | `-Json` | 关 | 机器可读输出（`status`/`setup`） |
 
 退出码（桌面版据此给不同提示）：`0` 成功 · `1` 用法 · `2` 下载失败 · `3` 二进制缺失 ·
-`4` initdb 失败 · `5` 启动失败 · `6` 数据目录在但凭据丢失 · `7` 自检未通过 · `8` 配置错误。
+`4` initdb 失败 · `5` 启动失败 · `6` 数据目录在但凭据丢失 · `7` 自检未通过 · `8` 配置错误 ·
+`9` 未预期错误（已包装成可读文本，附位置信息）。
+
+`-Action selftest` 逐项检查并返回 `0/7`，检查项：可执行文件齐全 · `PG_VERSION` 主版本 ·
+只监听 `127.0.0.1`（且块外无覆盖）· 端口/状态文件/`DATABASE_URL` 三处自洽 ·
+`pg_hba` 仅回环 + scram · 服务可连 · **非回环地址连不上**（只监听回环的实证）·
+正确口令可连且错误口令被拒 · 业务库存在 · `.env.db` 权限仅当前用户 ·
+`pg_dump` 能连通业务库。
 
 状态文件 `<DataDir>\coco-pg.json`：端口、库名、用户、安装根、版本、时间戳 —— **不放口令**
 （口令只在 `.env.db`，单一秘密存放点）。
@@ -135,9 +143,12 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 
 ### 2.6 安全边界（保持不变的口径）
 
-只监听 `127.0.0.1`；`pg_hba.conf` 只放行 `127.0.0.1/32`（+`::1/128`）且强制
-`scram-sha-256`；口令随机、只存 `.env.db`（限当前用户可读）；`unix_socket_directories`
-置空，集群不往数据目录之外写任何文件；不注册系统服务、不需要管理员权限。
+只监听 `127.0.0.1`（IPv4 回环；**不监听 `::1`**，避免 `localhost` 解析到 IPv6 造成连不上）；
+`pg_hba.conf` 只放行 `127.0.0.1/32` 且强制 `scram-sha-256`（无 trust、无 LAN、无公网）；
+口令 32 位随机、只存 `.env.db`（限当前用户可读）、状态文件里不放口令；
+`unix_socket_directories = ''`（不额外开 unix socket）；
+体积最小化：便携包只解 `bin/lib/share`（119.7MB，而非 906MB），
+不注册系统服务、不需要管理员权限。
 
 ---
 
@@ -148,3 +159,38 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 - 管理员账户下 `pg_ctl` 用受限令牌拉起 `postgres.exe`（不需要提权，这是 PG 在 Windows 的既定行为）；
 - 任务计划程序自启、与桌面版进程的退出联动；
 - `install.ps1` 里本机 PG stage 的接线。
+
+---
+
+## 四、验证记录（可复跑）
+
+### 4.1 Linux 等价验证（本仓库内可复跑的脚本）
+
+```bash
+# 需要：非 root 用户（initdb 拒绝 root）、pwsh 7、系统 PostgreSQL、一个装了
+# sqlalchemy/psycopg2-binary/cryptography 的 venv（脚本第 6 步会真的建表）
+mkdir -p /tmp/coco-pg-e2e && uv venv /tmp/coco-pg-e2e/venv
+uv pip install --python /tmp/coco-pg-e2e/venv/bin/python sqlalchemy psycopg2-binary cryptography
+PWSH=pwsh PG_BIN=/usr/lib/postgresql/16/bin WORK=/tmp/coco-pg-e2e \
+  bash apps/desktop/scripts/tests/portable-postgres-linux-e2e.sh
+```
+
+覆盖：首次安装与连接串自洽 / 幂等（端口·口令·数据目录·数据行都不动）/ 自检 /
+端口冲突自动改选并同步 `.env.db` / 凭据丢失报错与 `reset-password` 恢复 /
+`status`·`print-env` 机器可读输出 / 停止后重启。
+
+### 4.2 实测结论（本机 Ubuntu 24.04 + PostgreSQL 16.15，同一个脚本文件）
+
+- **60 项断言全通过**（含「非回环地址 `192.3.0.245` 连不上」「错误口令被拒」）。
+- 真实 `agent/real_estate_db.py`（sha256 `c9155be2…`）在便携 PG 上建出 **12 张 `re_` 表**。
+- 首次安装后 `.env.db` 的 `DATABASE_URL` 可直接被 `psql` 连上（不是只有 Python 能连）。
+- 重复 `setup`：端口/口令/连接串不变、`PG_VERSION` 时间戳不变、业务行仍在；
+  `postgresql.conf` 的托管块始终只有 1 份（重复写入是替换而非追加）。
+- 端口被别的进程占用时自动改选新端口并同步 `.env.db`；再跑一次端口稳定不变。
+
+### 4.3 便携包解出（用真实 338.7MB Windows 发行包验证过筛选逻辑）
+
+- `postgresql-16.4-1-windows-x64-binaries.zip`：22649 项 → **只解出 1627 项 / 119.7MB**；
+  `pgAdmin 4`(615.9MB)、`symbols`(155.6MB)、`doc`、`include`、`StackBuilder` 全部被排除。
+- 校验函数 `Get-ZipStatus` 的判定顺序：存在 → ≥150MB → zip 魔数 → 目录可读 → 含 `bin/initdb`；
+  缓存文件不合格会被删除并重新下载（不会把半截包喂给解压器）。
