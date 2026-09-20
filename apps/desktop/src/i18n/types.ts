@@ -230,6 +230,19 @@ export interface Translations {
       signInToRemoteGateway: string
       signInWithProvider: (provider: string) => string
       identityProvider: string
+      // COCO-PATCH: 本机模式的「便携数据库准备失败」文案（按引导脚本退出码分流），
+      // 解析逻辑在 src/components/boot-failure-local-db.ts
+      localDb: {
+        title: string
+        downloadFailed: string
+        binMissing: string
+        startFailed: string
+        credentialsLost: string
+        selfTestFailed: string
+        configInvalid: string
+        unexpected: string
+        hint: (logPath: string) => string
+      }
     }
   }
 

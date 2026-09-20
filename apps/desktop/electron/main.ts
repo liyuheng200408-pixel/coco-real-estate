@@ -60,7 +60,7 @@ import { createBackendConnectionState } from './backend-connection-state'
 import { BackendDialClaims } from './backend-dial-claim'
 import { buildDesktopBackendEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot } from './backend-env'
 // COCO-PATCH: 本机模式的便携 PostgreSQL（连接串注入 + 引导脚本调用），见 portable-postgres.ts
-import { readDatabaseUrlFromEnvFile, runLocalPostgresSetup } from './portable-postgres'
+import { readDatabaseUrlFromEnvFile, runLocalBackupRegister, runLocalPostgresSetup } from './portable-postgres'
 import { isReauthRequiredError, waitForHermesReady } from './backend-health'
 import { backendCommandMatches, createBackendOwnership, createBackendShutdownCoordinator } from './backend-ownership'
 import {
@@ -5247,17 +5247,56 @@ function ensureLocalPostgres() {
       .then(result => {
         rememberLog(`[postgres] ${result.ok ? 'ready' : 'setup failed'}: ${result.message}`)
 
-        if (!result.ok && result.exitCode !== null) {
-          localPostgresSetup = null
+        if (result.ok) {
+          // 数据库就绪后把「每日备份」注册上（幂等）。失败只记日志：没有自动备份
+          // 是件要修的事，但不该让整个 App 起不来 —— 用户还能手动备份/导出。
+          void runLocalBackupRegister({
+            hermesHome: HERMES_HOME,
+            installDir: ACTIVE_HERMES_ROOT,
+            repoRoot: SOURCE_REPO_ROOT || ACTIVE_HERMES_ROOT
+          })
+            .then(backup => rememberLog(`[postgres] backup schedule: ${backup.message}`))
+            .catch(error => rememberLog(`[postgres] backup schedule failed: ${error.message}`))
+
+          return result
         }
 
-        return result
+        // 失败就明确停下来并把原因带上去：本机模式下后端没有数据库必然起不来，
+        // 让它以「未配置 DATABASE_URL」这种晦涩方式失败，不如直接告诉经纪人
+        // 发生了什么、下一步点哪里（启动失败界面会按 localDbExitCode 选文案）。
+        // 清掉缓存：点「重试」时会重新准备（例如用户先修好了网络）。
+        localPostgresSetup = null
+
+        const logPath = path.join(HERMES_HOME, 'pgsql-data', 'coco-postgres.log')
+        const postgresError = new Error(
+          `Local database setup failed` +
+            `${result.exitCode === null || result.exitCode === undefined ? '' : ` (exit ${result.exitCode})`}: ` +
+            `${result.message} Database log: ${logPath}`
+        ) as any
+        postgresError.isBootstrapFailure = true
+        postgresError.localDbExitCode = typeof result.exitCode === 'number' ? result.exitCode : 9
+        postgresError.localDbLogPath = logPath
+        bootstrapFailure = postgresError
+
+        throw postgresError
       })
       .catch(error => {
+        // 上面自己抛的错已经是「给用户看的」，别再包一层；其余（spawn 异常等）同样抬上去
         rememberLog(`[postgres] setup threw: ${error.message}`)
         localPostgresSetup = null
 
-        return null
+        if (error?.isBootstrapFailure) {
+          throw error
+        }
+
+        const logPath = path.join(HERMES_HOME, 'pgsql-data', 'coco-postgres.log')
+        const wrapped = new Error(`Local database setup failed: ${error.message} Database log: ${logPath}`) as any
+        wrapped.isBootstrapFailure = true
+        wrapped.localDbExitCode = 9
+        wrapped.localDbLogPath = logPath
+        bootstrapFailure = wrapped
+
+        throw wrapped
       })
   }
 

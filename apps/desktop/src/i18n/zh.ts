@@ -179,7 +179,21 @@ export const zh = defineLocale({
       signInFailed: '登录失败',
       signInToRemoteGateway: '登录远程网关',
       signInWithProvider: provider => `使用 ${provider} 登录`,
-      identityProvider: '你的身份提供方'
+      identityProvider: '你的身份提供方',
+      // COCO-PATCH: 本机模式的便携数据库准备失败（按退出码分流）
+      localDb: {
+        title: '本机数据库没能启动',
+        downloadFailed:
+          '本机数据库组件下载失败。请检查网络后重试；如果一直失败，可以先改用「连接服务器」模式。',
+        binMissing: '本机数据库组件不完整，请点「修复安装」重新补齐。',
+        startFailed: '本机数据库无法启动。请点「打开日志」，把最后几行发给我们。',
+        credentialsLost:
+          '检测到已有的数据库，但凭据文件不见了。请从备份恢复 .env.db，或点「重置口令」——数据不会丢。',
+        selfTestFailed: '本机数据库自检没通过。为避免数据错乱，机器人没有启动。',
+        configInvalid: '本机数据库的配置被改过（监听地址或端口），请点「修复安装」。',
+        unexpected: '本机数据库出现未预期的错误。请点「打开日志」，把最后几行发给我们。',
+        hint: (logPath: string) => (logPath ? `数据库日志：${logPath}` : '点「打开日志」可以看到数据库的输出。')
+      }
     }
   },
 

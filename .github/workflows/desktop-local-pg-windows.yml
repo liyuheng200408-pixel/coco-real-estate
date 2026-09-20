@@ -39,6 +39,12 @@ jobs:
         shell: pwsh
         run: $PSVersionTable | Out-String
 
+      # 备份链路要用 python 跑仓库里的 scripts/backup_db.py（只用标准库）
+      - name: Set up Python for the backup script
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       # 下载单独成步：把「网络问题」和「脚本逻辑问题」分开，失败时一眼看出是哪种。
       # 带 --speed-limit/--speed-time：源被限速就 60 秒内失败，而不是静默挂半小时。
       - name: Pre-download the portable PostgreSQL archive (visible progress)
@@ -78,7 +84,7 @@ jobs:
           $log = Join-Path $env:RUNNER_TEMP 'selfcheck-output.log'
           $proc = Start-Process -FilePath 'pwsh' -ArgumentList @(
             '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script, '-KeepGoing',
-            '-ZipPath', '${{ steps.download.outputs.zip }}'
+            '-SkipBackupCheck', '-ZipPath', '${{ steps.download.outputs.zip }}'
           ) -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
 
           $seen = 0
@@ -154,6 +160,46 @@ jobs:
           if ($reached) { throw "端口 $port 在 $lan 上也能连上（应只监听回环）" }
           "OK: $lan`:$port 连不上（只监听回环）" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
 
+      # 备份链路真机验证：注册计划任务（会立刻跑一次备份）→ 校验 dump/密钥/任务都在。
+      - name: Daily backup registers and produces a usable dump (real Windows)
+        shell: pwsh
+        env:
+          HERMES_HOME: ${{ runner.temp }}\hermes
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $install = $env:GITHUB_WORKSPACE
+          # local-backup 需要 <InstallDir>\venv\Scripts\python.exe 与 <InstallDir>\scripts\backup_db.py，
+          # 所以用一个真 venv + 把生成的 .env.db 放到安装目录（与线上安装的布局一致）
+          python -m venv "$install\venv"
+          Copy-Item (Join-Path $env:HERMES_HOME 'hermes-agent\.env.db') (Join-Path $install '.env.db') -Force
+
+          $script = 'apps/desktop/scripts/local-backup.ps1'
+          $out = & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $script -Action register `
+              -InstallDir $install -DataRoot (Join-Path $env:HERMES_HOME 'pgsql') -BackupDir (Join-Path $env:RUNNER_TEMP 'backups') 2>&1
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          if ($code -ne 0) { throw "备份注册/执行失败（退出码 $code）" }
+
+          $dir = Join-Path $env:RUNNER_TEMP 'backups'
+          $dump = Get-ChildItem $dir -Filter '*.dump' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $dump -or $dump.Length -le 0) { throw '没有生成有效的 dump' }
+          "OK: dump $($dump.Name)（$($dump.Length) 字节）" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
+          foreach ($f in @('enc_key.txt', 'env.db.bak')) {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "备份里缺少 $f" }
+          }
+          "OK: enc_key.txt + env.db.bak 都在" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
+          $q = & schtasks.exe /Query /TN 'Coco-LocalDatabase-Backup' 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "计划任务未注册：$q" }
+          "OK: 计划任务已注册（schtasks /Query 通过）" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
+          $st = & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $script -Action status `
+              -InstallDir $install -DataRoot (Join-Path $env:HERMES_HOME 'pgsql') -BackupDir $dir 2>&1
+          $st | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { throw '备份 status 判定为非正常' }
+          "OK: 备份 status 正常" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
       # 退出前把数据库停掉：既是最干净的收尾，也避免常驻的 postgres 继续攥着
       # 继承来的句柄让 runner 收尾时干等。
       - name: Stop the portable database
@@ -179,7 +225,9 @@ jobs:
           foreach ($p in @(
               (Join-Path $env:RUNNER_TEMP 'summary.txt'),
               (Join-Path $env:HERMES_HOME 'pgsql-logs\selfcheck-*.txt'),
-              (Join-Path $env:HERMES_HOME 'pgsql-data\coco-postgres.log'))) {
+              (Join-Path $env:HERMES_HOME 'pgsql-data\coco-postgres.log'),
+              (Join-Path $env:RUNNER_TEMP 'backups\enc_key.txt'),
+              (Join-Path $env:RUNNER_TEMP 'backups\env.db.bak'))) {
             Copy-Item -Path $p -Destination $dest -ErrorAction SilentlyContinue -Force
           }
           Get-ChildItem -Path $dest -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table | Out-String | Write-Host

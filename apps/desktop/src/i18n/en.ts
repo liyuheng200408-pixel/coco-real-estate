@@ -189,7 +189,24 @@ export const en: Translations = {
       signInFailed: 'Sign-in failed',
       signInToRemoteGateway: 'Sign in to remote gateway',
       signInWithProvider: provider => `Sign in with ${provider}`,
-      identityProvider: 'your identity provider'
+      identityProvider: 'your identity provider',
+      // COCO-PATCH: local mode runs its own PostgreSQL; each bootstrap exit code gets
+      // its own wording + next step (see src/components/boot-failure-local-db.ts).
+      localDb: {
+        title: "Coco's local database couldn't start",
+        downloadFailed:
+          'The local database package could not be downloaded. Check your network and retry; if it keeps failing, switch to the "connect to a server" mode instead.',
+        binMissing: 'The local database package is incomplete. Choose "Repair install" to fetch it again.',
+        startFailed: 'The local database would not start. Open the logs and send us the last few lines.',
+        credentialsLost:
+          'An existing database was found, but its credentials file is missing. Restore .env.db from a backup, or reset the password — your data is kept.',
+        selfTestFailed:
+          'The local database failed its self-check. To avoid inconsistent data, Coco did not start the bot.',
+        configInvalid: 'The local database configuration was modified (listen address or port). Choose "Repair install".',
+        unexpected: 'The local database hit an unexpected error. Open the logs and send us the last few lines.',
+        hint: (logPath: string) =>
+          logPath ? `Database log: ${logPath}` : 'Open the logs to see the database output.'
+      }
     }
   },
 
