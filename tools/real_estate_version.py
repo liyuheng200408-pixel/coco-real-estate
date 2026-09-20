@@ -19,6 +19,27 @@ def _read_first_line(path: Path) -> str:
         return ""
 
 
+def _git_branch() -> str:
+    """当前分支（用于区分稳定通道 / 测试通道）。"""
+    import subprocess
+
+    try:
+        out = subprocess.run(["git", "-C", str(REPO_ROOT), "branch", "--show-current"],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _channel_label() -> str:
+    branch = _git_branch()
+    if branch == "master":
+        return "稳定通道"
+    if branch == "next":
+        return "测试通道"
+    return "自定义通道" if branch else "未知通道"
+
+
 def _git_short_commit() -> str:
     """当前代码的提交短哈希（对上"到底是哪一次提交"，排查时最有用）。"""
     import subprocess
@@ -37,13 +58,16 @@ def get_coco_version(task_id: str = None) -> str:
     base = ver.split("-")[0] if "-" in ver else ver
     upstream = _read_first_line(REPO_ROOT / "UPSTREAM_VERSION").splitlines()
     commit = _git_short_commit()
+    channel = _channel_label()
     return json.dumps({
         "success": True,
         "coco_version": ver,
         "hermes_base": base,
         "commit": commit,
+        "channel": channel,
+        "branch": _git_branch(),
         "upstream_tag": upstream[0] if upstream else None,
-        "message": f"Coco v{ver}（官方 Hermes {base} 定制版）· 提交 {commit}",
+        "message": f"Coco v{ver}（官方 Hermes {base} 定制版）· 提交 {commit} · {channel}",
     }, ensure_ascii=False)
 
 

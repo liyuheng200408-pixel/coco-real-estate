@@ -40,6 +40,24 @@ else
     echo "提示: 系统没有 flock，跳过并发保护（请勿同时跑两次更新）。"
 fi
 
+# 通道（稳定版 master / 测试版 next，2026-09-21 加）：老板的测试机停在 next 分支，
+# 别人的机器停在 master —— 同一条更新命令各自拉自己的通道，详见 scripts/coco_channel.sh。
+# 需要切换时：环境变量 COCO_CHANNEL=next，或在仓库根写一个 .coco-channel 文件。
+CHANNEL_SCRIPT="$REPO_ROOT/scripts/coco_channel.sh"
+CUR_BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || echo '')"
+if [[ -f "$CHANNEL_SCRIPT" ]]; then
+    WANT_BRANCH="$(bash "$CHANNEL_SCRIPT" want 2>/dev/null || echo "$CUR_BRANCH")"
+    if [[ -n "$WANT_BRANCH" && "$WANT_BRANCH" != "$CUR_BRANCH" ]]; then
+        info "切换通道：${CUR_BRANCH:-游离} → $WANT_BRANCH"
+        bash "$CHANNEL_SCRIPT" switch "$WANT_BRANCH" >/dev/null || fail "切换通道失败（工作区有未提交改动，或网络不通）"
+        CUR_BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || echo '')"
+    fi
+    CHANNEL_LABEL="$(bash "$CHANNEL_SCRIPT" label "$CUR_BRANCH" 2>/dev/null || echo '自定义通道')"
+else
+    CHANNEL_LABEL="稳定通道"
+fi
+info "当前通道：$CHANNEL_LABEL（分支 ${CUR_BRANCH:-游离}）"
+
 SKIP_BACKUP=0
 NO_RESTART=0
 for arg in "$@"; do
@@ -225,4 +243,5 @@ echo -e "版本: \033[1;34mv${COCO_VER}\033[0m  （官方 Hermes ${COCO_BASE} �
 # 提交号：与安装提示一致，便于任何一台机器对齐"哪一次提交"
 COCO_COMMIT=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "未知")
 echo -e "提交: \033[1;34m${COCO_COMMIT}\033[0m"
+echo -e "通道: \033[1;34m${CHANNEL_LABEL}\033[0m"
 ok "无损更新完成。若本次更新涉及表结构，数据库已通过迁移升级，旧数据全部保留。"

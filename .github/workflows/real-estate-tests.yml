@@ -3,7 +3,7 @@ name: Real Estate Tests
 # Coco 房产模块专用 CI：只测房产代码，与上游 Hermes CI 互不干扰
 on:
   push:
-    branches: [master]
+    branches: [master, next]
     paths:
       - 'tools/real_estate_*'
       - 'agent/real_estate_*'

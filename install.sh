@@ -11,11 +11,13 @@ set -euo pipefail
 
 # ==================== 配置 ====================
 # 双源配置：Gitee（国内快）+ GitHub（海外稳定），自动切换
+# 通道：默认装稳定版(master)；装测试版用 COCO_CHANNEL=next bash install.sh
+COCO_CHANNEL="${COCO_CHANNEL:-master}"
 GITEE_RAW_URL="https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh"
 GITEE_REPO_URL="https://gitee.com/liyuheng200408/coco-real-estate.git"
-GITEE_ZIP_URL="https://gitee.com/liyuheng200408/coco-real-estate/repository/archive/master.zip"
+GITEE_ZIP_URL="https://gitee.com/liyuheng200408/coco-real-estate/repository/archive/${COCO_CHANNEL}.zip"
 GITHUB_REPO_URL="https://github.com/liyuheng200408-pixel/coco-real-estate.git"
-GITHUB_ZIP_URL="https://github.com/liyuheng200408-pixel/coco-real-estate/archive/refs/heads/master.zip"
+GITHUB_ZIP_URL="https://github.com/liyuheng200408-pixel/coco-real-estate/archive/refs/heads/${COCO_CHANNEL}.zip"
 INSTALL_DIR="$HOME/hermes-agent"
 SERVICE_NAME="hermes-agent"   # 旧版自建系统服务的名字，仅用于安装时清理残留；现统一用官方用户服务 hermes-gateway
 
@@ -238,10 +240,10 @@ make_instance_updatable() {
         cd "$INSTALL_DIR" || exit 1
         git remote remove origin >/dev/null 2>&1 || true
         git remote add origin "$url" >/dev/null 2>&1 || true
-        git fetch -q --depth=1 origin master >/dev/null 2>&1 || exit 1
-        git checkout -q -B master FETCH_HEAD >/dev/null 2>&1 || git reset -q --hard FETCH_HEAD >/dev/null 2>&1 || exit 1
-        git config branch.master.remote origin
-        git config branch.master.merge refs/heads/master
+        git fetch -q --depth=1 origin "$COCO_CHANNEL" >/dev/null 2>&1 || exit 1
+        git checkout -q -B "$COCO_CHANNEL" FETCH_HEAD >/dev/null 2>&1 || git reset -q --hard FETCH_HEAD >/dev/null 2>&1 || exit 1
+        git config "branch.$COCO_CHANNEL.remote" origin
+        git config "branch.$COCO_CHANNEL.merge" "refs/heads/$COCO_CHANNEL"
     ) && ok "已关联更新源，该实例可直接用一键更新命令" \
       || warn "未能关联更新源（不影响使用，但一键更新会失败）"
     return 0
@@ -257,21 +259,21 @@ clone_project() {
     src=$(probe_source)
     case "$src" in
         gitee)
-            git clone "$GITEE_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
+            git clone --branch "$COCO_CHANNEL" "$GITEE_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
                 warn "git clone 失败，改用 zip 包..."
                 curl -fsSL "$GITEE_ZIP_URL" -o /tmp/coco.zip
                 unzip -q /tmp/coco.zip -d /tmp/
-                mv /tmp/coco-real-estate-master "$INSTALL_DIR"
+                mv "/tmp/coco-real-estate-$COCO_CHANNEL" "$INSTALL_DIR"
                 rm -f /tmp/coco.zip
                 make_instance_updatable "$GITEE_REPO_URL"
             }
             ;;
         github)
-            git clone "$GITHUB_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
+            git clone --branch "$COCO_CHANNEL" "$GITHUB_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
                 warn "git clone 失败，改用 zip 包..."
                 curl -fsSL "$GITHUB_ZIP_URL" -o /tmp/coco.zip
                 unzip -q /tmp/coco.zip -d /tmp/
-                mv /tmp/coco-real-estate-master "$INSTALL_DIR"
+                mv "/tmp/coco-real-estate-$COCO_CHANNEL" "$INSTALL_DIR"
                 rm -f /tmp/coco.zip
                 make_instance_updatable "$GITHUB_REPO_URL"
             }
@@ -580,6 +582,12 @@ print_result() {
     # 提交号：出问题时凭它就能对上"到底是哪一次提交"，不必猜版本
     COCO_COMMIT=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "未知")
     echo -e "提交: ${BLUE}${COCO_COMMIT}${NC}"
+    case "$COCO_CHANNEL" in
+        master) COCO_CHANNEL_LABEL="稳定版" ;;
+        next)   COCO_CHANNEL_LABEL="测试版" ;;
+        *)      COCO_CHANNEL_LABEL="自定义版本" ;;
+    esac
+    echo -e "通道: ${BLUE}${COCO_CHANNEL_LABEL}（分支 ${COCO_CHANNEL}）${NC}"
     echo -e "安装目录: ${BLUE}$INSTALL_DIR${NC}"
     echo -e "配置文件: ${BLUE}$INSTALL_DIR/.env${NC}"
     echo ""
