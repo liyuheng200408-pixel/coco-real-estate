@@ -6,7 +6,9 @@
 
 覆盖检查项:
     1. 安装目录与代码版本（是否落后远程）
-    2. hermes-gateway 服务状态（用户服务，备选 hermes-agent 系统服务）
+    2. 服务状态 —— Linux: hermes-gateway 用户服务（备选 hermes-agent 系统服务）；
+       Windows 本机模式: 便携 PostgreSQL 是否在跑 + 有没有 Hermes 相关进程
+       （Windows 没有 systemd，照 Linux 口径查会把正常部署判成故障）
     3. Python 依赖（ddgs 缺失 = web_search 对模型不可见）
     4. web_search 后端可用性（Coco 能否联网查政策）
     5. 数据库连接与数据量
@@ -15,20 +17,41 @@
     8. 备份新鲜度（最新 dump 是否 <48h，2026-08-12 加）
     9. 定时任务注册（早报/午间/逾期 3 个，默认关闭属预期）
     10. 技能同步
-    11. 磁盘空间
-    12. 网关运行期日志错误（已排除"重启导致飞书长连接正常断开"的噪音）
-    13. 服务器时区（应为 Asia/Shanghai，时间显示统一为北京时间）
+    11. 磁盘空间（Linux 用 df，Windows 用 shutil 直接问系统）
+    12. 网关运行期日志错误（已排除"重启导致飞书长连接正常断开"的噪音；
+       Windows 读 %LOCALAPPDATA%\\hermes\\logs\\desktop.log，没有 journalctl）
+    13. 系统时区（应为 Asia/Shanghai；Windows 用 tzutil /g 并把时区名归一化）
     14. Coco 运行时配置（轮次 500 / 压缩阈值 0.8 / 保留最近 40 条 / 时区北京时间）
 
 退出码: 0 = 全部通过/仅警告; 1 = 存在 FAIL 项
 """
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import time
 
-INSTALL_DIR = os.environ.get("HERMES_AGENT_DIR", os.path.expanduser("~/hermes-agent"))
+IS_WINDOWS = sys.platform.startswith("win")
+
+# 平台相关的决策（默认路径 / 服务探针 / 时区归一化 / 日志噪音过滤）都在 healthcheck_lib 里，
+# 纯函数、有单测；这里只负责「按平台去执行」。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from healthcheck_lib import (  # noqa: E402
+    TARGET_TZ,
+    parse_tzutil,
+    platform_defaults,
+    python_in_venv,
+    scan_gateway_log as _scan_gateway_log,
+    service_probe_plan,
+    timezone_fix_command,
+    windows_database_status_command,
+    windows_log_paths,
+    windows_process_command,
+)
+
+_DEFAULT_INSTALL, _DEFAULT_HOME = platform_defaults(sys.platform, os.environ)
+INSTALL_DIR = os.environ.get("HERMES_AGENT_DIR", _DEFAULT_INSTALL)
 # 主服务是官方 hermes gateway install 生成的用户服务 hermes-gateway —— 真正连飞书的就是它
 # （2026-09-16 老板重装实测：重启系统服务 hermes-agent 机器人无响应，重启这个才响应）。
 # 备选是旧版 install.sh 自建的系统服务 hermes-agent，兼容尚未收口的老部署。
@@ -37,7 +60,7 @@ SERVICE = "hermes-gateway"
 SERVICE_USER = True  # 用户服务需 systemctl --user
 SERVICE_FALLBACK = "hermes-agent"  # 旧版自建系统服务
 SERVICE_FALLBACK_USER = False
-HERMES_HOME = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
+HERMES_HOME = os.environ.get("HERMES_HOME", _DEFAULT_HOME)
 
 PASS = FAIL = WARN = 0
 
@@ -127,34 +150,62 @@ else:
 # ---- 2. 服务状态 ----
 print("\n[2] 服务状态")
 _user = "--user " if SERVICE_USER else ""
-rc, _ = sh(f"systemctl {_user}is-active --quiet {SERVICE}")
-if rc:
-    rc2, since = sh(f"systemctl {_user}show -p ActiveEnterTimestamp --value {SERVICE}")
-    since_cn = to_beijing(since) if (rc2 and since) else ""
-    ok(f"服务 {SERVICE} 运行中" + (f"（自 {since_cn}，北京时间）" if since_cn else ""))
-else:
-    # 主服务未运行，查备选系统服务（旧版 install.sh 自建的那个）
-    _fb_user = "--user " if SERVICE_FALLBACK_USER else ""
-    rc3, _ = sh(f"systemctl {_fb_user}is-active --quiet {SERVICE_FALLBACK}")
-    if rc3:
-        rc4, since2 = sh(f"systemctl {_fb_user}show -p ActiveEnterTimestamp --value {SERVICE_FALLBACK}")
-        warn(
-            f"主服务 {SERVICE}（用户服务）未运行，但备选 {SERVICE_FALLBACK}（旧版系统服务）运行中",
-            f"推荐统一用 {SERVICE}：systemctl --user restart {SERVICE}；"
-            f"若两者并存会互相抢 bot token（2026-08-12 事故），停掉一个",
-        )
-        if rc4 and since2:
-            print(f"        {SERVICE_FALLBACK} 自 {since2} 运行")
-    else:
+
+if service_probe_plan(sys.platform) == "windows-local":
+    # Windows 本机模式没有 systemd：真正会让 Coco 失灵的是「便携数据库没在跑」，
+    # 其次才是「应用/网关进程不在」。按这两件事如实报，不用 Linux 的口径误报。
+    pg_ctl, pg_data = windows_database_status_command(HERMES_HOME)
+    _db_up = False
+    if os.path.isfile(pg_ctl) and os.path.isdir(pg_data):
+        _db_rc, _ = sh(f'"{pg_ctl}" -D "{pg_data}" status')
+        _db_up = bool(_db_rc)
+    _proc_rc, _procs = sh(windows_process_command())
+    _proc_lines = [l for l in (_procs or "").splitlines() if l.strip()]
+    if _db_up:
+        ok("本机数据库在运行（便携 PostgreSQL）")
+    elif os.path.isfile(pg_ctl):
         bad(
-            f"服务 {SERVICE}（用户服务）与 {SERVICE_FALLBACK}（旧版系统服务）均未运行",
-            f"先 hermes gateway install 再 systemctl --user start {SERVICE}；"
-            f"查看状态: systemctl --user status {SERVICE}",
+            "本机数据库未在运行（便携 PostgreSQL）",
+            f'启动：pwsh -File "$env:LOCALAPPDATA\\hermes\\hermes-agent\\apps\\desktop\\scripts\\portable-postgres.ps1" -Action start',
         )
+    else:
+        warn("未安装便携数据库（这台机器可能用的是「连接服务器」模式）")
+    if _proc_lines:
+        ok(f"检测到 {len(_proc_lines)} 个 Hermes/数据库相关进程")
+    else:
+        warn(
+            "没有检测到 Hermes 相关进程",
+            "桌面版本机模式下：应用关闭 = 机器人离线（数据仍在，重开即恢复）",
+        )
+else:
+    rc, _ = sh(f"systemctl {_user}is-active --quiet {SERVICE}")
+    if rc:
+        rc2, since = sh(f"systemctl {_user}show -p ActiveEnterTimestamp --value {SERVICE}")
+        since_cn = to_beijing(since) if (rc2 and since) else ""
+        ok(f"服务 {SERVICE} 运行中" + (f"（自 {since_cn}，北京时间）" if since_cn else ""))
+    else:
+        # 主服务未运行，查备选系统服务（旧版 install.sh 自建的那个）
+        _fb_user = "--user " if SERVICE_FALLBACK_USER else ""
+        rc3, _ = sh(f"systemctl {_fb_user}is-active --quiet {SERVICE_FALLBACK}")
+        if rc3:
+            rc4, since2 = sh(f"systemctl {_fb_user}show -p ActiveEnterTimestamp --value {SERVICE_FALLBACK}")
+            warn(
+                f"主服务 {SERVICE}（用户服务）未运行，但备选 {SERVICE_FALLBACK}（旧版系统服务）运行中",
+                f"推荐统一用 {SERVICE}：systemctl --user restart {SERVICE}；"
+                f"若两者并存会互相抢 bot token（2026-08-12 事故），停掉一个",
+            )
+            if rc4 and since2:
+                print(f"        {SERVICE_FALLBACK} 自 {since2} 运行")
+        else:
+            bad(
+                f"服务 {SERVICE}（用户服务）与 {SERVICE_FALLBACK}（旧版系统服务）均未运行",
+                f"先 hermes gateway install 再 systemctl --user start {SERVICE}；"
+                f"查看状态: systemctl --user status {SERVICE}",
+            )
 
 # ---- 3. Python 依赖 ----
 print("\n[3] Python 依赖")
-PY = os.environ.get("COCO_PYTHON", os.path.join(INSTALL_DIR, "venv", "bin", "python"))
+PY = os.environ.get("COCO_PYTHON", python_in_venv(INSTALL_DIR))
 missing = []
 for pkg in ("ddgs", "PIL", "qrcode", "lark_oapi", "sqlalchemy", "psycopg2", "cryptography", "apscheduler"):
     if importlib.util.find_spec(pkg) is None:
@@ -179,7 +230,8 @@ if ws_state == "OK":
     ok("web_search 后端可用，Coco 可联网查最新政策")
 elif ws_state == "NO":
     bad("web_search 不可用（未检测到搜索后端），Coco 只能回复'未收录'",
-        "确认 ddgs 已装: pip show ddgs; 再重启: systemctl --user restart hermes-gateway.service")
+        "确认 ddgs 已装: pip show ddgs; 再重启服务"
+        + ("" if IS_WINDOWS else ": systemctl --user rerestart hermes-gateway.service"))
 else:
     warn(f"web_search 检查异常: {ws_state}", "把以下日志发技术顾问")
 
@@ -204,7 +256,12 @@ except Exception as ex:
     if rc and out.startswith("OK"):
         ok(f"数据库连接正常（房源 {out.split('props=')[1].split()[0]} 条，客户 {out.split('custs=')[1]} 条）")
     else:
-        bad(f"数据库连接失败: {out[:120]}", "检查 PostgreSQL 是否运行: sudo systemctl status postgresql")
+        _db_fix = (
+            "启动本机数据库：portable-postgres.ps1 -Action start"
+            if IS_WINDOWS
+            else "检查 PostgreSQL 是否运行: sudo systemctl status postgresql"
+        )
+        bad(f"数据库连接失败: {out[:120]}", _db_fix)
 else:
     warn("未读取到 DATABASE_URL（.env.db 缺失或未配置）",
          "重跑 install.sh 或检查 $INSTALL_DIR/.env.db")
@@ -271,97 +328,101 @@ else:
 
 # ---- 11. 磁盘空间 ----
 print("\n[11] 磁盘空间")
-rc, out = sh("df -P / | awk 'NR==2{print $4}'")
-if rc and out.isdigit():
-    free_mb = int(out) // 1024
-    if free_mb > 2048:
-        ok(f"磁盘可用 {free_mb / 1024:.1f} GB")
-    else:
-        warn(f"磁盘可用仅 {free_mb / 1024:.1f} GB", "清理空间，避免备份/日志写满")
-else:
+free_mb = None
+if not IS_WINDOWS:
+    # Linux 上保留原来的 df 口径（输出与历史一致，便于对照）
+    rc, out = sh("df -P / | awk 'NR==2{print $4}'")
+    if rc and out.isdigit():
+        free_mb = int(out) // 1024
+if free_mb is None:
+    # Windows / 没有 df 的环境：shutil 直接问操作系统，跨平台
+    try:
+        free_mb = int(shutil.disk_usage(INSTALL_DIR if os.path.isdir(INSTALL_DIR) else os.path.abspath(os.sep)).free / (1024 * 1024))
+    except Exception:
+        free_mb = None
+if free_mb is None:
     warn("无法读取磁盘空间")
+elif free_mb > 2048:
+    ok(f"磁盘可用 {free_mb / 1024:.1f} GB")
+else:
+    warn(f"磁盘可用仅 {free_mb / 1024:.1f} GB", "清理空间，避免备份/日志写满")
 
 # ---- 12. 网关日志 ----
 print("\n[12] 网关运行期错误（已排除重启噪音）")
 _user = "--user " if SERVICE_USER else ""
 # 统计窗口 = 当前这次服务启动之后：老进程的报错（例如已经修好的历史故障）不该再报警。
 # （2026-09-18 老板实测：更新后仍报 5 处错误，全是修复前那次调用失败留下的日志。）
-rc_st, started = sh(f"systemctl {_user}show -p ActiveEnterTimestamp --value {SERVICE}")
+rc = False
+out = ""
 _window = "最近 200 行"
-rc, out = sh(f"journalctl {_user}-u {SERVICE} -n 200 --no-pager 2>/dev/null")
-if rc_st and started.strip():
-    rc2, out2 = sh(f"journalctl {_user}-u {SERVICE} --since '{started.strip()}' --no-pager 2>/dev/null")
-    if rc2 and out2.strip():
-        rc, out = rc2, out2
-        _window = f"本次服务启动以来（{started.strip()}）"
-
-# 重启会让飞书长连接正常断开（websocket code 1000），lark 库把"正常断开"也记成 ERROR 并附一条
-# traceback —— 每次重启固定产生 4 行这类噪音。不排除掉，这一项每次更新后必然 WARN，反而盖住
-# 真正的运行期错误（2026-09-18 老板追问"为什么老有这条"后改的口径）。
-_LOG_NOISE = (
-    "receive message loop exit",
-    "ConnectionClosed",
-    "Task exception was never retrieved",
-    "Shutdown context: signal=",
-    "1000 (OK)",
-    "Main process exited",
-    "Stopping hermes-gateway",
-)
-
-
-def _log_noise(line: str) -> bool:
-    return any(p in line for p in _LOG_NOISE)
-
-
-def _scan_gateway_log(text: str):
-    """挑出真正的运行期错误行；紧跟噪音的 Traceback 块整块跳过"""
-    lines = text.splitlines()
-    hits = []
-    for i, line in enumerate(lines):
-        if _log_noise(line):
-            continue
-        if "Traceback" in line:
-            if _log_noise("\n".join(lines[i:i + 12])):
+if IS_WINDOWS:
+    # 没有 journalctl：读桌面版/网关的日志文件尾部（windows_log_paths 按贴近程度排序）
+    for _p in windows_log_paths(HERMES_HOME):
+        if os.path.isfile(_p):
+            try:
+                with open(_p, encoding="utf-8", errors="replace") as _fh:
+                    _tail = _fh.readlines()[-200:]
+                out = "".join(_tail)
+                rc = True
+                _window = f"{os.path.basename(_p)} 最近 200 行"
+                break
+            except Exception:
                 continue
-            hits.append(line)
-        elif "ERROR" in line:
-            hits.append(line)
-    return hits
-
+else:
+    rc_st, started = sh(f"systemctl {_user}show -p ActiveEnterTimestamp --value {SERVICE}")
+    rc, out = sh(f"journalctl {_user}-u {SERVICE} -n 200 --no-pager 2>/dev/null")
+    if rc_st and started.strip():
+        rc2, out2 = sh(f"journalctl {_user}-u {SERVICE} --since '{started.strip()}' --no-pager 2>/dev/null")
+        if rc2 and out2.strip():
+            rc, out = rc2, out2
+            _window = f"本次服务启动以来（{started.strip()}）"
 
 if rc and out:
     errs = _scan_gateway_log(out)
     if errs:
-        warn(f"近期日志有 {len(errs)} 处运行期错误（窗口: {_window}）",
-             f"完整日志: journalctl {_user}-u {SERVICE} -n 200 --no-pager")
+        _log_hint = (
+            f"完整日志: {windows_log_paths(HERMES_HOME)[0]}"
+            if IS_WINDOWS
+            else f"完整日志: journalctl {_user}-u {SERVICE} -n 200 --no-pager"
+        )
+        warn(f"近期日志有 {len(errs)} 处运行期错误（窗口: {_window}）", _log_hint)
         for line in errs[-3:]:
             print(f"         {line.strip()[:150]}")
     else:
         ok(f"近期日志无运行期错误（窗口: {_window}；重启时的飞书断开噪音已排除）")
 else:
-    warn("无法读取服务日志")
+    warn("无法读取日志" + (f"（{windows_log_paths(HERMES_HOME)[0]} 不存在）" if IS_WINDOWS else ""))
 
 # ---- 13. 服务器时区 ----
 print("\n[13] 服务器时区（北京时间口径）")
 TARGET_TZ = "Asia/Shanghai"
 _cur_tz = ""
-if sh("command -v timedatectl >/dev/null 2>&1")[0]:
-    rc_tz, _cur_tz = sh("timedatectl show -p Timezone --value 2>/dev/null")
-    _cur_tz = _cur_tz.strip()
-if not _cur_tz:
-    try:
-        with open("/etc/timezone", encoding="utf-8") as fh:
-            _cur_tz = fh.read().strip()
-    except Exception:
-        _cur_tz = ""
-if not _cur_tz:
-    warn("无法读取服务器时区", f"手动确认：timedatectl")
-elif _cur_tz == TARGET_TZ:
-    _now_cn = sh("TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M'")[1]
-    ok(f"服务器时区 {TARGET_TZ}（当前 {_now_cn}）")
+if IS_WINDOWS:
+    _rc_tz, _tz_out = sh("tzutil /g")
+    if _rc_tz:
+        _cur_tz = parse_tzutil(_tz_out)
 else:
-    warn(f"服务器时区是 {_cur_tz}，与北京时间不一致（日志/定时任务会偏移）",
-         f"修复：sudo timedatectl set-timezone {TARGET_TZ}（或 COCO_SKIP_TZ=1 明确跳过）")
+    if sh("command -v timedatectl >/dev/null 2>&1")[0]:
+        rc_tz, _cur_tz = sh("timedatectl show -p Timezone --value 2>/dev/null")
+        _cur_tz = _cur_tz.strip()
+    if not _cur_tz:
+        try:
+            with open("/etc/timezone", encoding="utf-8") as fh:
+                _cur_tz = fh.read().strip()
+        except Exception:
+            _cur_tz = ""
+if not _cur_tz:
+    warn("无法读取系统时区", "手动确认：tzutil /g（Windows）或 timedatectl（Linux）")
+elif _cur_tz == TARGET_TZ:
+    if IS_WINDOWS:
+        _now_cn = time.strftime("%Y-%m-%d %H:%M")
+        ok(f"系统时区 {TARGET_TZ}（当前 {_now_cn}）")
+    else:
+        _now_cn = sh("TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M'")[1]
+        ok(f"服务器时区 {TARGET_TZ}（当前 {_now_cn}）")
+else:
+    warn(f"系统时区是 {_cur_tz}，与北京时间不一致（日志/定时任务会偏移）",
+         f"修复：{timezone_fix_command(sys.platform)}（或 COCO_SKIP_TZ=1 明确跳过）")
 
 # ---- 14. Coco 运行时配置核对 ----
 print("\n[14] Coco 运行时配置核对（轮次 / 压缩阈值 / 时区）")
@@ -396,5 +457,8 @@ if FAIL == 0:
 else:
     print(f" 结论: 存在 {FAIL} 个问题，按上方修复提示处理后再测")
 print("=" * 56)
-print("提示: 更新请用 bash ~/hermes-agent/scripts/update.sh（不要用 install.sh，也不要直接跑 hermes update）")
+if IS_WINDOWS:
+    print("提示: 更新请在桌面版里点「修复安装」，不要重跑安装包（会重建目录、丢密钥）")
+else:
+    print("提示: 更新请用 bash ~/hermes-agent/scripts/update.sh（不要用 install.sh）")
 sys.exit(1 if FAIL else 0)
