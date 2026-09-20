@@ -457,6 +457,9 @@ POSTER_TEMPLATES = [
      "need_photo": False, "shows_room_no": True},
     {"code": "B", "name": "极简高级", "desc": "米白极简、适合有房源照片的房；会显示楼层/朝向两栏，不印房号",
      "need_photo": True, "shows_room_no": False},
+    {"code": "CUSTOM", "name": "参考图风格（自定义款）",
+     "desc": "按经纪人发的参考海报图提取的风格渲染：可选版式/配色/字体气质/显示哪些信息/装饰；会印房源标识行（含房号）",
+     "need_photo": False, "shows_room_no": True},
 ]
 
 
@@ -554,13 +557,14 @@ def _pick_template(p, template: str, photo: str) -> tuple:
 
     传 "auto"（或"你看着办"）才按房源特征自动挑 —— 保留这个逃生口，避免每次都问。
     """
-    alias = {"premium": "A", "modern": "B", "vibrant": "A", "promo": "A", "classic": "B"}
+    alias = {"premium": "A", "modern": "B", "vibrant": "A", "promo": "A", "classic": "B",
+             "custom": "CUSTOM", "自定义": "CUSTOM", "参考图": "CUSTOM", "style": "CUSTOM"}
     if template and str(template).strip().lower() in ("auto", "你看着办", "随便", "自动"):
         template = ""
     elif template:
         code = alias.get(str(template).lower(), str(template).upper())
-        if code in ("A", "B"):
-            return code, "按指定模板"
+        if code in ("A", "B", "CUSTOM"):
+            return code, ("按经纪人发的参考图风格渲染" if code == "CUSTOM" else "按指定模板")
         return None, f"模板「{template}」不在模板库里"
     else:
         return None, "未指定模板 —— 先问经纪人要哪一款"
@@ -576,13 +580,15 @@ def _pick_template(p, template: str, photo: str) -> tuple:
 
 def generate_property_poster(property_id: int = None, title: str = None, qr_content: str = None,
                             template: str = None, poster_title: str = None,
-                            show_room_no: str = None,
+                            show_room_no: str = None, style: dict = None,
                             allow_missing: bool = False, task_id: str = None) -> str:
     """生成房源海报（1080x1920）
 
     property_id 或 title 二选一：传 id 精确匹配；传标题模糊匹配。
     template 可选 A（红金促销）/B（极简高级，需照片）/auto（你看着办，系统按房源特征挑）；
     **不传则不出图，先返回模板库清单让经纪人挑**（2026-09-21 老板要求）。
+    style：template="custom" 时用 —— 从参考图提取的风格参数（layout/palette/font_style/show_fields/decor），
+    非法值会被收敛到安全取值并在 notes 里说明（绝不因为参数不对就出空图）。
     show_room_no：海报上要不要写房号 —— full（完整）/unit（只写楼栋单元）/none（只显示小区名）；
     **不传会并入待问清单**（不同经纪人对房号曝光的诉求不同，不能默认替他决定）。
     poster_title：海报主标题文案（先调 suggest_poster_titles 拿候选给经纪人挑）。
@@ -607,6 +613,15 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     if tpl is None:
         tpl = "A"          # 仅用于判断依赖（照片/楼层/朝向），真正的代号在拿到选择后才会用于渲染
     room_no_mode = _norm_room_no_mode(show_room_no)
+    from tools.real_estate_poster_svg import normalize_style
+
+    style_notes: list = []
+    style_summary = ""
+    if tpl == "CUSTOM":
+        style_norm = normalize_style(style, style_notes)
+        style_summary = style_norm["summary"]
+    else:
+        style_norm = None
     if tpl == "B" and not photo:
         if allow_missing:
             tpl, reason = "A", "无照片（经纪人同意先出图）→ 改为不需要照片的促销款"
@@ -625,8 +640,13 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
 
     # B 款会显示「楼层 / 朝向」两栏 —— 缺了就先问清，不要等出图后再补问
     _need_extras = tpl == "B"
+    if tpl == "CUSTOM" and style_norm:
+        # 自定义款：显示哪些信息由 show_fields 决定 —— 显示楼层/朝向但库里没有时，也算缺信息
+        _need_extras = ("floor" in style_norm["show_fields"] and not p.get("floor")) or \
+                       ("orientation" in style_norm["show_fields"] and not p.get("orientation"))
     missing = (_missing_poster_info(p, card, need_photo=False,
-                                    need_floor=_need_extras, need_orientation=_need_extras,
+                                    need_floor=("floor" in (style_norm or {}).get("show_fields", []) if tpl == "CUSTOM" else _need_extras),
+                                    need_orientation=("orientation" in (style_norm or {}).get("show_fields", []) if tpl == "CUSTOM" else _need_extras),
                                     need_room_no=_template_shows_room_no(tpl), room_no_mode=room_no_mode)
                if not allow_missing else [])
     if need_template and not allow_missing:
@@ -659,6 +679,7 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
 
     data = {
         "template": tpl,
+        "style": style_norm,
         "room_no_mode": room_no_mode or "full",
         "title": poster_title,
         "subtitle": " · ".join(str(x) for x in [p.get('community'), p.get('district'),
@@ -690,11 +711,16 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
 
     if not card.get('company'):
         notes.append("未提供公司名称，海报未显示品牌（不臆造）")
+    if tpl == "CUSTOM":
+        notes.extend(style_notes)
+        if not photo:
+            notes.append("这套房源还没有照片：已用色块代替大图位；发给经纪人看效果时可说明")
     return json.dumps({
         "success": True,
         "property_id": property_id,
         "template": tpl,
         "why": reason,
+        "style_summary": style_summary,
         "poster_path": path,
         "notes": notes,
         "message": f"海报已生成（模板 {tpl}）：{path}（发送时用 MEDIA:{path} 直接发图）",
@@ -811,7 +837,13 @@ registry.register(
             "property_id": {"type": "integer", "description": "房源ID（与 title 二选一，优先用 ID）"},
             "title": {"type": "string", "description": "房源标题关键词（与 property_id 二选一，模糊匹配）"},
             "poster_title": {"type": "string", "description": "海报主标题文案（先用 suggest_poster_titles 拿候选给经纪人挑）"},
-            "template": {"type": "string", "enum": ["A", "B", "auto"], "description": "A 红金促销（不需要照片）/B 极简高级（需要照片）/auto（经纪人让你看着办时用，按房源特征自动挑）。**不传则不出图，会返回模板库清单让你先问经纪人选哪款**"},
+            "template": {"type": "string", "enum": ["A", "B", "CUSTOM", "auto"], "description": "A 红金促销（不需要照片）/B 极简高级（需要照片）/CUSTOM 参考图风格（经纪人发了参考海报图，用 style 传提取到的风格）/auto（经纪人让你看着办时用，按房源特征自动挑）。**不传则不出图，会返回模板库清单让你先问经纪人选哪款**"},
+              "style": {"type": "object", "description": "template=CUSTOM 时必填：从经纪人发的参考海报图里提取到的风格（拿不准就别填，系统会用默认）", "properties": {
+                  "layout": {"type": "string", "enum": ["hero_top", "minimal", "split"], "description": "版式：hero_top 大图在上信息在下 / minimal 极简留白 / split 左右分栏"},
+                  "palette": {"type": "string", "enum": ["red_gold", "black_gold", "cream", "navy", "green", "orange", "pink", "grey"], "description": "配色：红金/黑金/米白/藏蓝/墨绿/橙红/粉紫/灰白（也可传自定义色值（bg 底色 / accent 主色，形如 #RRGGBB））"},
+                  "font_style": {"type": "string", "enum": ["serif", "sans"], "description": "字体气质：serif 衬线（稳重高级）/ sans 黑体（醒目促销）"},
+                  "show_fields": {"type": "array", "items": {"type": "string", "enum": ["price", "unit_price", "area", "layout", "floor", "orientation", "tags", "community"]}, "description": "海报上显示哪些信息（参考图信息少就少显示）"},
+                  "decor": {"type": "string", "enum": ["rounded_soft", "sharp", "bordered"], "description": "装饰：圆角柔和 / 直角硬朗 / 描边款"}}},
               "show_room_no": {"type": "string", "enum": ["full", "unit", "none"], "description": "海报上要不要写房号：full 写完整（如 7号楼2单元1602）/unit 只写楼栋单元（如 7号楼2单元）/none 不写、只显示小区名。**不传会并入待问清单先问经纪人**——不同经纪人对房号曝光的诉求不同，不要替他决定"},
             "qr_content": {"type": "string", "description": "可选：二维码内容；不传则用经纪人名片里的微信号（微信名片）"},
             "allow_missing": {"type": "boolean", "description": "仅当经纪人明确说「就这些，先出图」时传 true；缺的字段留空，不编造"},

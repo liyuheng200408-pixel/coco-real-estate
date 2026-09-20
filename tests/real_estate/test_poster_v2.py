@@ -238,7 +238,7 @@ class TestAskBeforeRendering:
         res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推"))
         assert res["success"] is False and res["need_template"] is True
         codes = [t["code"] for t in res["templates"]]
-        assert codes == ["A", "B"]
+        assert codes == ["A", "B", "CUSTOM"]      # 模板库：A/B + 参考图风格（自定义款）
         assert any("模板" in m for m in res["missing"])
 
     def test_asks_room_no_for_template_that_prints_it(self, wired):
