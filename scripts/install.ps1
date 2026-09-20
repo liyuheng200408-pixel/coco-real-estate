@@ -4753,6 +4753,10 @@ if ($IncludeDesktop) {
     $InstallStages += @{ Name = "desktop"; Title = "Building desktop app"; Category = "install"; NeedsUserInput = $false; Worker = "Stage-Desktop" }
 }
 $InstallStages += @(
+    # COCO-PATCH: Coco 本机模式的便携数据库（官方安装器没有这一环）。
+    # 放在 venv/依赖之后、PATH 与网关之前：数据层强制 PostgreSQL（缺 DATABASE_URL 直接
+    # 报错），而且这一步会写出 .env.db —— 后面注入 PATH、启动后端都要读它。
+    @{ Name = "coco-database";    Title = "Preparing the local database";  Category = "install";     NeedsUserInput = $false; Worker = "Stage-CocoDatabase" }
     @{ Name = "path";             Title = "Adding Hermes to PATH";                Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-Path" }
     @{ Name = "config-templates"; Title = "Writing configuration templates";      Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-ConfigTemplates" }
     @{ Name = "platform-sdks";    Title = "Installing messaging platform SDKs";   Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-PlatformSdks" }
@@ -4799,6 +4803,40 @@ function Stage-Venv             { Resolve-UvCmd; Install-Venv }
 function Stage-Dependencies     { Resolve-UvCmd; Install-Dependencies }
 function Stage-NodeDeps         { Install-NodeDeps }
 function Stage-Desktop          { Install-DesktopVoiceDeps; Install-Desktop }
+function Stage-CocoDatabase     { Install-CocoLocalDatabase }
+# COCO-PATCH: Coco 本机模式的便携 PostgreSQL。
+#
+# 官方安装器不装数据库（它的本机后端不需要），而 Coco 的数据层强制 PostgreSQL：
+# agent/real_estate_db.py 在缺少 DATABASE_URL 时直接拒绝初始化（禁 sqlite 回退，
+# 2026-08-12 幽灵库事故的治本机制）。所以本机模式必须自带一个数据库，这一步负责：
+# 下载便携包 → 只解 bin/lib/share → initdb → 随机端口与口令 → 只监听回环 → 写 .env.db。
+#
+# 幂等：重复执行只做「确保在跑」，不重建数据目录、不换口令。桌面版每次启动也会调一次。
+# 失败即抛（安装器会把这一步标红，用户能看到具体原因）—— 没有数据库时后端必然起不来。
+function Install-CocoLocalDatabase {
+    if ($env:COCO_SKIP_LOCAL_DB -eq "1") {
+        Write-Info "Skipping local database (COCO_SKIP_LOCAL_DB=1)."
+        return
+    }
+
+    $bootstrap = Join-Path $PSScriptRoot "..\apps\desktop\scripts\portable-postgres.ps1"
+    if (-not (Test-Path -LiteralPath $bootstrap)) {
+        throw "portable-postgres.ps1 not found at $bootstrap -- this build is missing the Coco local-database scripts"
+    }
+
+    Write-Info "Preparing the local PostgreSQL (portable, user directory, loopback only)..."
+    $pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    if (-not $pwshExe) { $pwshExe = "powershell" }
+
+    & $pwshExe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap -Action setup
+    if ($LASTEXITCODE -ne 0) {
+        $log = Join-Path $env:LOCALAPPDATA "hermes\pgsql-data\coco-postgres.log"
+        throw "local database setup failed (exit $LASTEXITCODE). Database log: $log"
+    }
+
+    Write-Success "Local database ready (connection string written to .env.db)."
+}
+
 function Stage-Path             { Set-PathVariable }
 function Stage-ConfigTemplates  { Copy-ConfigTemplates }
 function Stage-PlatformSdks     { Resolve-UvCmd; Install-PlatformSdks }

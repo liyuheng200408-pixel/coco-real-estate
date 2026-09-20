@@ -23,6 +23,7 @@ on:
       - 'apps/desktop/scripts/local-backup.ps1'
       - 'apps/desktop/scripts/tests/portable-postgres-windows-selfcheck.ps1'
       - 'scripts/backup_db.py'
+      - 'scripts/install.ps1'
       - 'scripts/healthcheck.py'
       - 'scripts/healthcheck_lib.py'
       - '.github/workflows/desktop-local-pg-windows.yml'
@@ -245,6 +246,31 @@ jobs:
 
           # 体检自身会因「CI 里缺依赖/缺备份」等项返回 1 —— 那是预期，不该把这一步判红
           exit 0
+
+      # 安装器阶段：桌面版首启的进度界面靠 install.ps1 的 stage 协议驱动，
+      # 本机数据库必须是其中一个阶段（否则用户在「准备本机环境」里看不到数据库这一步）。
+      - name: Installer exposes and runs the local-database stage (real Windows)
+        shell: pwsh
+        env:
+          HERMES_HOME: ${{ runner.temp }}\hermes
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $manifestLine = (& pwsh -NoLogo -NoProfile -File scripts/install.ps1 -Manifest 2>$null | Select-Object -Last 1)
+          $manifest = $manifestLine | ConvertFrom-Json
+          $names = @($manifest.stages | ForEach-Object { $_.name })
+
+          if ($names -notcontains 'coco-database') { throw "安装清单里没有 coco-database 阶段：$($names -join ',')" }
+          $idx = [array]::IndexOf($names, 'coco-database')
+          if ($idx -lt 1 -or $names[$idx - 1] -ne 'node-deps') { throw "阶段位置不对（应在依赖之后）：$($names -join ' > ')" }
+          if ($names[$idx + 1] -ne 'path') { throw "阶段位置不对（应在 PATH 之前）：$($names -join ' > ')" }
+          "OK: 安装清单含 coco-database，且在 node-deps 之后、path 之前" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
+          # 单跑该阶段（幂等：数据目录已存在就只做「确保在跑」）
+          & pwsh -NoLogo -NoProfile -File scripts/install.ps1 -Stage coco-database
+          if ($LASTEXITCODE -ne 0) { throw "coco-database 阶段执行失败（退出码 $LASTEXITCODE）" }
+          $envFile = Join-Path $env:HERMES_HOME 'hermes-agent\.env.db'
+          if (-not (Test-Path $envFile)) { throw "阶段跑完了却没有 .env.db：$envFile" }
+          "OK: coco-database 阶段可单独执行，且产出 .env.db" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
 
       # 退出前把数据库停掉：既是最干净的收尾，也避免常驻的 postgres 继续攥着
       # 继承来的句柄让 runner 收尾时干等。
