@@ -162,7 +162,7 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 
 ---
 
-## 三、平台相关的部分（Windows 真机才能验）
+## 三、Windows 真机验证
 
 跑法（两种，任选）：
 
@@ -172,15 +172,40 @@ pwsh -File apps\desktop\scripts\tests\portable-postgres-windows-selfcheck.ps1
 ```
 
 ```bash
-# CI 真机（GitHub Actions 的 windows-latest，手动触发，不自动跑）
-gh workflow run desktop-local-pg-windows.yml --ref feat/desktop-local-pg
+# CI 真机（GitHub Actions 的 windows-latest）。注意：workflow_dispatch 要求工作流已在
+# 默认分支上，当前分支未合并，所以靠「只在本分支 push 时触发」来跑（已配好 paths 过滤）。
+gh workflow run desktop-local-pg-windows.yml --ref <branch>   # 合并到默认分支后可用
 ```
 
-覆盖不到、只能真机确认的点：
+### 已通过（Windows Server 2025 / PowerShell 7.6.5，GitHub windows-latest，全绿）
 
-- 便携 zip 的下载与解压（EDB 发行包）、`initdb.exe`/`pg_ctl.exe` 的真实执行；
-- NTFS ACL 收紧（`%LOCALAPPDATA%\hermes\pgsql-data` 与 `.env.db` 只授权当前用户）；
-- 管理员账户下 `pg_ctl` 用受限令牌拉起 `postgres.exe`（不需要提权，这是 PG 在 Windows 的既定行为）；
+| 环节 | 实测结果 |
+|---|---|
+| 便携包下载 | 323 MB / 1.6 秒（200 MB/s，EDB 源） |
+| 只解 bin/lib/share | 22649 项 → 1627 项 / 119.7 MB（1.7 秒） |
+| `initdb.exe` | 1.1 秒完成（UTF8 / locale C / scram-sha-256） |
+| `pg_ctl.exe` 启动 | 0.25 秒，127.0.0.1 随机端口（实测 50059），非回环地址 172.26.144.1 连不上 |
+| 建库与写配置 | `hermes_agent` 建出；`.env.db` 六个键 + `COCO_ENC_KEY` 写入 |
+| 自检 11 项 | 全过（含「口令认证生效」「错误口令被拒」「pg_dump 能连业务库」） |
+| **NTFS 权限** | `.env.db` 与数据目录「ACL 已断开继承，仅当前用户」 |
+| 连接串 | 用 `.env.db` 里的 DATABASE_URL 跑 psql：`hermes\|hermes_agent\|127.0.0.1` |
+| 停库 | `-Action stop` 正常，退出码 0 |
+
+### 真机上踩到、并已修的三个坑（都只会在 Windows 上现形）
+
+1. **`pg_ctl` 不能管道捕获**：`postgres.exe` 会继承父进程的 stdout 句柄，`& pg_ctl ... 2>&1`
+   会让 PowerShell 一直读到管道 EOF —— 即使 pg_ctl 早已退出也不返回，表现为「启动 PostgreSQL」
+   静默卡死（实测两次各挂 35 分钟直到 job 超时）。改为 `Start-Process` + 文件重定向（带硬超时），
+   并用 `pg_isready` 复核确实能接受连接。
+2. **同一坑的第二层**：自检/CI 若用 `& pwsh ... | Tee-Object` 捕获引导脚本输出，常驻的 postgres
+   同样会攥住那条管道。改为文件重定向 + 边跑边读（输出照样实时可见）。
+3. **psql 的选项必须写在连接串之前**：Windows 的 psql 不做 GNU 式参数重排，写在 URL 后面的
+   `-t -A -c` 会被当成「多余参数」静默忽略 → 进交互模式、什么都没查却返回 0（假绿）。
+   检查项还要断言输出内容，不能只看退出码。
+
+### 还没验的（下一步）
+
+- 经纪人电脑上的**完整安装包流程**（安装 → 首启装后端 → 本机库 → 飞书配对 → 说话 → 落库）；
 - 任务计划程序自启、与桌面版进程的退出联动；
 - `install.ps1` 里本机 PG stage 的接线（当前接线在 `runEnsureRuntime()`，尚未做成独立 stage）。
 
