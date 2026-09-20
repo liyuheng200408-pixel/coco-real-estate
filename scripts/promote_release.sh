@@ -14,6 +14,9 @@
 #   bash scripts/promote_release.sh                    # 把 next 快进到 master 并双推
 #   bash scripts/promote_release.sh --tag v0.21.3-65   # 顺手打标签并推送标签
 #
+# 前置条件（硬闸门）：晋升的提交上必须有老板的验收登记（verified/* 标签），
+# 用 `bash scripts/mark_verified.sh --note "..."` 在老板说"可以"之后登记。
+#
 # 晋升后仍需人工做两件事（脚本只保证代码到位，避免误发对外内容）：
 #   ① 在 Gitee/GitHub 建对应 Release（对外的"正式发布"动作）；
 #   ② 更新博客的版本行（post 70）。
@@ -78,6 +81,20 @@ if [[ "$FROM_SHA" == "$TO_SHA" ]]; then
     ok "$TO_BRANCH 与 $FROM_BRANCH 已经是同一个提交（${TO_SHA:0:7}），无需晋升"
     exit 0
 fi
+
+# 硬闸门（2026-09-21 老板要求"没经过我测试的功能绝对不能混进正式版本"）：
+# 本次晋升的提交上必须有老板的验收登记（verified/* 标签），否则拒绝晋升。
+# 标签钉的是具体提交 —— 所以"验收的是 A、发布的是 B"这种情况不可能发生：
+# 登记之后测试通道若又推了新提交，新提交上没有标签，晋升照样被拒。
+APPROVED_TAG="$(git tag --points-at "$FROM_SHA" | grep '^verified/' | head -1 || true)"
+if [[ -z "$APPROVED_TAG" ]]; then
+    fail "本次晋升的提交没有老板的验收登记（提交 ${FROM_SHA:0:7}）
+  规则：没经过老板实测的功能不能进正式版。
+  做法：老板说“可以”之后，在测试通道上运行
+        bash scripts/mark_verified.sh --note \"老板实测通过：<测了什么>\"
+  然后在测试通道**不再新增提交**的前提下再次执行本脚本。"
+fi
+info "验收登记：${BLUE}${APPROVED_TAG}${NC} —— $(git tag -l --format='%(contents:subject)' "$APPROVED_TAG")"
 
 # 关键校验：必须能快进（master 是 next 的祖先），否则拒绝
 if ! git merge-base --is-ancestor "$TO_SHA" "$FROM_SHA"; then

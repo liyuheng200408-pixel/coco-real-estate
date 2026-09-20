@@ -167,6 +167,9 @@ class TestPromoteRelease:
         next_tip = _commit_all(work, "feature on next")
         subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "next"], check=True)
         subprocess.run(["git", "-C", str(work), "push", "-q", "github", "next"], check=True)
+        # 晋升的硬闸门：必须有老板的验收登记（verified/* 标签钉在晋升的提交上）
+        subprocess.run(["git", "-C", str(work), "tag", "-a", "verified/v0.0.0-1-" + next_tip[:7],
+                        "-m", "老板验收通过：测试用例", next_tip], check=True)
         return work, next_tip
 
     def _remote_master(self, tmp_path, which):
@@ -349,6 +352,8 @@ class TestPromoteSyncsTestChannelFirst:
             subprocess.run(["git", "-C", str(work), "push", "-q", r, "next"], check=True)
         (work / "new.txt").write_text("new", encoding="utf-8")
         tip = _commit_all(work, "not pushed yet")
+        subprocess.run(["git", "-C", str(work), "tag", "-a", "verified/v0.0.0-1-" + tip[:7],
+                        "-m", "老板验收通过：测试用例", tip], check=True)
 
         r = _run(["bash", "scripts/promote_release.sh"], cwd=work)
         out = r.stdout + r.stderr
@@ -358,3 +363,80 @@ class TestPromoteSyncsTestChannelFirst:
                               capture_output=True, text=True).stdout.strip() == tip
         assert subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "next"],
                               capture_output=True, text=True).stdout.strip() == tip, "测试通道也应被推齐"
+
+
+class TestApprovalGate:
+    """硬闸门：没经过老板验收登记的功能不能进正式版（老板 2026-09-21 要求）。
+
+    机制：验收登记 = 钉在"测试通道那个提交"上的 verified/* 标签；
+    promote_release.sh 只认带这个标签的提交。所以"验收的是 A、发布的是 B"不可能发生。
+    """
+
+    def _setup(self, tmp_path, mark=True, extra_commit_after_mark=False):
+        work = _init_repo(tmp_path / "work")
+        (work / "scripts").mkdir(exist_ok=True)
+        for name in ("coco_channel.sh", "promote_release.sh", "mark_verified.sh"):
+            shutil.copy(SCRIPTS / name, work / "scripts" / name)
+        _commit_all(work, "init")
+        for name in ("gitee.git", "github.git"):
+            subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / name)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(tmp_path / "gitee.git")], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "github", str(tmp_path / "github.git")], check=True)
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "master"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "next"], check=True)
+        (work / "feature.txt").write_text("feature", encoding="utf-8")
+        _commit_all(work, "feature on next")
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "next"], check=True)
+        if mark:
+            subprocess.run(["bash", "scripts/mark_verified.sh", "--note", "老板实测通过：某功能",
+                            "--no-push"], cwd=work, check=True, capture_output=True)
+        if extra_commit_after_mark:
+            (work / "later.txt").write_text("later", encoding="utf-8")
+            _commit_all(work, "验收之后又推的新提交")
+        return work
+
+    def test_promote_refused_without_verification(self, tmp_path):
+        work = self._setup(tmp_path, mark=False)
+        before = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                                capture_output=True, text=True).stdout.strip()
+        r = _run(["bash", "scripts/promote_release.sh"], cwd=work)
+        out = r.stdout + r.stderr
+        assert r.returncode != 0, out
+        assert "验收登记" in out, out
+        assert subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                              capture_output=True, text=True).stdout.strip() == before, "被拒时不得改动 master"
+
+    def test_promote_allowed_after_verification(self, tmp_path):
+        work = self._setup(tmp_path)
+        r = _run(["bash", "scripts/promote_release.sh"], cwd=work)
+        out = r.stdout + r.stderr
+        assert r.returncode == 0, out
+        assert "验收登记" in out and "晋升完成" in out, out
+
+    def test_verification_is_pinned_to_a_commit(self, tmp_path):
+        """登记之后测试通道又推新提交 → 新提交没有登记 → 晋升必须被拒（不能"验收A发布B"）"""
+        work = self._setup(tmp_path, extra_commit_after_mark=True)
+        r = _run(["bash", "scripts/promote_release.sh"], cwd=work)
+        out = r.stdout + r.stderr
+        assert r.returncode != 0, out
+        assert "验收登记" in out, out
+
+    def test_mark_verified_refuses_on_stable_branch(self, tmp_path):
+        work = self._setup(tmp_path, mark=False)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "master"], check=True)
+        r = _run(["bash", "scripts/mark_verified.sh", "--note", "x", "--no-push"], cwd=work)
+        assert r.returncode != 0
+        assert "只能在测试通道" in (r.stdout + r.stderr)
+
+    def test_mark_verified_requires_note(self, tmp_path):
+        work = self._setup(tmp_path, mark=False)
+        r = _run(["bash", "scripts/mark_verified.sh", "--no-push"], cwd=work)
+        assert r.returncode != 0 and "--note" in (r.stdout + r.stderr)
+
+    def test_mark_verified_list(self, tmp_path):
+        work = self._setup(tmp_path)
+        r = _run(["bash", "scripts/mark_verified.sh", "--list"], cwd=work)
+        assert r.returncode == 0, r.stderr
+        assert "verified/" in r.stdout and "老板实测通过" in r.stdout, r.stdout
