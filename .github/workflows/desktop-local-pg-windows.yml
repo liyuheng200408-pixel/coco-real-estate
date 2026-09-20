@@ -102,12 +102,16 @@ jobs:
 
       - name: Assert the bootstrap really produced a usable database
         shell: pwsh
+        env:
+          HERMES_HOME: ${{ runner.temp }}\hermes
         run: |
           $home_ = $env:HERMES_HOME
           $envFile = Join-Path $home_ 'hermes-agent\.env.db'
           if (-not (Test-Path $envFile)) { throw "缺少 .env.db：$envFile" }
 
-          $url = (Select-String -Path $envFile -Pattern '^DATABASE_URL=(.+)$').Matches.Groups[1].Value
+          $match = [regex]::Match((Get-Content -LiteralPath $envFile -Raw), '(?m)^DATABASE_URL=(.+)$')
+          if (-not $match.Success) { throw '.env.db 里没有 DATABASE_URL' }
+          $url = $match.Groups[1].Value.Trim()
           if (-not ($url -match '^postgresql://[^:]+:[^@]+@127\.0\.0\.1:\d+/hermes_agent$')) {
             throw "DATABASE_URL 形态不符：$url"
           }
@@ -115,9 +119,10 @@ jobs:
           $psql = Join-Path $home_ 'pgsql\bin\psql.exe'
           if (-not (Test-Path $psql)) { throw "缺少 psql.exe：$psql" }
 
-          $out = & $psql $url -t -A -c "select current_user || '|' || current_database() || '|' || current_setting('listen_addresses')"
+          # 选项放连接串之前：Windows 的 psql 不重排参数，写后面会被静默忽略（实测假绿）
+          $out = (& $psql -t -A -c "select current_user || '|' || current_database() || '|' || current_setting('listen_addresses')" $url 2>&1 | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) { throw "psql 连接失败：$out" }
-          if ($out.Trim() -ne 'hermes|hermes_agent|127.0.0.1') { throw "连接结果不符：$out" }
+          if ($out -ne 'hermes|hermes_agent|127.0.0.1') { throw "连接结果不符：$out" }
           "OK: $out" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
 
           # 建表链路：用分发包里的真实数据层在便携 PG 上建表（与 install.sh 的 setup_tables 同一入口）
@@ -125,10 +130,13 @@ jobs:
 
       - name: Assert the port is loopback-only on a real Windows host
         shell: pwsh
+        env:
+          HERMES_HOME: ${{ runner.temp }}\hermes
         run: |
           $envFile = Join-Path $env:HERMES_HOME 'hermes-agent\.env.db'
-          $url = (Select-String -Path $envFile -Pattern '^DATABASE_URL=(.+)$').Matches.Groups[1].Value
-          $port = [int]($url -replace '.*:(\d+)/.*', '$1')
+          $match = [regex]::Match((Get-Content -LiteralPath $envFile -Raw), '(?m)^DATABASE_URL=(.+)$')
+          if (-not $match.Success) { throw '.env.db 里没有 DATABASE_URL' }
+          $port = [int]($match.Groups[1].Value.Trim() -replace '.*:(\d+)/.*', '$1')
 
           $lan = (Get-NetIPAddress -AddressFamily IPv4 |
             Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' } |
