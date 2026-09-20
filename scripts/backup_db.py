@@ -6,10 +6,21 @@ Coco 房产智能体 - 数据库备份脚本（PostgreSQL 版）
 """
 import os
 import subprocess
+import sys
 import hashlib
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+
+# 控制台输出抗编码：Windows 上 stdout 默认跟随控制台代码页（cp1252/GBK），脚本里的中文
+# print 会抛 UnicodeEncodeError，把备份/恢复整个带崩（2026-09-20 真机实测：计划任务注册
+# 成功、一跑备份就崩在 _log 的 print 上）。这里一次性把两个流改成 UTF-8 + 替换不可编码字符，
+# 覆盖脚本内所有 print；日志文件本来就是显式 UTF-8 打开，不受影响。
+for _stream in ("stdout", "stderr"):
+    try:
+        getattr(sys, _stream).reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 def _load_db_config():

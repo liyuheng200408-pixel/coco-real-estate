@@ -108,8 +108,15 @@ function Invoke-Backup {
 
     # 备份脚本调裸命令名 pg_dump/pg_restore/psql —— 必须把便携 PG 的 bin 放最前
     $oldPath = $env:PATH
+    $oldUtf8 = $env:PYTHONUTF8
+    $oldIoEnc = $env:PYTHONIOENCODING
     $env:PATH = "$PgBinDir$([System.IO.Path]::PathSeparator)$oldPath"
     $env:DATABASE_URL = $url
+    # 强制 Python 走 UTF-8：Windows 上 stdout 默认跟随控制台代码页（cp1252/GBK），
+    # 脚本一打印中文就 UnicodeEncodeError 崩掉（实测真机 CI：计划任务注册成功、
+    # 备份一跑就失败）。后端进程本来就有 PYTHONUTF8=1，这里对备份脚本做同样的事。
+    $env:PYTHONUTF8 = '1'
+    $env:PYTHONIOENCODING = 'utf-8'
     try {
         # 明确把备份目录交给 backup_db.py：它默认写 ~/backups/real_estate，
         # 而我们可能被调用方指定了别的位置（不传就会出现「备份成功但目录里没有」）。
@@ -123,6 +130,8 @@ function Invoke-Backup {
     } finally {
         $env:PATH = $oldPath
         Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
+        if ($null -eq $oldUtf8) { Remove-Item Env:\PYTHONUTF8 -ErrorAction SilentlyContinue } else { $env:PYTHONUTF8 = $oldUtf8 }
+        if ($null -eq $oldIoEnc) { Remove-Item Env:\PYTHONIOENCODING -ErrorAction SilentlyContinue } else { $env:PYTHONIOENCODING = $oldIoEnc }
     }
 
     # 密钥单独留一份（服务器版也是这么做的）：丢了就再也解不开客户手机号/微信
