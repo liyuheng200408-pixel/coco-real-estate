@@ -198,6 +198,7 @@ gh workflow run desktop-local-pg-windows.yml --ref <branch>   # 合并到默认�
 | 连接串 | 用 `.env.db` 里的 DATABASE_URL 跑 psql：`hermes\|hermes_agent\|127.0.0.1` |
 | 停库 | `-Action stop` 正常，退出码 0 |
 | **每日备份** | 计划任务注册成功（`schtasks /Query` 通过）；立刻跑出的 dump 有效；`enc_key.txt` 与 `env.db.bak` 都在；`-Action status` 判定正常 |
+| **部署体检** | 按本机模式口径：`[PASS] 本机数据库在运行（便携 PostgreSQL）`、`检测到 9 个 Hermes/数据库相关进程`、`[PASS] 数据库连接正常（房源 0 条，客户 0 条）`；输出里**没有** systemd/journalctl/timedatectl |
 
 ### 真机上踩到、并已修的三个坑（都只会在 Windows 上现形）
 
@@ -211,9 +212,17 @@ gh workflow run desktop-local-pg-windows.yml --ref <branch>   # 合并到默认�
    `-t -A -c` 会被当成「多余参数」静默忽略 → 进交互模式、什么都没查却返回 0（假绿）。
    检查项还要断言输出内容，不能只看退出码。
 4. **Python 打印中文会在 Windows 控制台上崩**：stdout 默认跟随控制台代码页（cp1252/GBK），
-   `print("...")` 抛 `UnicodeEncodeError` 直接把备份带崩（实测：计划任务注册成功、一跑备份就失败）。
-   修法有两层：调用方给 `PYTHONIOENCODING=utf-8`（只设 `PYTHONUTF8=1` 会被它盖掉），
-   脚本自己在入口 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` 兜底。
+   `print("...")` 抛 `UnicodeEncodeError` 直接把脚本带崩（实测：备份注册成功但一跑就失败；
+   体检脚本更是第一行都过不去）。修法有两层：调用方给 `PYTHONIOENCODING=utf-8`
+   （只设 `PYTHONUTF8=1` 会被它盖掉），脚本自己在入口
+   `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")` 兜底 ——
+   `scripts/backup_db.py`、`scripts/healthcheck.py`、`scripts/migrate.py` 都已加。
+5. **不要用 shell + `shlex` 引号调 Python**：`sh(f'{py} -c {shlex.quote(code)}')` 是 POSIX 规则，
+   Windows 的 cmd 会吃掉引号 → 实测体检的数据库项报 `SyntaxError`、迁移项拿不到输出。
+   统一改成参数列表调用（不经 shell），连接串这类含特殊字符的值必须是独立参数。
+6. **子进程输出要显式 UTF-8 解码**：`subprocess.run(..., text=True)` 在 Windows 上按 locale
+   （cp1252/GBK）解码，撞到别的字节抛 `UnicodeDecodeError` 把整项检查带崩。
+   统一传 `encoding="utf-8", errors="replace"`。
 
 ### 还没验的（下一步）
 
