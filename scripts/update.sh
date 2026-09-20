@@ -3,9 +3,11 @@
 # Coco（可可）房产智能体 · 一键无损更新脚本
 #
 # 用法（在任何目录都能跑，脚本自己定位仓库根目录）：
-#   bash /home/ubuntu/hermes-agent/scripts/update.sh
-#   bash scripts/update.sh --skip-backup      # 跳过备份（仅纯代码零风险场景）
-#   bash scripts/update.sh --no-restart       # 更新后不自动重启（手动重启）
+#   bash /home/ubuntu/hermes-agent/scripts/update.sh            # 默认：跟随当前通道
+#   bash scripts/update.sh --test               # 测试版：切到测试通道并按测试版更新（仅老板测试机）
+#   bash scripts/update.sh --stable             # 稳定版：切回稳定通道并更新
+#   bash scripts/update.sh --skip-backup        # 跳过备份（仅纯代码零风险场景）
+#   bash scripts/update.sh --no-restart         # 更新后不自动重启（手动重启）
 #
 # 设计目标：后续"新增功能"无论纯代码还是动表结构，都用这一条命令无损更新。
 # 数据库是用户重要数据，三重硬防护：
@@ -22,15 +24,21 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 VENV_PY="$REPO_ROOT/venv/bin/python"
 
+# ---- 通用输出函数（必须在下面各处之前定义：曾经的坑是"先用了后定义"，一启动就 command not found）----
+info(){ echo -e "\033[1;34m==>\033[0m $*"; }
+ok(){   echo -e "\033[1;32m   OK\033[0m $*"; }
+err(){  echo -e "\033[1;31m   FAIL\033[0m $*" >&2; }
+fail(){ echo -e "\033[1;31m   FAIL\033[0m $*" >&2; exit 1; }
+
 # 并发保护（2026-09-21 加）：同一实例同时跑两次更新会互相踩 —— git 索引锁冲突、
 # 依赖安装与迁移交叠、服务被重复重启。这里用 flock 拿独占锁，拿不到就明确退出。
-# 锁文件是未跟踪文件（不进 git），上面的工作区检查会忽略它。
+# 锁文件是未跟踪文件（不进 git），工作区检查会忽略它。
 if command -v flock >/dev/null 2>&1; then
     LOCK_FILE="$REPO_ROOT/.coco-update.lock"
     if exec 9>"$LOCK_FILE"; then
         if ! flock -n 9; then
-            echo "另一个 Coco 更新正在进行中（锁文件 $LOCK_FILE）—— 等它跑完再执行；"
-            echo "若确认没有任何更新在跑（例如上次被强杀），删除该锁文件后重试即可。"
+            err "另一个 Coco 更新正在进行中（锁文件 $LOCK_FILE）—— 等它跑完再执行；"
+            echo "  若确认没有任何更新在跑（例如上次被强杀），删除该锁文件后重试即可。"
             exit 1
         fi
     else
@@ -40,16 +48,37 @@ else
     echo "提示: 系统没有 flock，跳过并发保护（请勿同时跑两次更新）。"
 fi
 
-# 通道（稳定版 master / 测试版 next，2026-09-21 加）：老板的测试机停在 next 分支，
-# 别人的机器停在 master —— 同一条更新命令各自拉自己的通道，详见 scripts/coco_channel.sh。
-# 需要切换时：环境变量 COCO_CHANNEL=next，或在仓库根写一个 .coco-channel 文件。
+# ---- 参数 ----
+SKIP_BACKUP=0
+NO_RESTART=0
+FORCE_CHANNEL=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-backup) SKIP_BACKUP=1 ;;
+    --no-restart)  NO_RESTART=1 ;;
+    --test)        FORCE_CHANNEL="next" ;;      # 测试版：最新待实测的版本
+    --stable)      FORCE_CHANNEL="master" ;;    # 稳定版：已实测通过的版本
+    --channel)     FORCE_CHANNEL="${2:-}"; shift ;;
+    *) echo "未知参数: $1（支持 --test / --stable / --channel <分支> / --skip-backup / --no-restart）" >&2; exit 1 ;;
+  esac
+  shift
+done
+
+# 通道（稳定版 master / 测试版 next，2026-09-21 加）
+#   不传通道参数：跟随当前分支 —— 别人的机器在 master 上，永远是稳定版，零迁移（行为与以前完全一致）。
+#   老板测试机：`update.sh --test` 一条命令切到测试版并按测试版更新；`--stable` 一条命令切回稳定版。
+#   也可用环境变量 COCO_CHANNEL=next，或在仓库根放 .coco-channel 文件。详见 scripts/coco_channel.sh。
 CHANNEL_SCRIPT="$REPO_ROOT/scripts/coco_channel.sh"
+if [[ -n "$FORCE_CHANNEL" ]]; then
+    export COCO_CHANNEL="$FORCE_CHANNEL"
+fi
 CUR_BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || echo '')"
 if [[ -f "$CHANNEL_SCRIPT" ]]; then
     WANT_BRANCH="$(bash "$CHANNEL_SCRIPT" want 2>/dev/null || echo "$CUR_BRANCH")"
     if [[ -n "$WANT_BRANCH" && "$WANT_BRANCH" != "$CUR_BRANCH" ]]; then
         info "切换通道：${CUR_BRANCH:-游离} → $WANT_BRANCH"
-        bash "$CHANNEL_SCRIPT" switch "$WANT_BRANCH" >/dev/null || fail "切换通道失败（工作区有未提交改动，或网络不通）"
+        bash "$CHANNEL_SCRIPT" switch "$WANT_BRANCH" >/dev/null \
+            || fail "切换通道失败（工作区有未提交改动，或网络不通）—— 你的改动没有被覆盖"
         CUR_BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || echo '')"
     fi
     CHANNEL_LABEL="$(bash "$CHANNEL_SCRIPT" label "$CUR_BRANCH" 2>/dev/null || echo '自定义通道')"
@@ -58,19 +87,13 @@ else
 fi
 info "当前通道：$CHANNEL_LABEL（分支 ${CUR_BRANCH:-游离}）"
 
-SKIP_BACKUP=0
-NO_RESTART=0
-for arg in "$@"; do
-  case "$arg" in
-    --skip-backup) SKIP_BACKUP=1 ;;
-    --no-restart)  NO_RESTART=1 ;;
-    *) echo "未知参数: $arg（支持 --skip-backup / --no-restart）" >&2; exit 1 ;;
-  esac
-done
-
-info(){ echo -e "\033[1;34m==>\033[0m $*"; }
-ok(){   echo -e "\033[1;32m   OK\033[0m $*"; }
-err(){  echo -e "\033[1;31m   FAIL\033[0m $*" >&2; }
+# 通道相对稳定线的位置提示：避免"以为在测、其实没有待测内容"（只读，失败不影响更新）
+if [[ "$CUR_BRANCH" != "master" && -n "$CUR_BRANCH" ]] && git rev-parse -q --verify origin/master >/dev/null 2>&1; then
+    AHEAD_N="$(git rev-list --count origin/master..HEAD 2>/dev/null || echo 0)"
+    BEHIND_N="$(git rev-list --count HEAD..origin/master 2>/dev/null || echo 0)"
+    [[ "${AHEAD_N:-0}" != "0" ]] && echo "  本机领先稳定版 ${AHEAD_N} 个提交（待实测内容）"
+    [[ "${BEHIND_N:-0}" != "0" ]] && echo "  本机落后稳定版 ${BEHIND_N} 个提交（当前没有待实测内容）"
+fi
 
 # ---- 前提检查：venv python 必须存在（说明已跑过 install.sh）----
 if [[ ! -x "$VENV_PY" ]]; then

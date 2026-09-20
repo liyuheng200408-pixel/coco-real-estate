@@ -46,8 +46,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -n "$(git status --porcelain)" ]]; then
-    fail "工作区有未提交改动，先 commit（晋升必须是"仓库里的东西"）"
+# 只看已跟踪文件的改动（未跟踪的锁文件/.env.db/密钥不算 —— 与更新脚本口径一致）
+if [[ -n "$(git status --porcelain | grep -vE '^\?\?' || true)" ]]; then
+    fail "工作区有未提交的代码改动，先 commit（晋升必须是"仓库里的东西"）"
 fi
 
 info "取两个远程的最新状态..."

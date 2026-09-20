@@ -50,8 +50,10 @@ coco_channel_switch() {         # $1=目标分支  $2=仓库根
         echo "切通道失败：没有指定目标分支" >&2
         return 1
     fi
-    if [[ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ]]; then
-        echo "切通道失败：$root 有未提交改动，请先处理（本工具绝不覆盖你的改动）" >&2
+    # 只看已跟踪文件的改动：未跟踪文件（更新锁、.env.db、加密密钥）不影响切分支，
+    # 也不该挡住切通道 —— 这一条是被真事逼出来的（锁文件由更新脚本自己创建，导致永远切不动）。
+    if [[ -n "$(git -C "$root" status --porcelain 2>/dev/null | grep -vE '^\?\?' || true)" ]]; then
+        echo "切通道失败：$root 有未提交的代码改动（已跟踪文件），请先处理（本工具绝不覆盖你的改动）" >&2
         return 1
     fi
     git -C "$root" fetch -q origin "$target" || {

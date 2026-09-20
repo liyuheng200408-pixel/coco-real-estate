@@ -103,11 +103,11 @@ class TestChannelTool:
         _commit_all(work, "init")
         subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(origin)], check=True)
         subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "master"], check=True)
-        (work / "VERSION").write_text("dirty\n", encoding="utf-8")      # 制造未提交改动
+        (work / "VERSION").write_text("dirty\n", encoding="utf-8")      # 制造已跟踪文件的未提交改动
 
         r = _run(["bash", str(work / "scripts" / "coco_channel.sh"), "switch", "next"], cwd=work)
         assert r.returncode != 0
-        assert "未提交改动" in (r.stdout + r.stderr)
+        assert "未提交的代码改动" in (r.stdout + r.stderr)
         assert _git(work, "branch", "--show-current").stdout.strip() == "master", "拒绝切换后不应换分支"
 
 
@@ -205,3 +205,118 @@ class TestPromoteRelease:
         assert r.returncode == 0, r.stdout + r.stderr
         tags = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "tag"], capture_output=True, text=True).stdout
         assert "v0.0.0-99" in tags
+
+
+class TestUpdateScriptStartsCleanly:
+    """更新脚本自身必须能正常启动 —— 这一条是被真事逼出来的：
+
+    曾经把通道代码写在 info()/fail() 定义**之前**，脚本一启动就 "command not found"
+    直接中断（还调了一个根本不存在的 fail）。所以这里真跑一次脚本，钉住：
+    ① 不出现 command not found；② 能打印当前通道；③ 能走到 venv 前提检查（说明前面全过了）。
+    """
+
+    def _fake_repo(self, tmp_path, branch="master"):
+        work = tmp_path / "work"
+        (work / "scripts").mkdir(parents=True)
+        for name in ("update.sh", "coco_channel.sh"):
+            shutil.copy(SCRIPTS / name, work / "scripts" / name)
+        subprocess.run(["git", "init", "-q", "-b", branch, str(work)], check=True)
+        for k, v in (("user.email", "t@t"), ("user.name", "t")):
+            subprocess.run(["git", "-C", str(work), "config", k, v], check=True)
+        (work / "VERSION").write_text("0.0.0-1\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(work), "commit", "-qm", "init"], check=True)
+        return work
+
+    def test_script_starts_and_reaches_preflight(self, tmp_path):
+        work = self._fake_repo(tmp_path)
+        r = _run(["bash", str(work / "scripts" / "update.sh")], cwd=work)
+        out = r.stdout + r.stderr
+        assert "command not found" not in out, out
+        assert "当前通道" in out, out
+        assert r.returncode != 0 and "虚拟环境" in out, "应当停在 venv 前提检查（本临时仓库不是真实安装）"
+
+    def test_test_flag_switches_to_test_channel(self, tmp_path):
+        """老板命令：update.sh --test → 自动切到测试通道"""
+        work = self._fake_repo(tmp_path)
+        origin = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "master"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "next"], check=True)
+        (work / "f.txt").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(work), "commit", "-qm", "next"], check=True)
+        subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "next"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "master"], check=True)
+
+        r = _run(["bash", str(work / "scripts" / "update.sh"), "--test"], cwd=work)
+        out = r.stdout + r.stderr
+        assert "command not found" not in out, out
+        assert "测试通道" in out, out
+        assert _git(work, "branch", "--show-current").stdout.strip() == "next", "没有切到测试通道"
+
+    def test_stable_flag_switches_back(self, tmp_path):
+        work = self._fake_repo(tmp_path, branch="next")
+        origin = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "next"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "master"], check=True)
+        subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "master"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "next"], check=True)
+
+        r = _run(["bash", str(work / "scripts" / "update.sh"), "--stable"], cwd=work)
+        out = r.stdout + r.stderr
+        assert "稳定通道" in out, out
+        assert _git(work, "branch", "--show-current").stdout.strip() == "master", "没有切回稳定通道"
+
+    def test_flag_refuses_to_switch_with_dirty_tree(self, tmp_path):
+        work = self._fake_repo(tmp_path)
+        origin = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "master"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "next"], check=True)
+        subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "next"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "master"], check=True)
+        (work / "VERSION").write_text("dirty\n", encoding="utf-8")     # 已跟踪文件的未提交改动
+
+        r = _run(["bash", str(work / "scripts" / "update.sh"), "--test"], cwd=work)
+        out = r.stdout + r.stderr
+        assert "未提交改动" in out, out
+        assert _git(work, "branch", "--show-current").stdout.strip() == "master", "脏工作区不应换分支"
+
+    def test_unknown_flag_is_rejected(self, tmp_path):
+        work = self._fake_repo(tmp_path)
+        r = _run(["bash", str(work / "scripts" / "update.sh"), "--nonsense"], cwd=work)
+        assert r.returncode != 0 and "未知参数" in (r.stdout + r.stderr)
+
+
+class TestRuntimeFilesDoNotBlockSwitch:
+    """运行时文件（更新锁 / 通道标记 / .env.db / 密钥）是未跟踪的，不该挡住切通道。
+
+    真缺陷记录：更新脚本自己会创建 .coco-update.lock，若切通道的干净检查把未跟踪文件
+    也算进去，老板的机器就会永远切不动通道（第一次更新后就再也切不了）。
+    """
+
+    def test_lock_file_does_not_block_switch(self, tmp_path):
+        work = _init_repo(tmp_path / "work")
+        (work / "scripts").mkdir(exist_ok=True)
+        shutil.copy(SCRIPTS / "coco_channel.sh", work / "scripts" / "coco_channel.sh")
+        _commit_all(work, "init")
+        origin = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "master"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "next"], check=True)
+        subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "next"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "master"], check=True)
+        # 模拟更新脚本留下的运行时文件
+        (work / ".coco-update.lock").write_text("", encoding="utf-8")
+        (work / ".coco-channel").write_text("next\n", encoding="utf-8")
+        (work / ".env.db").write_text("secret", encoding="utf-8")
+
+        r = _run(["bash", str(work / "scripts" / "coco_channel.sh"), "switch", "next"], cwd=work)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert _git(work, "branch", "--show-current").stdout.strip() == "next"

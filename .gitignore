@@ -228,3 +228,7 @@ native/fts5_cjk/*.so
 
 # Coco 上游同步时的挂钩点本地备份（仅本机，不提交）
 .sync-backup/
+
+# Coco 运行时文件（更新锁、通道标记）
+.coco-update.lock
+.coco-channel
