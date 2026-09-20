@@ -130,6 +130,9 @@ else
 fi
 
 if [[ -n "$TAG" ]]; then
+    case "$TAG" in
+        *-test*) fail "正式标签不能带 -test（那是测试号）—— 正式版请用 v<版本>，例如 v${VER}" ;;
+    esac
     info "打标签 $TAG 并推送"
     git tag -a "$TAG" -m "Coco $TAG（官方 Hermes ${VER%%-*} 定制版）" "$FROM_SHA" 2>/dev/null \
         || warn "标签 $TAG 已存在，沿用现有标签"

@@ -24,10 +24,11 @@ COCO_BASE="${COCO_VER%%-*}"
 COCO_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "未知")"
 COCO_BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || echo "")"
 COCO_CHANNEL_LABEL="$(bash "$REPO_ROOT/scripts/coco_channel.sh" label "$COCO_BRANCH" 2>/dev/null || echo "")"
+COCO_TEST_TAG="$(bash "$REPO_ROOT/scripts/coco_channel.sh" test-tag 2>/dev/null || echo "")"
 
 case "${1:-version}" in
   version|--version|-v|"")
-    echo "Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）· 提交 ${COCO_COMMIT}${COCO_CHANNEL_LABEL:+ · ${COCO_CHANNEL_LABEL}}"
+    echo "Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）· 提交 ${COCO_COMMIT}${COCO_CHANNEL_LABEL:+ · ${COCO_CHANNEL_LABEL}}${COCO_TEST_TAG:+ · 测试号 ${COCO_TEST_TAG}}"
     ;;
   check)
     exec "$REPO_ROOT/venv/bin/python" "$REPO_ROOT/scripts/healthcheck.py"

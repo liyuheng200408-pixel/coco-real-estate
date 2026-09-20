@@ -440,3 +440,85 @@ class TestApprovalGate:
         r = _run(["bash", "scripts/mark_verified.sh", "--list"], cwd=work)
         assert r.returncode == 0, r.stderr
         assert "verified/" in r.stdout and "老板实测通过" in r.stdout, r.stdout
+
+
+class TestTestVersionTags:
+    """测试版也要有号（老板 2026-09-21 要求："要不然你和我都区分不了测试版的版本"）。
+
+    约号：正式版 v<版本>，测试版 v<版本>-test<N>（N 递增）；测试号不发 Release、不进正式版。
+    """
+
+    def _repo(self, tmp_path, branch="next"):
+        work = _init_repo(tmp_path / "work", branch=branch)
+        (work / "scripts").mkdir(exist_ok=True)
+        for name in ("tag_test_version.sh", "coco_channel.sh", "promote_release.sh", "coco.sh"):
+            shutil.copy(SCRIPTS / name, work / "scripts" / name)
+        _commit_all(work, "init")
+        return work
+
+    def test_test_tag_increments(self, tmp_path):
+        work = self._repo(tmp_path)
+        r1 = _run(["bash", "scripts/tag_test_version.sh", "--note", "第一批", "--no-push"], cwd=work)
+        assert r1.returncode == 0, r1.stdout + r1.stderr
+        assert "v0.0.0-1-test1" in r1.stdout, r1.stdout
+        r2 = _run(["bash", "scripts/tag_test_version.sh", "--note", "第二批", "--no-push"], cwd=work)
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        assert "v0.0.0-1-test2" in r2.stdout, r2.stdout
+        tags = subprocess.run(["git", "-C", str(work), "tag"], capture_output=True, text=True).stdout.split()
+        assert "v0.0.0-1-test1" in tags and "v0.0.0-1-test2" in tags
+
+    def test_test_tag_requires_note_and_test_branch(self, tmp_path):
+        work = self._repo(tmp_path)
+        r = _run(["bash", "scripts/tag_test_version.sh", "--no-push"], cwd=work)
+        assert r.returncode != 0 and "--note" in (r.stdout + r.stderr)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "master2"], check=True)
+        r2 = _run(["bash", "scripts/tag_test_version.sh", "--note", "x", "--no-push"], cwd=work)
+        assert r2.returncode != 0 and "只能在测试通道" in (r2.stdout + r2.stderr)
+
+    def test_test_number_visible_in_version_output(self, tmp_path):
+        work = self._repo(tmp_path)
+        subprocess.run(["bash", "scripts/tag_test_version.sh", "--note", "第一批", "--no-push"],
+                       cwd=work, check=True, capture_output=True)
+        r = _run(["bash", "scripts/coco.sh", "version"], cwd=work)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "测试号" in r.stdout and "v0.0.0-1-test1" in r.stdout, r.stdout
+
+    def test_channel_tool_reports_test_tag(self, tmp_path):
+        work = self._repo(tmp_path)
+        subprocess.run(["bash", "scripts/tag_test_version.sh", "--note", "第一批", "--no-push"],
+                       cwd=work, check=True, capture_output=True)
+        r = _run(["bash", str(work / "scripts" / "coco_channel.sh"), "test-tag"], cwd=work)
+        assert r.stdout.strip() == "v0.0.0-1-test1", r.stdout
+        # 标签之后又有新提交 → 显示 +N 提交（避免"以为还是那一版"）
+        (work / "more.txt").write_text("more", encoding="utf-8")
+        _commit_all(work, "标签之后的新提交")
+        r2 = _run(["bash", str(work / "scripts" / "coco_channel.sh"), "test-tag"], cwd=work)
+        assert r2.stdout.strip() == "v0.0.0-1-test1 +1 提交", r2.stdout
+
+    def test_promote_refuses_test_tag_as_release_tag(self, tmp_path):
+        # 稳定通道要在位（先 master 提交 + 推送），再切到测试通道
+        work = _init_repo(tmp_path / "work")
+        (work / "scripts").mkdir(exist_ok=True)
+        for name in ("tag_test_version.sh", "coco_channel.sh", "promote_release.sh"):
+            shutil.copy(SCRIPTS / name, work / "scripts" / name)
+        _commit_all(work, "init")
+        origin = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "github", str(origin)], check=True)
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "master"], check=True)
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "next"], check=True)
+        (work / "feature.txt").write_text("f", encoding="utf-8")
+        _commit_all(work, "feature on next")
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "next"], check=True)
+        subprocess.run(["bash", "scripts/tag_test_version.sh", "--note", "第一批", "--no-push"],
+                       cwd=work, check=True, capture_output=True)
+        tip = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"],
+                             capture_output=True, text=True).stdout.strip()
+        subprocess.run(["git", "-C", str(work), "tag", "-a", "verified/v0.0.0-1-" + tip[:7],
+                        "-m", "老板验收通过：测试", tip], check=True)
+        r = _run(["bash", "scripts/promote_release.sh", "--tag", "v0.0.0-1-test9"], cwd=work)
+        assert r.returncode != 0
+        assert "正式标签不能带 -test" in (r.stdout + r.stderr), r.stdout + r.stderr

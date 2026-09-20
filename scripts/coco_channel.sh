@@ -11,6 +11,7 @@
 #   bash scripts/coco_channel.sh show            # 打印当前通道（如 "测试通道（next）"）
 #   bash scripts/coco_channel.sh want            # 打印"应该用哪个分支"（env/文件/当前分支）
 #   bash scripts/coco_channel.sh switch <分支>   # 切通道（工作区不干净时拒绝）
+#   bash scripts/coco_channel.sh test-tag        # 打印当前测试号（如 v0.21.3-67-test1）
 # =============================================================================
 set -uo pipefail
 
@@ -25,6 +26,19 @@ coco_channel_label() {          # $1=分支名
         "")               echo "未知通道" ;;
         *)                echo "自定义通道" ;;
     esac
+}
+
+# 测试标签：测试通道上离当前提交最近的测试号（如 v0.21.3-67-test1 [+N 提交]）
+coco_test_label() {             # $1=仓库根
+    local root="${1:-.}" tag ahead
+    tag="$(git -C "$root" describe --tags --match 'v*-test*' --abbrev=0 2>/dev/null || echo '')"
+    [[ -z "$tag" ]] && return 0
+    ahead="$(git -C "$root" rev-list --count "${tag}..HEAD" 2>/dev/null || echo 0)"
+    if [[ "${ahead:-0}" != "0" ]]; then
+        echo "${tag} +${ahead} 提交"
+    else
+        echo "$tag"
+    fi
 }
 
 coco_channel_current() {        # 当前分支（游离 HEAD 时为空）
@@ -88,8 +102,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         label)
             coco_channel_label "${2:-}"
             ;;
+        test-tag)
+            coco_test_label "$ROOT"
+            ;;
         *)
-            echo "用法: bash scripts/coco_channel.sh [show|want|switch <分支>|label <分支>]" >&2
+            echo "用法: bash scripts/coco_channel.sh [show|want|switch <分支>|label <分支>|test-tag]" >&2
             exit 2
             ;;
     esac

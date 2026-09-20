@@ -40,6 +40,24 @@ def _channel_label() -> str:
     return "自定义通道" if branch else "未知通道"
 
 
+def _test_tag() -> str:
+    """测试号：测试通道上离当前提交最近的测试标签（如 v0.21.3-67-test1）。"""
+    import subprocess
+
+    try:
+        out = subprocess.run(["git", "-C", str(REPO_ROOT), "describe", "--tags",
+                              "--match", "v*-test*", "--abbrev=0"],
+                             capture_output=True, text=True, timeout=5)
+        tag = out.stdout.strip()
+        if not tag:
+            return ""
+        ahead = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-list", "--count", f"{tag}..HEAD"],
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+        return f"{tag} +{ahead} 提交" if ahead not in ("", "0") else tag
+    except Exception:
+        return ""
+
+
 def _git_short_commit() -> str:
     """当前代码的提交短哈希（对上"到底是哪一次提交"，排查时最有用）。"""
     import subprocess
@@ -59,15 +77,20 @@ def get_coco_version(task_id: str = None) -> str:
     upstream = _read_first_line(REPO_ROOT / "UPSTREAM_VERSION").splitlines()
     commit = _git_short_commit()
     channel = _channel_label()
+    test_tag = _test_tag() if channel == "测试通道" else ""
+    version_line = f"Coco v{ver}（官方 Hermes {base} 定制版）· 提交 {commit} · {channel}"
+    if test_tag:
+        version_line += f" · 测试号 {test_tag}"
     return json.dumps({
         "success": True,
         "coco_version": ver,
         "hermes_base": base,
         "commit": commit,
         "channel": channel,
+        "test_tag": test_tag,
         "branch": _git_branch(),
         "upstream_tag": upstream[0] if upstream else None,
-        "message": f"Coco v{ver}（官方 Hermes {base} 定制版）· 提交 {commit} · {channel}",
+        "message": version_line,
     }, ensure_ascii=False)
 
 

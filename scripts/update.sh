@@ -85,7 +85,11 @@ if [[ -f "$CHANNEL_SCRIPT" ]]; then
 else
     CHANNEL_LABEL="稳定通道"
 fi
-info "当前通道：$CHANNEL_LABEL（分支 ${CUR_BRANCH:-游离}）"
+TEST_TAG=""
+if [[ "$CUR_BRANCH" == "next" && -f "$CHANNEL_SCRIPT" ]]; then
+    TEST_TAG="$(bash "$CHANNEL_SCRIPT" test-tag 2>/dev/null || echo '')"
+fi
+info "当前通道：$CHANNEL_LABEL（分支 ${CUR_BRANCH:-游离}${TEST_TAG:+，测试号 $TEST_TAG}）"
 
 # 通道相对稳定线的位置提示：避免"以为在测、其实没有待测内容"（只读，失败不影响更新）
 if [[ "$CUR_BRANCH" != "master" && -n "$CUR_BRANCH" ]] && git rev-parse -q --verify origin/master >/dev/null 2>&1; then
@@ -266,5 +270,5 @@ echo -e "版本: \033[1;34mv${COCO_VER}\033[0m  （官方 Hermes ${COCO_BASE} �
 # 提交号：与安装提示一致，便于任何一台机器对齐"哪一次提交"
 COCO_COMMIT=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "未知")
 echo -e "提交: \033[1;34m${COCO_COMMIT}\033[0m"
-echo -e "通道: \033[1;34m${CHANNEL_LABEL}\033[0m"
+echo -e "通道: \033[1;34m${CHANNEL_LABEL}${TEST_TAG:+（测试号 $TEST_TAG）}\033[0m"
 ok "无损更新完成。若本次更新涉及表结构，数据库已通过迁移升级，旧数据全部保留。"
