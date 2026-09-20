@@ -30,6 +30,8 @@ param(
     # existing tree pass -ForceCommit.
     [switch]$ForceCommit,
     [string]$Tag = "",
+    # COCO-PATCH: 覆盖要安装的代码仓库（默认装 Coco 房产定制版；留空即用内置源列表）。
+    [string]$RepoUrl = "",
     [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }),
     [string]$InstallDir = $(if ($env:HERMES_HOME) { "$env:HERMES_HOME\hermes-agent" } else { "$env:LOCALAPPDATA\hermes\hermes-agent" }),
 
@@ -383,8 +385,21 @@ $script:ResolvedPathReport = @{
 # Configuration
 # ============================================================================
 
-$RepoUrlSsh = "git@github.com:NousResearch/hermes-agent.git"
-$RepoUrlHttps = "https://github.com/NousResearch/hermes-agent.git"
+# COCO-PATCH: 首启要装的是 Coco（房产定制版），不是官方 Hermes —— 这是「换大脑」的关键一处。
+# 源顺序：Gitee（国内快）→ GitHub（海外快），与仓库其它下载一致；-RepoUrl 可显式覆盖。
+$CocoRepoGitee = "https://gitee.com/liyuheng200408/coco-real-estate.git"
+$CocoRepoGitHub = "https://github.com/liyuheng200408-pixel/coco-real-estate.git"
+if ($RepoUrl) {
+    $RepoUrlSsh = ""
+    $RepoUrlHttps = $RepoUrl
+    $RepoUrlHttpsFallback = ""
+} else {
+    $RepoUrlSsh = "git@github.com:liyuheng200408-pixel/coco-real-estate.git"
+    $RepoUrlHttps = $CocoRepoGitee
+    $RepoUrlHttpsFallback = $CocoRepoGitHub
+}
+# 实际成功的源（ZIP 兜底后要按它补 remote，否则后续更新会指向错的仓库）
+$script:UsedRepoUrl = $RepoUrlHttps
 $PythonVersion = "3.11"
 # Minor versions the installer accepts when the requested $PythonVersion isn't
 # available, in preference order. Only checkout-private uv-managed interpreters
@@ -2391,21 +2406,28 @@ function Install-Repository {
         git config --global windows.appendAtomically false 2>$null
 
         # Try SSH first, then HTTPS, with -c flag for atomic write fix
-        Write-Info "Trying SSH clone..."
-        $env:GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
-        try {
-            Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlSsh $InstallDir }
-            if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
-        } catch { }
-        $env:GIT_SSH_COMMAND = $null
+        if ($RepoUrlSsh) {
+            Write-Info "Trying SSH clone..."
+            $env:GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
+            try {
+                Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlSsh $InstallDir }
+                if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true; $script:UsedRepoUrl = $RepoUrlSsh }
+            } catch { }
+            $env:GIT_SSH_COMMAND = $null
+        }
 
         if (-not $cloneSuccess) {
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
-            Write-Info "SSH failed, trying HTTPS..."
-            try {
-                Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
-                if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
-            } catch { }
+            # COCO-PATCH: 按源列表逐个试（Gitee → GitHub），任一成功即止
+            foreach ($candidate in (@($RepoUrlHttps, $RepoUrlHttpsFallback) | Where-Object { $_ } | Select-Object -Unique)) {
+                if ($cloneSuccess) { break }
+                if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
+                Write-Info "Trying HTTPS clone: $candidate"
+                try {
+                    Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $candidate $InstallDir }
+                    if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true; $script:UsedRepoUrl = $candidate }
+                } catch { }
+            }
         }
 
         # Fallback: download ZIP archive (bypasses git file I/O issues entirely)
@@ -2416,20 +2438,37 @@ function Install-Repository {
                 # Pick the ZIP URL for the most-specific ref the caller asked
                 # for.  GitHub supports archive URLs for commits, tags, and
                 # branches; we honour Commit > Tag > Branch.
-                if ($Commit) {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/$Commit.zip"
-                    $zipLabel = $Commit
-                } elseif ($Tag) {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/tags/$Tag.zip"
-                    $zipLabel = $Tag
-                } else {
-                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/heads/$Branch.zip"
-                    $zipLabel = $Branch
+                # COCO-PATCH: 按源逐个试归档包。Gitee 与 GitHub 的归档路径不同：
+                #   Gitee : <repo>/repository/archive/<ref>.zip
+                #   GitHub: <repo>/archive/<commit>.zip | /archive/refs/tags/<tag>.zip | /archive/refs/heads/<branch>.zip
+                $zipBase = $null
+                $zipUrl = $null
+                foreach ($candidate in (@($RepoUrlHttps, $RepoUrlHttpsFallback) | Where-Object { $_ } | Select-Object -Unique)) {
+                    $repoRoot = $candidate -replace "\.git$", ""
+                    if ($repoRoot -match "gitee\.com") {
+                        if ($Commit) { $zipUrl = "$repoRoot/repository/archive/$Commit.zip"; $zipLabel = $Commit }
+                        elseif ($Tag) { $zipUrl = "$repoRoot/repository/archive/$Tag.zip"; $zipLabel = $Tag }
+                        else { $zipUrl = "$repoRoot/repository/archive/$Branch.zip"; $zipLabel = $Branch }
+                    } else {
+                        if ($Commit) { $zipUrl = "$repoRoot/archive/$Commit.zip"; $zipLabel = $Commit }
+                        elseif ($Tag) { $zipUrl = "$repoRoot/archive/refs/tags/$Tag.zip"; $zipLabel = $Tag }
+                        else { $zipUrl = "$repoRoot/archive/refs/heads/$Branch.zip"; $zipLabel = $Branch }
+                    }
+                    try {
+                        Invoke-WebRequest -Uri $zipUrl -OutFile "$env:TEMP\hermes-agent-$zipLabel.zip" -UseBasicParsing -ErrorAction Stop
+                        $zipBase = $candidate
+                        break
+                    } catch {
+                        Write-Warn "Archive download failed: $zipUrl"
+                        $zipUrl = $null
+                    }
                 }
+                if (-not $zipUrl) { throw "All archive sources failed: $($RepoUrlHttps), $($RepoUrlHttpsFallback)" }
+                $script:UsedRepoUrl = $zipBase
                 $zipPath = "$env:TEMP\hermes-agent-$zipLabel.zip"
                 $extractPath = "$env:TEMP\hermes-agent-extract"
 
-                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+                # ZIP 已在源循环里下载过了（见上），这里只做解压
                 if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
                 Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
@@ -2457,7 +2496,7 @@ function Install-Repository {
                     # config below and install.ps1:1461-1469). The later pin on
                     # the shared path is idempotent and still covers git clones.
                     git -c windows.appendAtomically=false config core.autocrlf false 2>$null
-                    git remote add origin $RepoUrlHttps 2>$null
+                    git remote add origin $script:UsedRepoUrl 2>$null
                     $fetchRef = if ($Commit) { $Commit } elseif ($Tag) { "refs/tags/$Tag" } else { $Branch }
                     Write-Info "Fetching $fetchRef so the ZIP checkout has a resolvable HEAD..."
                     $prevZipEAP = $ErrorActionPreference

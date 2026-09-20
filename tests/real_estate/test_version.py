@@ -64,6 +64,17 @@ class TestReleaseVersionConsistency:
         pkg = _json.loads((REPO_ROOT / "apps" / "desktop" / "package.json").read_text(encoding="utf-8"))
         assert pkg["version"] == ver, f"apps/desktop/package.json 是 {pkg['version']}，VERSION 是 {ver}"
 
+    def test_installer_clones_coco_not_upstream_hermes(self):
+        """首启引导脚本必须克隆 Coco 仓库，不能是官方 Hermes。
+
+        为什么钉这条：桌面版首启会下载并执行 install.ps1，而官方原版写死克隆
+        NousResearch/hermes-agent —— 装出来是官方 Hermes（没有 real_estate 工具集、
+        没有身份定制），用户以为装了 Coco 却是空壳。实测已修（Gitee 主源 + GitHub 兜底）。
+        """
+        text = (REPO_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
+        assert "coco-real-estate.git" in text, "install.ps1 没有指向 Coco 仓库"
+        assert "NousResearch/hermes-agent" not in text, "install.ps1 仍在克隆官方 Hermes 仓库"
+
     def test_readmes_advertise_the_repo_version(self):
         ver = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
         for name in ("README.md", "README.zh-CN.md"):

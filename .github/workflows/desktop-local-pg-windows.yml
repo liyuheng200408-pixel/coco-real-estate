@@ -272,6 +272,28 @@ jobs:
           if (-not (Test-Path $envFile)) { throw "阶段跑完了却没有 .env.db：$envFile" }
           "OK: coco-database 阶段可单独执行，且产出 .env.db" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
 
+      # 首启引导最关键的一条：install.ps1 克隆的是 Coco 而不是官方 Hermes。
+      # 官方原版写死 NousResearch/hermes-agent —— 那条路装出来是空壳（没有 real_estate 工具）。
+      - name: Bootstrap clones Coco (not upstream Hermes) on real Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $root = Join-Path $env:RUNNER_TEMP 'coco-clone-stage'
+          $install = Join-Path $root 'hermes-agent'
+          Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+
+          & pwsh -NoLogo -NoProfile -File scripts/install.ps1 -Stage repository -Branch master `
+              -HermesHome $root -InstallDir $install
+          if ($LASTEXITCODE -ne 0) { throw "repository 阶段失败（退出码 $LASTEXITCODE）" }
+
+          if (-not (Test-Path (Join-Path $install 'agent\real_estate_db.py'))) {
+            throw '克隆到的仓库里没有 agent/real_estate_db.py —— 装的不是 Coco（可能退回官方 Hermes 了）'
+          }
+          $origin = (git -C $install remote get-url origin) 2>$null
+          if ($origin -notmatch 'coco-real-estate') { throw "origin 不是 Coco 仓库：$origin" }
+          $version = (Get-Content (Join-Path $install 'VERSION') -Raw).Trim()
+          "OK: 首启克隆到 Coco（origin=$origin，VERSION=$version）" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
       # 退出前把数据库停掉：既是最干净的收尾，也避免常驻的 postgres 继续攥着
       # 继承来的句柄让 runner 收尾时干等。
       - name: Stop the portable database

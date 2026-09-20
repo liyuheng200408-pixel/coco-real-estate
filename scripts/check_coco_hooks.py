@@ -241,6 +241,15 @@ CONTENT_CHECKS = [
         "后端启动路径上被静默准备），且 Coco 的本机模式在安装阶段不再写 .env.db。\n"
         "处理：按 patches/10-install-ps1-local-db-stage.patch 恢复（阶段位置在依赖之后、PATH 之前）。",
     ),
+    (
+        "20",
+        "首启装的是 Coco 而不是官方 Hermes",
+        "scripts/install.ps1",
+        [r"COCO-PATCH", r"coco-real-estate"],
+        "官方快照覆盖后，首启会去克隆 NousResearch/hermes-agent → 装出来是官方 Hermes：\n"
+        "没有 real_estate 工具集、没有身份定制，等于白装。\n"
+        "处理：按 patches/10-install-ps1-coco-patches.patch 恢复（源顺序 Gitee → GitHub，-RepoUrl 可覆盖）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示

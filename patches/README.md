@@ -28,7 +28,7 @@
 | 07 | `gateway/run_turn.py`（官方 v0.21 起从 `gateway/run.py` 拆到这里） | 首次对话开场白换成 Coco 自我介绍；关闭官方 profile-build 引导 |
 | 08 | `scripts/sandbox/pick-release-tags.sh` | 标签过滤正则放宽：同时认「日期式 `vYYYY.M.D`」和「语义化 `vX.Y.Z`（含 `-N` 后缀）」 |
 | 09 | `apps/desktop/electron/backend-env.ts`、`apps/desktop/electron/main.ts` | 桌面版「本机模式」接上便携 PostgreSQL：后端 PATH 带 `pgsql\bin`、后端环境注入 `DATABASE_URL`、拉起后端前先确保数据库在跑 |
-| 10 | `scripts/install.ps1` | 安装器新增阶段 `coco-database`（在依赖之后、PATH 之前）：下载/初始化便携 PostgreSQL 并写出 `.env.db`，让首启界面能看到这一步 |
+| 10 | `scripts/install.ps1` | ①新增阶段 `coco-database`（在依赖之后、PATH 之前）：下载/初始化便携 PostgreSQL 并写出 `.env.db`；②克隆源从官方 `NousResearch/hermes-agent` 改为 Coco 仓库（Gitee → GitHub 双源，`-RepoUrl` 可覆盖） |
 
 另有 2 个**自有文档**（不属于官方代码，同步时直接保留即可）：
 `README.md`、`README.zh-CN.md`。
@@ -61,10 +61,16 @@
   Worker 是 `Stage-CocoDatabase` → `Install-CocoLocalDatabase`；后者调
   `apps/desktop/scripts/portable-postgres.ps1 -Action setup`，失败即抛（安装器把这一步标红）。
   `COCO_SKIP_LOCAL_DB=1` 可跳过。
-- **为什么**：桌面版首启的进度界面由 install.ps1 的 stage 协议驱动（`-Manifest` 给阶段清单、
+- **为什么（数据库阶段）**：桌面版首启的进度界面由 install.ps1 的 stage 协议驱动（`-Manifest` 给阶段清单、
   `-Stage <name>` 单跑一步）。数据库不成为阶段，用户就看不到「正在准备本机数据库」，
   只会在后端启动时静默等待；而数据层缺少 `DATABASE_URL` 是直接拒绝初始化的。
   顺序必须在依赖之后（阶段里会顺带建表）、PATH 与网关之前（它们都要读 `.env.db`）。
+- **为什么（克隆源）**：桌面版首启会下载并执行这个 `install.ps1`，而官方原版写死克隆
+  `NousResearch/hermes-agent` —— 装出来是**官方 Hermes**：没有 real_estate 工具集、没有身份定制，
+  用户以为装了 Coco 却是空壳（2026-09-20 查出来的致命缺口）。改成 Coco 仓库后，
+  实测 `-Stage repository` 的 origin 是 `gitee.com/liyuheng200408/coco-real-estate.git`、
+  且工作区含 `agent/real_estate_db.py` 与正确的 `VERSION`。ZIP 兜底也按源区分路径
+  （Gitee 是 `<repo>/repository/archive/<ref>.zip`，GitHub 是 `<repo>/archive/refs/heads/<ref>.zip`）。
 - **上游变了怎么办**：自检第 19 项盯着（`COCO-PATCH` + `coco-database` + `Stage-CocoDatabase`）。
   官方若重构阶段表，按上面的语义在新结构里重做，别机械 apply。
 
