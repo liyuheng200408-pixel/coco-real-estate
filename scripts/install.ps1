@@ -30,8 +30,6 @@ param(
     # existing tree pass -ForceCommit.
     [switch]$ForceCommit,
     [string]$Tag = "",
-    # COCO-PATCH: 覆盖要安装的代码仓库（默认装 Coco 房产定制版；留空即用内置源列表）。
-    [string]$RepoUrl = "",
     [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }),
     [string]$InstallDir = $(if ($env:HERMES_HOME) { "$env:HERMES_HOME\hermes-agent" } else { "$env:LOCALAPPDATA\hermes\hermes-agent" }),
 
@@ -385,21 +383,8 @@ $script:ResolvedPathReport = @{
 # Configuration
 # ============================================================================
 
-# COCO-PATCH: 首启要装的是 Coco（房产定制版），不是官方 Hermes —— 这是「换大脑」的关键一处。
-# 源顺序：Gitee（国内快）→ GitHub（海外快），与仓库其它下载一致；-RepoUrl 可显式覆盖。
-$CocoRepoGitee = "https://gitee.com/liyuheng200408/coco-real-estate.git"
-$CocoRepoGitHub = "https://github.com/liyuheng200408-pixel/coco-real-estate.git"
-if ($RepoUrl) {
-    $RepoUrlSsh = ""
-    $RepoUrlHttps = $RepoUrl
-    $RepoUrlHttpsFallback = ""
-} else {
-    $RepoUrlSsh = "git@github.com:liyuheng200408-pixel/coco-real-estate.git"
-    $RepoUrlHttps = $CocoRepoGitee
-    $RepoUrlHttpsFallback = $CocoRepoGitHub
-}
-# 实际成功的源（ZIP 兜底后要按它补 remote，否则后续更新会指向错的仓库）
-$script:UsedRepoUrl = $RepoUrlHttps
+$RepoUrlSsh = "git@github.com:NousResearch/hermes-agent.git"
+$RepoUrlHttps = "https://github.com/NousResearch/hermes-agent.git"
 $PythonVersion = "3.11"
 # Minor versions the installer accepts when the requested $PythonVersion isn't
 # available, in preference order. Only checkout-private uv-managed interpreters
@@ -1540,41 +1525,13 @@ function Install-Git {
             $downloadIsZip = $false
         }
 
-        # COCO-PATCH: 多源 + 按实测延迟排序。官方 GitHub release 资产会重定向到
-        # objects.githubusercontent.com（国内常被挡），首启会卡在「装 Git」这一步；
-        # npmmirror 镜像了 git-for-windows 的全部 release 资产（同名同版本，已核对）。
-        # 只取 1 字节探延迟（最多 6 秒），快的排前面 —— 国内自然走镜像、海外自然走官方。
-        $gitMirrorBase = "https://registry.npmmirror.com/-/binary/git-for-windows/$gitTag"
-        $gitOfficialBase = "https://github.com/git-for-windows/git/releases/download/$gitTag"
-        $gitSources = @("$gitMirrorBase/$assetName", "$gitOfficialBase/$assetName")
-        $scored = foreach ($u in $gitSources) {
-            $secs = 99
-            try {
-                $sw = [System.Diagnostics.Stopwatch]::StartNew()
-                $null = Invoke-WebRequest -Uri $u -Method Head -TimeoutSec 6 -UseBasicParsing -ErrorAction Stop
-                $sw.Stop()
-                $secs = [math]::Round($sw.Elapsed.TotalSeconds, 2)
-            } catch { $secs = 99 }
-            [pscustomobject]@{ Url = $u; Secs = $secs }
-        }
-        $downloadUrl = $null
+        $downloadUrl = "https://github.com/git-for-windows/git/releases/download/$gitTag/$assetName"
         $downloadExt = if ($downloadIsZip) { "zip" } else { "7z.exe" }
         $tmpFile = "$env:TEMP\$assetName"
         $gitDir = "$HermesHome\git"
 
-        foreach ($candidate in ($scored | Sort-Object Secs | ForEach-Object { $_.Url })) {
-            Write-Info "Downloading $assetName (Git for Windows $gitVerTag) from $candidate ..."
-            try {
-                Invoke-WebRequest -Uri $candidate -OutFile $tmpFile -UseBasicParsing -ErrorAction Stop
-                $downloadUrl = $candidate
-                break
-            } catch {
-                Write-Warn "Git 下载失败（$candidate）：$($_.Exception.Message)"
-            }
-        }
-        if (-not $downloadUrl) {
-            throw "PortableGit 下载失败（已试：$($gitSources -join ', ')）。排查：1) 网络/代理；2) 镜像是否可达（registry.npmmirror.com）；3) 手动下载 $assetName 放到 $tmpFile 后重跑。"
-        }
+        Write-Info "Downloading $assetName (Git for Windows $gitVerTag)..."
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing
 
         if (Test-Path $gitDir) {
             Write-Info "Removing previous Git install at $gitDir ..."
@@ -2434,28 +2391,21 @@ function Install-Repository {
         git config --global windows.appendAtomically false 2>$null
 
         # Try SSH first, then HTTPS, with -c flag for atomic write fix
-        if ($RepoUrlSsh) {
-            Write-Info "Trying SSH clone..."
-            $env:GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
-            try {
-                Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlSsh $InstallDir }
-                if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true; $script:UsedRepoUrl = $RepoUrlSsh }
-            } catch { }
-            $env:GIT_SSH_COMMAND = $null
-        }
+        Write-Info "Trying SSH clone..."
+        $env:GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
+        try {
+            Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlSsh $InstallDir }
+            if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
+        } catch { }
+        $env:GIT_SSH_COMMAND = $null
 
         if (-not $cloneSuccess) {
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
-            # COCO-PATCH: 按源列表逐个试（Gitee → GitHub），任一成功即止
-            foreach ($candidate in (@($RepoUrlHttps, $RepoUrlHttpsFallback) | Where-Object { $_ } | Select-Object -Unique)) {
-                if ($cloneSuccess) { break }
-                if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
-                Write-Info "Trying HTTPS clone: $candidate"
-                try {
-                    Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $candidate $InstallDir }
-                    if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true; $script:UsedRepoUrl = $candidate }
-                } catch { }
-            }
+            Write-Info "SSH failed, trying HTTPS..."
+            try {
+                Invoke-NativeWithRelaxedErrorAction { git -c windows.appendAtomically=false clone --depth 1 --branch $Branch $RepoUrlHttps $InstallDir }
+                if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
+            } catch { }
         }
 
         # Fallback: download ZIP archive (bypasses git file I/O issues entirely)
@@ -2466,37 +2416,20 @@ function Install-Repository {
                 # Pick the ZIP URL for the most-specific ref the caller asked
                 # for.  GitHub supports archive URLs for commits, tags, and
                 # branches; we honour Commit > Tag > Branch.
-                # COCO-PATCH: 按源逐个试归档包。Gitee 与 GitHub 的归档路径不同：
-                #   Gitee : <repo>/repository/archive/<ref>.zip
-                #   GitHub: <repo>/archive/<commit>.zip | /archive/refs/tags/<tag>.zip | /archive/refs/heads/<branch>.zip
-                $zipBase = $null
-                $zipUrl = $null
-                foreach ($candidate in (@($RepoUrlHttps, $RepoUrlHttpsFallback) | Where-Object { $_ } | Select-Object -Unique)) {
-                    $repoRoot = $candidate -replace "\.git$", ""
-                    if ($repoRoot -match "gitee\.com") {
-                        if ($Commit) { $zipUrl = "$repoRoot/repository/archive/$Commit.zip"; $zipLabel = $Commit }
-                        elseif ($Tag) { $zipUrl = "$repoRoot/repository/archive/$Tag.zip"; $zipLabel = $Tag }
-                        else { $zipUrl = "$repoRoot/repository/archive/$Branch.zip"; $zipLabel = $Branch }
-                    } else {
-                        if ($Commit) { $zipUrl = "$repoRoot/archive/$Commit.zip"; $zipLabel = $Commit }
-                        elseif ($Tag) { $zipUrl = "$repoRoot/archive/refs/tags/$Tag.zip"; $zipLabel = $Tag }
-                        else { $zipUrl = "$repoRoot/archive/refs/heads/$Branch.zip"; $zipLabel = $Branch }
-                    }
-                    try {
-                        Invoke-WebRequest -Uri $zipUrl -OutFile "$env:TEMP\hermes-agent-$zipLabel.zip" -UseBasicParsing -ErrorAction Stop
-                        $zipBase = $candidate
-                        break
-                    } catch {
-                        Write-Warn "Archive download failed: $zipUrl"
-                        $zipUrl = $null
-                    }
+                if ($Commit) {
+                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/$Commit.zip"
+                    $zipLabel = $Commit
+                } elseif ($Tag) {
+                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/tags/$Tag.zip"
+                    $zipLabel = $Tag
+                } else {
+                    $zipUrl = "https://github.com/NousResearch/hermes-agent/archive/refs/heads/$Branch.zip"
+                    $zipLabel = $Branch
                 }
-                if (-not $zipUrl) { throw "All archive sources failed: $($RepoUrlHttps), $($RepoUrlHttpsFallback)" }
-                $script:UsedRepoUrl = $zipBase
                 $zipPath = "$env:TEMP\hermes-agent-$zipLabel.zip"
                 $extractPath = "$env:TEMP\hermes-agent-extract"
 
-                # ZIP 已在源循环里下载过了（见上），这里只做解压
+                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
                 if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
                 Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
@@ -2524,7 +2457,7 @@ function Install-Repository {
                     # config below and install.ps1:1461-1469). The later pin on
                     # the shared path is idempotent and still covers git clones.
                     git -c windows.appendAtomically=false config core.autocrlf false 2>$null
-                    git remote add origin $script:UsedRepoUrl 2>$null
+                    git remote add origin $RepoUrlHttps 2>$null
                     $fetchRef = if ($Commit) { $Commit } elseif ($Tag) { "refs/tags/$Tag" } else { $Branch }
                     Write-Info "Fetching $fetchRef so the ZIP checkout has a resolvable HEAD..."
                     $prevZipEAP = $ErrorActionPreference
@@ -4820,10 +4753,6 @@ if ($IncludeDesktop) {
     $InstallStages += @{ Name = "desktop"; Title = "Building desktop app"; Category = "install"; NeedsUserInput = $false; Worker = "Stage-Desktop" }
 }
 $InstallStages += @(
-    # COCO-PATCH: Coco 本机模式的便携数据库（官方安装器没有这一环）。
-    # 放在 venv/依赖之后、PATH 与网关之前：数据层强制 PostgreSQL（缺 DATABASE_URL 直接
-    # 报错），而且这一步会写出 .env.db —— 后面注入 PATH、启动后端都要读它。
-    @{ Name = "coco-database";    Title = "Preparing the local database";  Category = "install";     NeedsUserInput = $false; Worker = "Stage-CocoDatabase" }
     @{ Name = "path";             Title = "Adding Hermes to PATH";                Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-Path" }
     @{ Name = "config-templates"; Title = "Writing configuration templates";      Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-ConfigTemplates" }
     @{ Name = "platform-sdks";    Title = "Installing messaging platform SDKs";   Category = "finalize";     NeedsUserInput = $false; Worker = "Stage-PlatformSdks" }
@@ -4870,40 +4799,6 @@ function Stage-Venv             { Resolve-UvCmd; Install-Venv }
 function Stage-Dependencies     { Resolve-UvCmd; Install-Dependencies }
 function Stage-NodeDeps         { Install-NodeDeps }
 function Stage-Desktop          { Install-DesktopVoiceDeps; Install-Desktop }
-function Stage-CocoDatabase     { Install-CocoLocalDatabase }
-# COCO-PATCH: Coco 本机模式的便携 PostgreSQL。
-#
-# 官方安装器不装数据库（它的本机后端不需要），而 Coco 的数据层强制 PostgreSQL：
-# agent/real_estate_db.py 在缺少 DATABASE_URL 时直接拒绝初始化（禁 sqlite 回退，
-# 2026-08-12 幽灵库事故的治本机制）。所以本机模式必须自带一个数据库，这一步负责：
-# 下载便携包 → 只解 bin/lib/share → initdb → 随机端口与口令 → 只监听回环 → 写 .env.db。
-#
-# 幂等：重复执行只做「确保在跑」，不重建数据目录、不换口令。桌面版每次启动也会调一次。
-# 失败即抛（安装器会把这一步标红，用户能看到具体原因）—— 没有数据库时后端必然起不来。
-function Install-CocoLocalDatabase {
-    if ($env:COCO_SKIP_LOCAL_DB -eq "1") {
-        Write-Info "Skipping local database (COCO_SKIP_LOCAL_DB=1)."
-        return
-    }
-
-    $bootstrap = Join-Path $PSScriptRoot "..\apps\desktop\scripts\portable-postgres.ps1"
-    if (-not (Test-Path -LiteralPath $bootstrap)) {
-        throw "portable-postgres.ps1 not found at $bootstrap -- this build is missing the Coco local-database scripts"
-    }
-
-    Write-Info "Preparing the local PostgreSQL (portable, user directory, loopback only)..."
-    $pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
-    if (-not $pwshExe) { $pwshExe = "powershell" }
-
-    & $pwshExe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap -Action setup
-    if ($LASTEXITCODE -ne 0) {
-        $log = Join-Path $env:LOCALAPPDATA "hermes\pgsql-data\coco-postgres.log"
-        throw "local database setup failed (exit $LASTEXITCODE). Database log: $log"
-    }
-
-    Write-Success "Local database ready (connection string written to .env.db)."
-}
-
 function Stage-Path             { Set-PathVariable }
 function Stage-ConfigTemplates  { Copy-ConfigTemplates }
 function Stage-PlatformSdks     { Resolve-UvCmd; Install-PlatformSdks }

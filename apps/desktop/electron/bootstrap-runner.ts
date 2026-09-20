@@ -44,7 +44,7 @@ const IS_WINDOWS = process.platform === 'win32'
 
 const STAMP_COMMIT_RE = /^[0-9a-f]{7,40}$/i
 const FALLBACK_COMMIT_RE = /^0{7,40}$/
-const FALLBACK_BRANCH = 'master'
+const FALLBACK_BRANCH = 'main'
 
 function isPinnedCommit(commit) {
   return typeof commit === 'string' && STAMP_COMMIT_RE.test(commit) && !FALLBACK_COMMIT_RE.test(commit)
@@ -193,8 +193,8 @@ function bootstrapCacheDir(hermesHome) {
 
 // The install.sh / install.ps1 that ships inside the already-installed agent
 // checkout under ~/.hermes/hermes-agent. Used as a last-resort fallback when
-// the pinned commit can't be fetched from any Coco source (e.g. a locally-built
-// desktop app stamped to an unpushed HEAD).
+// the pinned commit can't be fetched from GitHub (e.g. a locally-built desktop
+// app stamped to an unpushed HEAD).
 function installedAgentInstallScript(hermesHome) {
   if (!hermesHome) {
     return null
@@ -227,193 +227,90 @@ function cachedScriptPath(hermesHome, commit) {
   return path.join(bootstrapCacheDir(hermesHome), `install-${commit}.${process.platform === 'win32' ? 'ps1' : 'sh'}`)
 }
 
-// Raw sources for scripts/install.{ps1,sh}, ordered by "reachability from
-// mainland China first": Gitee, then the jsDelivr GitHub CDN mirror, then
-// raw.githubusercontent.com (which commonly fails there in milliseconds).
-// `{ref}` is the install ref (pinned SHA or branch), `{script}` the platform
-// installer filename. Order matters: the first source that answers HTTP 200
-// wins and the later ones are never contacted.
-const INSTALL_SCRIPT_SOURCE_TEMPLATES = [
-  'https://gitee.com/liyuheng200408/coco-real-estate/raw/{ref}/scripts/{script}',
-  'https://cdn.jsdelivr.net/gh/liyuheng200408-pixel/coco-real-estate@{ref}/scripts/{script}',
-  'https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/{ref}/scripts/{script}'
-]
+function downloadInstallScript(ref, destPath) {
+  // Fetch from GitHub raw at the install ref. Normal production builds pass a
+  // pinned SHA (immutable). Non-git fallback builds pass an unpinned branch
+  // ref so local builds can still bootstrap without pretending the all-zero
+  // placeholder is a real GitHub commit.
+  const scriptName = installScriptName()
+  const url = `https://raw.githubusercontent.com/NousResearch/hermes-agent/${ref}/scripts/${scriptName}`
 
-// Per-source budget. A source that is blackholed (no RST, just silence) must
-// not stall first-launch bootstrap for the platform socket default; 20s is
-// generous for a ~30KB script and still keeps the worst case acceptable when
-// all three sources are down.
-const INSTALL_SCRIPT_SOURCE_TIMEOUT_MS = 20_000
-
-const INSTALL_SCRIPT_USER_AGENT = 'coco-desktop-bootstrap'
-
-/** Expand the ordered source templates into concrete URLs for a ref + script. */
-function installScriptSourceUrls(ref, scriptName) {
-  return INSTALL_SCRIPT_SOURCE_TEMPLATES.map(template =>
-    template.replace('{ref}', String(ref)).replace('{script}', String(scriptName))
-  )
-}
-
-/**
- * Download ONE source into destPath (via a .tmp file renamed on success).
- * Rejects with the original error wording — `Failed to download <script>:
- * HTTP <status> from <url>` — so callers keep seeing the same style they did
- * when only raw.githubusercontent.com was used.
- */
-function fetchInstallScriptFrom(
-  url,
-  destPath,
-  scriptName = installScriptName(),
-  timeoutMs = INSTALL_SCRIPT_SOURCE_TIMEOUT_MS
-) {
-  return new Promise<void>((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(destPath), { recursive: true })
     const tmpPath = destPath + '.tmp'
+    const out = fs.createWriteStream(tmpPath)
+    https
+      .get(url, res => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          // GitHub raw shouldn't redirect for a SHA URL, but follow once
+          // defensively.
+          out.close()
+          fs.unlinkSync(tmpPath)
+          https
+            .get(res.headers.location, res2 => {
+              if (res2.statusCode !== 200) {
+                reject(
+                  new Error(
+                    `Failed to download ${scriptName}: HTTP ${res2.statusCode} from redirect ${res.headers.location}`
+                  )
+                )
 
-    const cleanup = () => {
-      try {
-        fs.unlinkSync(tmpPath)
-      } catch {
-        void 0
-      }
-    }
+                return
+              }
 
-    const handleResponse = (res, resUrl, redirectsLeft) => {
-      const status = res.statusCode || 0
-
-      // Gitee/jsDelivr may redirect (e.g. branch -> blob URL). Follow once
-      // defensively, like the original implementation did for GitHub raw.
-      if (status >= 300 && status < 400 && redirectsLeft > 0) {
-        res.resume()
-        const location = res.headers.location
-
-        if (!location) {
-          cleanup()
-          reject(new Error(`Failed to download ${scriptName}: HTTP ${status} without a Location header from ${resUrl}`))
-
-          return
-        }
-
-        let nextUrl
-
-        try {
-          nextUrl = new URL(location, resUrl).toString()
-        } catch {
-          cleanup()
-          reject(new Error(`Failed to download ${scriptName}: HTTP ${status} from redirect ${location}`))
+              const out2 = fs.createWriteStream(tmpPath)
+              res2.pipe(out2)
+              out2.on('finish', () => {
+                out2.close()
+                fs.renameSync(tmpPath, destPath)
+                resolve(destPath)
+              })
+              out2.on('error', reject)
+            })
+            .on('error', reject)
 
           return
         }
 
-        const redirected = https.get(nextUrl, { headers: requestHeaders() }, res2 =>
-          handleResponse(res2, nextUrl, redirectsLeft - 1)
-        )
+        if (res.statusCode !== 200) {
+          out.close()
 
-        redirected.setTimeout(timeoutMs, () =>
-          redirected.destroy(new Error(`timed out after ${timeoutMs}ms`))
-        )
-        redirected.on('error', err => {
-          cleanup()
-          reject(new Error(`Failed to download ${scriptName}: ${err.message} from ${nextUrl}`))
-        })
-
-        return
-      }
-
-      if (status !== 200) {
-        res.resume()
-        cleanup()
-        reject(new Error(`Failed to download ${scriptName}: HTTP ${status} from ${resUrl}`))
-
-        return
-      }
-
-      const out = fs.createWriteStream(tmpPath)
-
-      out.on('finish', () => {
-        out.close(() => {
           try {
-            fs.renameSync(tmpPath, destPath)
-            resolve()
-          } catch (err) {
-            cleanup()
-            reject(new Error(`Failed to download ${scriptName}: ${err.message} from ${resUrl}`))
+            fs.unlinkSync(tmpPath)
+          } catch {
+            void 0
           }
+
+          reject(new Error(`Failed to download ${scriptName}: HTTP ${res.statusCode} from ${url}`))
+
+          return
+        }
+
+        res.pipe(out)
+        out.on('finish', () => {
+          out.close()
+          fs.renameSync(tmpPath, destPath)
+          resolve(destPath)
+        })
+        out.on('error', err => {
+          try {
+            fs.unlinkSync(tmpPath)
+          } catch {
+            void 0
+          }
+
+          reject(err)
         })
       })
-      out.on('error', err => {
-        cleanup()
-        reject(new Error(`Failed to download ${scriptName}: ${err.message} from ${resUrl}`))
+      .on('error', err => {
+        try {
+          fs.unlinkSync(tmpPath)
+        } catch {
+          void 0
+        }
+
+        reject(err)
       })
-      res.on('error', err => {
-        cleanup()
-        reject(new Error(`Failed to download ${scriptName}: ${err.message} from ${resUrl}`))
-      })
-      res.pipe(out)
-    }
-
-    const req = https.get(url, { headers: requestHeaders() }, res => handleResponse(res, url, 1))
-
-    req.setTimeout(timeoutMs, () => req.destroy(new Error(`timed out after ${timeoutMs}ms`)))
-    req.on('error', err => {
-      cleanup()
-      reject(new Error(`Failed to download ${scriptName}: ${err.message} from ${url}`))
-    })
-  })
-}
-
-function requestHeaders() {
-  return { 'User-Agent': INSTALL_SCRIPT_USER_AGENT, Accept: '*/*' }
-}
-
-/**
- * Try each URL in order, keep the first that answers. Resolves with destPath
- * (unchanged contract); rejects only after every source failed, preserving
- * the per-source failure messages for the log trail.
- */
-type InstallScriptFetchFn = (
-  url: string,
-  destPath: string,
-  scriptName?: string,
-  timeoutMs?: number
-) => Promise<void>
-
-async function downloadInstallScriptFromFirstSource(
-  urls,
-  {
-    scriptName = installScriptName(),
-    destPath,
-    _fetch = fetchInstallScriptFrom
-  }: { scriptName?: string; destPath: string; _fetch?: InstallScriptFetchFn }
-) {
-  const failures = []
-
-  for (const url of urls) {
-    try {
-      await _fetch(url, destPath, scriptName)
-
-      return destPath
-    } catch (err) {
-      failures.push(err && err.message ? err.message : String(err))
-    }
-  }
-
-  throw new Error(
-    `Failed to download ${scriptName}: all ${urls.length} sources failed — ${failures.join('; ')}`
-  )
-}
-
-function downloadInstallScript(ref, destPath) {
-  // Fetch scripts/install.ps1|sh at the install ref from the Coco repo, trying
-  // the ordered sources (Gitee → jsDelivr → GitHub raw) until one answers.
-  // Normal production builds pass a pinned SHA (immutable). Non-git fallback
-  // builds pass an unpinned branch ref so local builds can still bootstrap
-  // without pretending the all-zero placeholder is a real commit.
-  const scriptName = installScriptName()
-
-  return downloadInstallScriptFromFirstSource(installScriptSourceUrls(ref, scriptName), {
-    scriptName,
-    destPath
   })
 }
 
@@ -435,8 +332,7 @@ async function resolveInstallScript({
     return { path: localScript, source: 'local', kind: installScriptKind() }
   }
 
-  // 2. Packaged path: download from the Coco sources (Gitee → jsDelivr →
-  //    GitHub raw) at the install stamp's ref.
+  // 2. Packaged path: download from GitHub at the install stamp's ref.
   // Non-git fallback builds carry an all-zero commit; treat that as an
   // unpinned branch ref instead of trying to fetch a non-existent SHA.
   const installRef = installRefForStamp(installStamp)
@@ -466,8 +362,7 @@ async function resolveInstallScript({
   emit({
     type: 'log',
     line:
-      `[bootstrap] fetching ${installScriptName()} for ${installRef.ref.slice(0, 12)} from ` +
-      'Coco sources (Gitee → jsDelivr → GitHub raw)' +
+      `[bootstrap] fetching ${installScriptName()} for ${installRef.ref.slice(0, 12)} from GitHub` +
       (installRef.pinned ? '' : ' (fallback, unpinned)')
   })
 
@@ -477,18 +372,18 @@ async function resolveInstallScript({
 
     return { path: cached, source: 'download', commit: resolvedCommit, kind: installScriptKind() }
   } catch (err) {
-    // The pinned commit may not be fetchable from any of the Coco sources --
-    // most commonly a locally-built desktop app stamped to an unpushed HEAD
-    // (see write-build-stamp.mjs fromLocalGit). Fall back to the installer
-    // that ships inside the already-installed agent checkout so dev/self-builds
-    // can still bootstrap instead of dying with a fatal 404.
+    // The pinned commit may not be fetchable from GitHub -- most commonly a
+    // locally-built desktop app stamped to an unpushed HEAD (see
+    // write-build-stamp.mjs fromLocalGit). Fall back to the installer that
+    // ships inside the already-installed agent checkout so dev/self-builds can
+    // still bootstrap instead of dying with a fatal 404.
     const installed = installedAgentInstallScript(hermesHome)
 
     if (installed) {
       emit({
         type: 'log',
         line:
-          `[bootstrap] installer fetch failed (${err.message}); ` +
+          `[bootstrap] GitHub fetch failed (${err.message}); ` +
           `falling back to installed agent ${installScriptName()} at ${installed}`
       })
 
@@ -1150,11 +1045,9 @@ export {
   buildPinArgs,
   buildPosixPinArgs,
   cachedScriptPath,
-  downloadInstallScriptFromFirstSource,
   hasExistingGitCheckout,
   installedAgentInstallScript,
   installRefForStamp,
-  installScriptSourceUrls,
   isPinnedCommit,
   // Exposed for testability
   parseStageResult,

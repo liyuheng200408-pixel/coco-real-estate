@@ -32,15 +32,15 @@ export const en: Translations = {
     ownerMissing: 'Reopen this conversation to manage its connections.',
     search: 'Find an app',
     empty: 'No matching apps',
-    disclaimer: 'Connecting is optional. Only authorize the apps you want Coco to use.',
+    disclaimer: 'Connecting is optional. Only authorize the apps you want Hermes to use.',
     connectTitle: app => `Connect ${app}?`,
-    describe: app => `Coco signs in to ${app} in your browser and asks before reading anything there.`,
+    describe: app => `Hermes signs in to ${app} in your browser and asks before reading anything there.`,
     execution: 'Connector tools'
   },
 
   sessionImport: {
     title: 'Continue from another app',
-    subtitle: 'Bring a conversation into Coco and pick up where you left off.',
+    subtitle: 'Bring a conversation into Hermes and pick up where you left off.',
     action: 'Import session',
     readingFrom: 'Reading from',
     connectedComputer: 'the connected computer',
@@ -58,18 +58,18 @@ export const en: Translations = {
     more: 'Load more sessions',
     messages: 'messages',
     choose: 'A conversation worth continuing',
-    chooseHelp: 'Choose a session to read its history before bringing it into Coco.',
+    chooseHelp: 'Choose a session to read its history before bringing it into Hermes.',
     previewLoading: 'Opening preview',
     previewError: 'Preview unavailable',
     previewHelp: 'The source may have moved or changed. Refresh the list and try again.',
     previewLimit: 'Preview shortened for readability. The complete conversation is imported.',
     you: 'You',
-    snapshot: 'This conversation is already in Coco. Open your existing copy to continue.',
+    snapshot: 'This conversation is already in Hermes. Open your existing copy to continue.',
     copyNotice:
       'Copies conversation text. Source files stay unchanged. Tool output and reasoning are not carried over.',
     importing: 'Importing…',
-    open: 'Open in Coco',
-    continue: 'Continue in Coco',
+    open: 'Open in Hermes',
+    continue: 'Continue in Hermes',
     importError: 'Could not import this conversation.'
   },
   common: {
@@ -134,15 +134,15 @@ export const en: Translations = {
   },
 
   boot: {
-    ready: 'Coco Desktop is ready',
+    ready: 'Hermes Desktop is ready',
     desktopBootFailedWithMessage: message => `Desktop boot failed: ${message}`,
     steps: {
       connectingGateway: 'Connecting live desktop gateway',
-      loadingSettings: 'Loading Coco settings',
+      loadingSettings: 'Loading Hermes settings',
       loadingSessions: 'Loading recent sessions',
       retryingRemoteBackend: 'Reconnecting to the remote Hermes backend…',
       startingDesktopConnection: 'Starting desktop connection',
-      startingHermesDesktop: 'Starting Coco Desktop…'
+      startingHermesDesktop: 'Starting Hermes Desktop…'
     },
     errors: {
       backgroundExited: 'Hermes background process exited.',
@@ -156,7 +156,7 @@ export const en: Translations = {
       ipcBridgeUnavailable: 'Desktop IPC bridge is unavailable.'
     },
     failure: {
-      title: "Coco couldn't start",
+      title: "Hermes couldn't start",
       description:
         "The background gateway didn't come up. Try one of the recovery steps below. Nothing here deletes your chats or settings.",
       remoteTitle: 'Remote gateway sign-in required',
@@ -189,24 +189,7 @@ export const en: Translations = {
       signInFailed: 'Sign-in failed',
       signInToRemoteGateway: 'Sign in to remote gateway',
       signInWithProvider: provider => `Sign in with ${provider}`,
-      identityProvider: 'your identity provider',
-      // COCO-PATCH: local mode runs its own PostgreSQL; each bootstrap exit code gets
-      // its own wording + next step (see src/components/boot-failure-local-db.ts).
-      localDb: {
-        title: "Coco's local database couldn't start",
-        downloadFailed:
-          'The local database package could not be downloaded. Check your network and retry; if it keeps failing, switch to the "connect to a server" mode instead.',
-        binMissing: 'The local database package is incomplete. Choose "Repair install" to fetch it again.',
-        startFailed: 'The local database would not start. Open the logs and send us the last few lines.',
-        credentialsLost:
-          'An existing database was found, but its credentials file is missing. Restore .env.db from a backup, or reset the password — your data is kept.',
-        selfTestFailed:
-          'The local database failed its self-check. To avoid inconsistent data, Coco did not start the bot.',
-        configInvalid: 'The local database configuration was modified (listen address or port). Choose "Repair install".',
-        unexpected: 'The local database hit an unexpected error. Open the logs and send us the last few lines.',
-        hint: (logPath: string) =>
-          logPath ? `Database log: ${logPath}` : 'Open the logs to see the database output.'
-      }
+      identityProvider: 'your identity provider'
     }
   },
 
@@ -224,7 +207,7 @@ export const en: Translations = {
     backendOutOfDateMessage:
       'Your Hermes backend is older than this desktop build and may not work correctly. Update to align them.',
     installMethodUnsupportedTitle: 'Unsupported install method',
-    updateHermes: 'Update Coco',
+    updateHermes: 'Update Hermes',
     updateReadyTitle: 'Update ready',
     updateReadyMessage: count => `${count} new change${count === 1 ? '' : 's'} available.`,
     updateReadyMessageUnknown: 'A new update is available.',
@@ -246,7 +229,7 @@ export const en: Translations = {
       diskFull: 'Disk full — free some space, then try again.',
       gatewayAuthFailed: 'Gateway authentication failed — check your API_SERVER_KEY.',
       methodNotAllowed:
-        'The desktop backend rejected that request (405 Method Not Allowed). Try restarting Coco Desktop.',
+        'The desktop backend rejected that request (405 Method Not Allowed). Try restarting Hermes Desktop.',
       microphonePermission: 'Microphone permission was denied.',
       openaiRejectedApiKey: 'OpenAI rejected the API key.',
       openaiRejectedApiKeyWithStatus: status => `OpenAI rejected the API key (${status} invalid_api_key).`,
@@ -274,7 +257,7 @@ export const en: Translations = {
       unavailable: 'Voice unavailable',
       liveEnded: 'Live voice session ended',
       liveError: 'Live voice',
-      liveDelegationFailed: 'Could not hand the request to Coco',
+      liveDelegationFailed: 'Could not hand the request to Hermes',
       liveUnavailable: reason => `GPT-Live voice chat is not available: ${reason}. Using speech-to-text instead.`
     },
     native: {
@@ -282,8 +265,8 @@ export const en: Translations = {
       approveAction: 'Approve',
       rejectAction: 'Reject',
       inputTitle: 'Input needed',
-      inputBody: 'Coco is waiting for your response.',
-      turnDoneTitle: 'Coco finished',
+      inputBody: 'Hermes is waiting for your response.',
+      turnDoneTitle: 'Hermes finished',
       turnDoneBody: '',
       turnErrorTitle: 'Turn failed',
       backgroundDoneTitle: 'Background task finished',
@@ -480,7 +463,7 @@ export const en: Translations = {
     exportConfig: 'Export config',
     importConfig: 'Import config',
     resetToDefaults: 'Reset to defaults',
-    resetConfirm: 'Reset all settings to Coco defaults?',
+    resetConfirm: 'Reset all settings to Hermes defaults?',
     exportFailed: 'Export failed',
     resetFailed: 'Reset failed',
     nav: {
@@ -615,7 +598,7 @@ export const en: Translations = {
       deleteAction: 'Remove saved item',
       otpField: 'Authenticator key',
       otpPlaceholder: 'Base32 secret or otpauth:// link',
-      otpHint: 'The "setup key" the site shows when you enable 2FA. With it saved, Coco generates the codes itself.',
+      otpHint: 'The "setup key" the site shows when you enable 2FA. With it saved, Hermes generates the codes itself.',
       twoFactorBadge: '2FA auto',
       deleteTitle: 'Delete this item?',
       deleteDescription: label => `"${label}" will be removed. This cannot be undone.`,
@@ -626,10 +609,10 @@ export const en: Translations = {
           'Installed password managers are picked up automatically. The agent asks you to unlock one the first time it needs a login from it (once per session); only a session token stays in memory, and the agent never sees your master password or any login.',
         toggleFailed: 'Could not update password manager',
         notInstalled: name =>
-          `Not detected. Install the ${name} command-line tool and sign in to it; Coco picks it up automatically.`,
-        disabledDesc: 'Detected but turned off for Coco.',
+          `Not detected. Install the ${name} command-line tool and sign in to it; Hermes picks it up automatically.`,
+        disabledDesc: 'Detected but turned off for Hermes.',
         lockedDesc: 'Detected. The agent will ask you to unlock it when it needs a login, or unlock now.',
-        unlockedDesc: 'Unlocked for this session. Locks automatically after 30 minutes idle or when Coco closes.',
+        unlockedDesc: 'Unlocked for this session. Locks automatically after 30 minutes idle or when Hermes closes.',
         statusLocked: 'Locked',
         statusNotDetected: 'Not detected',
         statusOff: 'Off',
@@ -649,7 +632,7 @@ export const en: Translations = {
       intro: 'OS notifications (not in-app toasts). Per device.',
       enableAll: 'Enable notifications',
       enableAllDesc: 'Off silences every notification below.',
-      focusedHint: 'Completion alerts only fire while Coco is in the background.',
+      focusedHint: 'Completion alerts only fire while Hermes is in the background.',
       kinds: {
         approval: {
           label: 'Approval needed',
@@ -657,11 +640,11 @@ export const en: Translations = {
         },
         input: {
           label: 'Input needed',
-          description: 'Coco asked a question or needs a password or secret.'
+          description: 'Hermes asked a question or needs a password or secret.'
         },
         turnDone: {
           label: 'Response ready',
-          description: 'A turn finished while Coco was in the background.'
+          description: 'A turn finished while Hermes was in the background.'
         },
         turnError: {
           label: 'Turn failed',
@@ -677,11 +660,11 @@ export const en: Translations = {
         },
         plugin: {
           label: 'Plugin notifications',
-          description: 'A desktop plugin sent a notification while Coco was in the background.'
+          description: 'A desktop plugin sent a notification while Hermes was in the background.'
         }
       },
       test: 'Send test notification',
-      testTitle: 'Coco',
+      testTitle: 'Hermes',
       testBody: 'Notifications are working.',
       testSent: 'Test sent. If nothing appears, check your OS notification permissions and Focus/Do Not Disturb.',
       testUnsupported: 'This system does not support native notifications.',
@@ -700,7 +683,7 @@ export const en: Translations = {
       advanced: 'Advanced'
     },
     searchPlaceholder: {
-      about: 'About Coco Desktop',
+      about: 'About Hermes Desktop',
       config: 'Search settings...',
       gateway: 'Gateway connection...',
       keys: 'Search API keys...',
@@ -716,7 +699,7 @@ export const en: Translations = {
       title: 'Appearance',
       intro: 'Desktop-only. Mode is brightness; theme is palette and chat chrome.',
       colorMode: 'Color Mode',
-      colorModeDesc: 'Pick a fixed mode or let Coco follow your system setting.',
+      colorModeDesc: 'Pick a fixed mode or let Hermes follow your system setting.',
       toolViewTitle: 'Tool Call Display',
       toolViewDesc: 'Product hides raw tool payloads; Technical shows full input/output.',
       reasoningCollapsedTitle: 'Collapse thinking by default',
@@ -771,14 +754,14 @@ export const en: Translations = {
       introSplashTitle: 'Intro Splash',
       introSplashDesc: 'The wordmark and prompt shown on an empty chat.',
       reactionsTitle: 'Message Reactions',
-      reactionsDesc: 'iMessage-style emoji tapbacks — react to messages, and Coco can react to yours.',
+      reactionsDesc: 'iMessage-style emoji tapbacks — react to messages, and Hermes can react to yours.',
       tipsTitle: 'In-App Tips',
       tipsDesc:
-        'Occasional hints from the app and Coco. Each tip appears once. Turns off automatically after your first 30 days; you can turn it back on.',
+        'Occasional hints from the app and Hermes. Each tip appears once. Turns off automatically after your first 30 days; you can turn it back on.',
       tipsReset: (count: number) => `Show ${count} ${count === 1 ? 'tip' : 'tips'} again`,
       toursTitle: 'Guided Tours',
       toursDesc:
-        'Let Coco spotlight each step as it guides you through the app. Turns off automatically after your first 30 days; you can turn it back on.',
+        'Let Hermes spotlight each step as it guides you through the app. Turns off automatically after your first 30 days; you can turn it back on.',
       composerPopoutTitle: 'Floating Composer',
       composerPopoutDesc: 'Allow dragging the composer out of its dock. Turn this off to keep it locked at the bottom.',
       vibeHeartsTitle: 'Vibe Hearts',
@@ -815,9 +798,9 @@ export const en: Translations = {
       pet: {
         title: 'Pet',
         intro:
-          'Adopt an animated petdex mascot that floats over the app and reacts to what Coco is doing — running while tools execute, celebrating on success, sulking on errors.',
+          'Adopt an animated petdex mascot that floats over the app and reacts to what Hermes is doing — running while tools execute, celebrating on success, sulking on errors.',
         restartHint:
-          'Pets need a quick restart — the running app started before this feature was added. Quit and reopen Coco, then come back here.',
+          'Pets need a quick restart — the running app started before this feature was added. Quit and reopen Hermes, then come back here.',
         on: 'On',
         off: 'Off',
         scaleTitle: 'Size',
@@ -857,7 +840,7 @@ export const en: Translations = {
     uninstallSection: {
       dangerZone: 'Danger zone',
       confirmUninstall: 'Confirm uninstall',
-      uninstallHermes: 'Uninstall Coco'
+      uninstallHermes: 'Uninstall Hermes'
     },
     poolLimits: {
       warmBotBackendsAria: 'Warm bot backends',
@@ -879,7 +862,7 @@ export const en: Translations = {
       driverHealth: 'Driver health'
     },
     about: {
-      heading: 'Coco Desktop',
+      heading: 'Hermes Desktop',
       version: value => `Version ${value}`,
       versionUnavailable: 'Version unavailable',
       bundleOutOfSync: 'App build out of date',
@@ -888,8 +871,8 @@ export const en: Translations = {
       bundleOutOfSyncAction: 'Get the installer',
       bundleSwapPending: 'Restart to finish the update',
       bundleSwapPendingDesc:
-        'The updated app is already installed — Coco only needs to restart to load it. Chats and settings are untouched.',
-      bundleSwapPendingAction: 'Restart Coco',
+        'The updated app is already installed — Hermes only needs to restart to load it. Chats and settings are untouched.',
+      bundleSwapPendingAction: 'Restart Hermes',
       updates: 'Updates',
       checkNow: 'Check now',
       checking: 'Checking…',
@@ -907,7 +890,7 @@ export const en: Translations = {
       justNowSuffix: ' · just now',
       automaticUpdates: 'Automatic updates',
       automaticUpdatesDesc:
-        'Coco checks for updates automatically in the background and lets you know when one is ready.',
+        'Hermes checks for updates automatically in the background and lets you know when one is ready.',
       branchCommit: (branch, commit) => `Branch ${branch} · Commit ${commit}`,
       never: 'never',
       justNow: 'just now',
@@ -947,7 +930,7 @@ export const en: Translations = {
     quickEntry: {
       enabledTitle: 'Quick Entry',
       enabledDesc:
-        'Summon a small composer from anywhere with a global shortcut and fire a prompt without opening Coco.',
+        'Summon a small composer from anywhere with a global shortcut and fire a prompt without opening Hermes.',
       shortcutTitle: 'Quick Entry shortcut',
       shortcutDesc: 'Needs at least one modifier, e.g. CommandOrControl+Shift+Space.',
       active: 'Shortcut is active.',
@@ -1152,7 +1135,7 @@ export const en: Translations = {
       enterUrlFirst: 'Enter a remote URL first.',
       restartingTitle: 'Gateway connection restarting',
       savedTitle: 'Gateway settings saved',
-      restartingMessage: 'Coco Desktop will reconnect using the saved settings — the shell stays open.',
+      restartingMessage: 'Hermes Desktop will reconnect using the saved settings — the shell stays open.',
       savedMessage: 'Saved for the next restart.',
       connectedTo: (baseUrl, version) => `Connected to ${baseUrl}${version ? ` · Hermes ${version}` : ''}`,
       reachableTitle: 'Remote gateway reachable',
@@ -1197,7 +1180,7 @@ export const en: Translations = {
       sshErrNotInstalled:
         'Hermes is not installed on the remote host. Install it there (curl -fsSL https://hermes-agent.nousresearch.com/install.sh | sh) or set the Hermes path.',
       sshErrPlatform:
-        'Unsupported remote platform. Coco Desktop SSH mode supports Linux, macOS, and Windows remote hosts.',
+        'Unsupported remote platform. Hermes Desktop SSH mode supports Linux, macOS, and Windows remote hosts.',
       sshErrTimeout: 'SSH connection timed out. The host may be unreachable or asleep.',
       sshErrUpdateRequired: 'Update Hermes on the remote host before connecting with Desktop SSH.',
       sshErrUnknown: 'SSH connection failed.'
@@ -1285,7 +1268,7 @@ export const en: Translations = {
       noOutput: 'No output yet.',
       deepLinkTitle: 'Add MCP server?',
       deepLinkDescription:
-        'A link asked to add this MCP server to Coco. Review the exact configuration below — it comes from the link, not from Coco.',
+        'A link asked to add this MCP server to Hermes. Review the exact configuration below — it comes from the link, not from Hermes.',
       deepLinkStdioWarning:
         'This server runs a local process on your machine with the command shown below. Only continue if you trust its source.',
       deepLinkConfirm: 'Add server',
@@ -1353,7 +1336,7 @@ export const en: Translations = {
       serverRunning: 'Running',
       runtimeInstalled: 'llama.cpp runtime installed',
       runtimeInstalledDetail: (tag, backend) =>
-        `Build ${tag}, ${backend} backend. Coco starts and manages the server for you.`,
+        `Build ${tag}, ${backend} backend. Hermes starts and manages the server for you.`,
       installTitle: 'Install the local runtime',
       installDetail:
         'Downloads the llama.cpp inference engine (a few hundred MB). Models you download run entirely on this machine — no account, nothing leaves your computer.',
@@ -1471,7 +1454,7 @@ export const en: Translations = {
       connectAccount: 'Connect an account',
       haveApiKey: 'Have an API key instead?',
       intro:
-        'Sign in with a subscription — no API key to copy. Coco runs the browser sign-in for you, right here in the app.',
+        'Sign in with a subscription — no API key to copy. Hermes runs the browser sign-in for you, right here in the app.',
       connected: 'Connected',
       collapse: 'Collapse',
       connectAnother: 'Connect another provider',
@@ -1616,7 +1599,7 @@ export const en: Translations = {
         failedSave: 'Could not save the real-profile setting',
         prompt: {
           title: 'Stay signed in to your sites',
-          body: 'Let Coco browse with a snapshot of your default browser profile, so sites open already signed in.',
+          body: 'Let Hermes browse with a snapshot of your default browser profile, so sites open already signed in.',
           bulletSnapshot: 'Cookies and logins are copied into a managed snapshot.',
           bulletLiveProfile: 'Your live browser profile is never opened directly.',
           bulletLocal: 'Nothing leaves this computer.',
@@ -1711,7 +1694,7 @@ export const en: Translations = {
       emptyHint: 'Browse the catalog below and install a reviewed plugin with one click.',
       loadFailed: 'Could not load agent plugins',
       toggleFailed: (name: string) => `Could not toggle ${name}`,
-      legacyBackend: 'This backend predates key-addressed plugin toggles — update Coco to manage it here.',
+      legacyBackend: 'This backend predates key-addressed plugin toggles — update Hermes to manage it here.',
       portableBadge: 'portable',
       catalogTitle: 'Plugin catalog',
       catalogBrowse: 'Browse',
@@ -1799,7 +1782,7 @@ export const en: Translations = {
     loadFailed: 'Could not load memory graph',
     loading: 'Loading…',
     emptyTitle: 'Nothing learned yet',
-    emptyDesc: 'As Coco builds skills and memories for your work, they appear here.',
+    emptyDesc: 'As Hermes builds skills and memories for your work, they appear here.',
     share: 'Share map',
     shareHint:
       'Copy the code to share this map, or paste one to load. It only includes the layout, not your memory or skill text.',
@@ -1881,7 +1864,7 @@ export const en: Translations = {
       placeholder: 'Search pets…',
       loading: 'Loading petdex gallery…',
       error: 'Could not reach the petdex gallery.',
-      staleBackend: 'Restart Coco to use pets — the backend predates this feature.',
+      staleBackend: 'Restart Hermes to use pets — the backend predates this feature.',
       empty: 'No matching pets.',
       turnOff: 'Turn off',
       turnOn: 'Turn on',
@@ -1908,8 +1891,8 @@ export const en: Translations = {
       hatchComposing: 'Piecing it together…',
       hatchSaving: 'Almost there…',
       namePlaceholder: 'Name your pet',
-      staleBackend: 'Update Coco to generate pets.',
-      backgroundHint: 'You can close this — Coco will notify you when it’s done.',
+      staleBackend: 'Update Hermes to generate pets.',
+      backgroundHint: 'You can close this — Hermes will notify you when it’s done.',
       slowProviderHint: 'This can take several minutes',
       remix: 'Remix',
       remixConfirmTitle: 'Remix this look?',
@@ -1945,7 +1928,7 @@ export const en: Translations = {
     },
     nav: {
       newChat: { title: 'New session', detail: 'Start a fresh session' },
-      settings: { title: 'Settings', detail: 'Configure Coco desktop' },
+      settings: { title: 'Settings', detail: 'Configure Hermes desktop' },
       skills: { title: 'Capabilities', detail: 'Skills, tools, MCP servers, and plugins' },
       messaging: { title: 'Messaging', detail: 'Set up Telegram, Slack, Discord, and more' },
       artifacts: { title: 'Artifacts', detail: 'Browse generated outputs' }
@@ -1975,7 +1958,7 @@ export const en: Translations = {
     sharedGatewayRestartDescription: bots => `All bots on this device reconnect: ${bots}`,
     sharedGatewayRestartConfirm: 'Restart all',
     sharedGatewayRestarted: count => `Shared gateway restarted (${count} ${count === 1 ? 'bot' : 'bots'})`,
-    updateHermes: 'Update Coco',
+    updateHermes: 'Update Hermes',
     reloadWindow: 'Reload window',
     actionRunning: 'running',
     actionDone: 'done',
@@ -2129,7 +2112,7 @@ export const en: Translations = {
       quickSetup: 'Quick setup',
       recommended: 'Recommended',
       quickHelp:
-        'Scan a QR code and confirm in Telegram. Coco creates the bot and detects your Telegram user ID automatically.',
+        'Scan a QR code and confirm in Telegram. Hermes creates the bot and detects your Telegram user ID automatically.',
       createWithQr: 'Create with QR',
       starting: 'Starting…',
       replaceWarning:
@@ -2445,7 +2428,7 @@ export const en: Translations = {
         `${count} unpinned scheduled ${count === 1 ? 'job keeps' : 'jobs keep'} running on the model ${count === 1 ? 'it was' : 'they were'} created under. Pin ${count === 1 ? 'it' : 'them'} or set cron.model to move ${count === 1 ? 'it' : 'them'}.`,
       detailMore: (names, remaining) => `${names} and ${remaining} more`,
       review: 'Review scheduled jobs',
-      saveFailed: 'Coco did not save that model change.',
+      saveFailed: 'Hermes did not save that model change.',
       confirmTitle: 'Model Selection Warning',
       confirmDetail: 'Confirm only if you accept this trade-off.',
       confirmAction: 'Confirm',
@@ -2506,7 +2489,7 @@ export const en: Translations = {
     everyHourAt: minute => `Every hour at :${minute}`,
     newCron: 'New cron',
     emptyDescNew:
-      'Schedule a prompt to run on a cron expression. Coco will run it and deliver results to the destination you pick.',
+      'Schedule a prompt to run on a cron expression. Hermes will run it and deliver results to the destination you pick.',
     emptyDescSearch: 'Try a broader search query.',
     emptyTitleNew: 'No scheduled jobs yet',
     emptyTitleSearch: 'No matches',
@@ -2717,7 +2700,7 @@ export const en: Translations = {
       createFailed: 'Could not create project',
       staleBackend:
         'Update the Hermes backend to create projects — your backend is older than this desktop app (Settings → Updates → Backend).',
-      deleteConfirm: 'This removes the saved project from Coco. Files, git repos, and worktrees stay untouched.',
+      deleteConfirm: 'This removes the saved project from Hermes. Files, git repos, and worktrees stay untouched.',
       startWork: 'New worktree',
       newWorktreeTitle: 'New worktree',
       newWorktreeDesc: 'Name the branch for this worktree.',
@@ -2821,12 +2804,12 @@ export const en: Translations = {
   composer: {
     message: 'Message',
     wakingProfile: profile => `Waking up ${profile}…`,
-    placeholderStarting: 'Starting Coco...',
-    placeholderReconnecting: 'Reconnecting to Coco…',
+    placeholderStarting: 'Starting Hermes...',
+    placeholderReconnecting: 'Reconnecting to Hermes…',
     placeholderFollowUp: 'Send follow-up',
     newSessionPlaceholders: [
       'What are we building?',
-      'Give Coco a task',
+      'Give Hermes a task',
       "What's on your mind?",
       'Describe what you need',
       'What should we tackle?',
@@ -2863,8 +2846,8 @@ export const en: Translations = {
     transcribingDictation: 'Transcribing dictation',
     voiceControls: 'Voice',
     voiceEngine: 'Voice chat engine',
-    voiceEngineChained: 'Speech-to-text + Coco voice',
-    voiceEngineLive: 'GPT-Live (full-duplex, delegates to Coco)',
+    voiceEngineChained: 'Speech-to-text + Hermes voice',
+    voiceEngineLive: 'GPT-Live (full-duplex, delegates to Hermes)',
     voiceEngineLiveNeedsKey: 'Needs an OpenAI API key',
     voiceEngineChangeFailed: 'Could not change the voice chat engine',
     voiceEngineChainedShort: 'speech-to-text',
@@ -2901,7 +2884,7 @@ export const en: Translations = {
       'composer.history': 'cycle popover / history'
     },
     attachUrlTitle: 'Attach a URL',
-    attachUrlDesc: 'Coco will fetch the page and include it as context for this turn.',
+    attachUrlDesc: 'Hermes will fetch the page and include it as context for this turn.',
     urlPlaceholder: 'https://example.com/post',
     urlHintPre: 'Include the full URL, e.g. ',
     attach: 'Attach',
@@ -3142,7 +3125,7 @@ export const en: Translations = {
       createPr: 'Create PR',
       openPr: 'Open PR',
       ghMissing: 'Install the GitHub CLI (gh) and sign in to open PRs',
-      agentShip: 'Ask Coco to open PR',
+      agentShip: 'Ask Hermes to open PR',
       agentShipUnavailable: "The chat that owns these changes isn't on screen.",
       agentShipPrompt:
         'Review the current changes, commit them with a clear conventional-commit message, push the branch, and open a pull request.',
@@ -3161,9 +3144,9 @@ export const en: Translations = {
       fetch: 'Downloading…',
       pull: 'Almost there…',
       pydeps: 'Finishing up…',
-      update: 'Updating Coco…',
+      update: 'Updating Hermes…',
       rebuild: 'Rebuilding the desktop app…',
-      restart: 'Restarting Coco…',
+      restart: 'Restarting Hermes…',
       done: 'Update complete',
       manual: 'Update from your terminal',
       guiSkew: 'Update the desktop app',
@@ -3173,13 +3156,13 @@ export const en: Translations = {
     checkFailedTitle: 'Couldn’t check for updates',
     tryAgain: 'Try again',
     notAvailableTitle: 'Update not available',
-    unsupportedMessage: 'This version of Coco can’t update itself from inside the app.',
+    unsupportedMessage: 'This version of Hermes can’t update itself from inside the app.',
     connectionRetry: 'Check your connection and try again.',
     latestBody: 'You’re running the latest version.',
     latestBodyBackend: 'The backend is running the latest version.',
     allSetTitle: 'You’re all set',
     availableTitle: 'New update available',
-    availableBody: 'A new version of Coco is ready to install.',
+    availableBody: 'A new version of Hermes is ready to install.',
     availableTitleBackend: 'Backend update available',
     availableBodyBackend: 'A newer version of the connected Hermes backend is ready to install.',
     availableBodyNoChangelog: 'A newer version is ready. Release notes aren’t available for this install type.',
@@ -3188,28 +3171,28 @@ export const en: Translations = {
     moreChanges: count => `+ ${count} more change${count === 1 ? '' : 's'} included.`,
     manualTitle: 'Update from your terminal',
     manualBody: 'You installed Hermes from the command line, so updates run there too. Paste this into your terminal:',
-    manualPickedUp: 'Coco will pick up the new version next time you launch it.',
+    manualPickedUp: 'Hermes will pick up the new version next time you launch it.',
     guiSkewTitle: 'Update the desktop app',
     guiSkewBody:
-      'The backend was updated, but this desktop app package wasn’t changed. Update or reinstall the Coco desktop app (your AppImage / .deb / .rpm) to match.',
+      'The backend was updated, but this desktop app package wasn’t changed. Update or reinstall the Hermes desktop app (your AppImage / .deb / .rpm) to match.',
     copy: 'Copy',
     copied: 'Copied',
     done: 'Done',
     applyingBody:
-      'The Coco updater takes over in its own window and reopens Coco automatically when it’s done. Please don’t reopen Coco yourself while it’s updating.',
+      'The Hermes updater takes over in its own window and reopens Hermes automatically when it’s done. Please don’t reopen Hermes yourself while it’s updating.',
     applyingBodyBackend:
-      'The remote backend is applying the update and will restart. Coco reconnects automatically when it’s back.',
-    applyingClose: 'This window will close while the update runs, then Coco reopens on its own.',
+      'The remote backend is applying the update and will restart. Hermes reconnects automatically when it’s back.',
+    applyingClose: 'This window will close while the update runs, then Hermes reopens on its own.',
     errorTitle: 'Update didn’t finish',
     errorBody: 'No worries — nothing was lost. You can try again now.',
-    blockerTitle: 'Close local previews to update Coco?',
+    blockerTitle: 'Close local previews to update Hermes?',
     blockerBody:
-      'Coco needs to stop these local previews before updating. This will not modify or delete your files.',
-    foreignBlockerTitle: 'Close other processes to update Coco',
+      'Hermes needs to stop these local previews before updating. This will not modify or delete your files.',
+    foreignBlockerTitle: 'Close other processes to update Hermes',
     foreignBlockerBody:
-      'Coco can’t safely close these processes automatically. Close the app, terminal, or service that owns each one, then try the update again.',
+      'Hermes can’t safely close these processes automatically. Close the app, terminal, or service that owns each one, then try the update again.',
     mixedBlockerBody:
-      'Coco can close the local previews listed below. Other processes must be closed manually before the update can continue.',
+      'Hermes can close the local previews listed below. Other processes must be closed manually before the update can continue.',
     closePreviewsAndUpdate: 'Close previews and update',
     closePreviewsAndCheckAgain: 'Close previews and check again',
     localPreview: 'Local preview',
@@ -3242,11 +3225,11 @@ export const en: Translations = {
     sessionsTitle: 'Each profile keeps its own sessions',
     sessionsText:
       'This list belongs to the default profile. New session starts one on whichever profile is selected. Switch profiles on the rail and the list changes with it.',
-    stayTitle: 'Coco is one click away',
-    stayText: 'Switch to the setup profile and open Welcome to Coco whenever you want a hand. It stays there.'
+    stayTitle: 'Hermes is one click away',
+    stayText: 'Switch to the setup profile and open Welcome to Hermes whenever you want a hand. It stays there.'
   },
   guidedGreeting: {
-    line: "Hey, come on in. I'm Coco. Give me two minutes to set the place up around you, then we'll put me to work on something you actually want done.\n\nFirst though, what should I call you?",
+    line: "Hey, come on in. I'm Hermes. Give me two minutes to set the place up around you, then we'll put me to work on something you actually want done.\n\nFirst though, what should I call you?",
     nameSuggestion: (name: string) => `(I can also just call you ${name}, if you prefer.)`
   },
   install: {
@@ -3265,7 +3248,7 @@ export const en: Translations = {
     viewDocs: 'View install docs',
     installTo: 'Will install to',
     retryAfterRun: 'I’ve run it -- retry',
-    setupChoiceTitle: 'Set up Coco Desktop',
+    setupChoiceTitle: 'Set up Hermes Desktop',
     setupChoiceDesc:
       'Connect this app to a Hermes gateway you already run, or install Hermes locally on this computer.',
     connectExistingTitle: 'Connect to existing Hermes',
@@ -3273,9 +3256,9 @@ export const en: Translations = {
     connectExistingDesc: 'Use a remote backend with a session token or browser sign-in. No local install will start.',
     installLocalTitle: 'Install Hermes locally',
     installLocalDesc: 'Download Hermes, create its Python environment, and run the backend on this computer.',
-    localStartUnavailable: 'Local installation could not start. Restart Coco Desktop and try again.',
+    localStartUnavailable: 'Local installation could not start. Restart Hermes Desktop and try again.',
     remoteSetupTitle: 'Connect to existing Hermes',
-    remoteSetupDesc: 'Enter your gateway URL. Coco Desktop will detect whether it needs a token or browser sign-in.',
+    remoteSetupDesc: 'Enter your gateway URL. Hermes Desktop will detect whether it needs a token or browser sign-in.',
     remoteUrlTitle: 'Gateway URL',
     remoteUrlDesc: 'Use the base URL of the Hermes gateway, including https:// when remote.',
     remoteUrlPlaceholder: 'https://gateway.example.com/hermes',
@@ -3326,7 +3309,7 @@ export const en: Translations = {
     headerTitle: "Let's get you setup with Hermes Agent",
     headerDesc: 'Connect a model provider to start chatting. Most options take one click.',
     preparingInstall: 'Hermes is finishing install. This usually takes under a minute on first run.',
-    starting: 'Starting Coco…',
+    starting: 'Starting Hermes…',
     lookingUpProviders: 'Looking up providers...',
     collapse: 'Collapse',
     otherProviders: 'Other providers',
@@ -3334,7 +3317,7 @@ export const en: Translations = {
     chooseLater: "I'll choose a provider later",
     recommended: 'Recommended',
     connected: 'Connected',
-    featuredPitch: 'One subscription, 300+ frontier models — the recommended way to run Coco',
+    featuredPitch: 'One subscription, 300+ frontier models — the recommended way to run Hermes',
     fireworksPitch: 'Direct model API — Fireworks-hosted frontier models',
     localModelsTitle: 'Run models locally',
     localModelsPitch: 'No account needed — download a model and run it on this machine',
@@ -3366,7 +3349,7 @@ export const en: Translations = {
     update: 'Update',
     flowSubtitles: {
       pkce: 'Opens your browser to sign in, then continues here',
-      device_code: 'Opens a verification page in your browser — Coco connects automatically',
+      device_code: 'Opens a verification page in your browser — Hermes connects automatically',
       external: 'Sign in once in your terminal, then come back to chat'
     },
     startingSignIn: provider => `Starting sign-in for ${provider}...`,
@@ -3379,12 +3362,12 @@ export const en: Translations = {
     pickDifferentProvider: 'Pick a different provider',
     signInWith: provider => `Sign in with ${provider}`,
     openedBrowser: provider => `We opened ${provider} in your browser.`,
-    authorizeThere: 'Authorize Coco there.',
+    authorizeThere: 'Authorize Hermes there.',
     copyAuthCode: 'Copy the authorization code and paste it below.',
     pasteAuthCode: 'Paste authorization code',
     reopenAuthPage: 'Re-open authorization page',
     autoBrowser: provider =>
-      `We opened ${provider} in your browser. Authorize Coco there and you'll be connected automatically — nothing to copy or paste.`,
+      `We opened ${provider} in your browser. Authorize Hermes there and you'll be connected automatically — nothing to copy or paste.`,
     reopenSignInPage: 'Re-open sign-in page',
     waitingAuthorize: 'Waiting for you to authorize...',
     externalPending: provider =>
@@ -3406,7 +3389,7 @@ export const en: Translations = {
   freeTier: {
     providerRowTitle: 'Nous · free tier',
     providerRowPitch: 'Sign in with a Nous account to unlock more models and tools.',
-    readyTitle: 'Coco is ready.',
+    readyTitle: 'Hermes is ready.',
     readyCaption: 'Free · connectors included',
     begin: 'Begin',
     signInInstead: 'Sign in with a Nous account instead',
@@ -3443,7 +3426,7 @@ export const en: Translations = {
     retiredBody: 'This free-tier identity was already used or expired; a new one is set up on the next start.',
     errorBody: 'Sign-in did not complete; run it again.',
     alreadySignedInHeading: 'Already signed in.',
-    alreadySignedInBody: 'This Coco is already signed in to a Nous account.'
+    alreadySignedInBody: 'This Hermes is already signed in to a Nous account.'
   },
 
   modelPicker: {
@@ -3685,7 +3668,7 @@ export const en: Translations = {
     binaryTitle: 'This looks like a binary file',
     binaryBody: label => `Previewing ${label} may show unreadable text.`,
     largeTitle: 'This file is large',
-    largeBody: (label, size) => `${label} is ${size}. Coco will only show the first 512 KB.`,
+    largeBody: (label, size) => `${label} is ${size}. Hermes will only show the first 512 KB.`,
     previewAnyway: 'Preview anyway',
     truncated: 'Showing first 512 KB.',
     noInlineTitle: 'No inline preview',
@@ -3726,11 +3709,11 @@ export const en: Translations = {
         'This address points at the machine running your agent, not this one. The browser pane loads pages locally, so a remote dev server needs a port forward or a reachable hostname.',
       failedToLoad: 'Preview failed to load',
       tryAgain: 'Try again',
-      restarting: 'Coco is restarting...',
-      askRestart: 'Ask Coco to restart the server',
-      lookingRestart: taskId => `Coco is looking for a preview server to restart (${taskId})`,
+      restarting: 'Hermes is restarting...',
+      askRestart: 'Ask Hermes to restart the server',
+      lookingRestart: taskId => `Hermes is looking for a preview server to restart (${taskId})`,
       restartingTitle: 'Restarting preview server',
-      restartingMessage: 'Coco is working in the background. Watch the preview console for progress.',
+      restartingMessage: 'Hermes is working in the background. Watch the preview console for progress.',
       startRestartFailed: message => `Could not start server restart: ${message}`,
       restartFailed: 'Server restart failed',
       hideConsole: 'Hide preview console',
@@ -3742,16 +3725,16 @@ export const en: Translations = {
       reload: 'Reload page',
       address: 'Address',
       addressPlaceholder: 'Enter address',
-      blankPageBody: 'Type an address above to browse, or ask Coco to open a page.',
-      finishedRestarting: message => `Coco finished restarting the preview server${message ? `: ${message}` : ''}`,
+      blankPageBody: 'Type an address above to browse, or ask Hermes to open a page.',
+      finishedRestarting: message => `Hermes finished restarting the preview server${message ? `: ${message}` : ''}`,
       failedRestarting: message => `Server restart failed: ${message}`,
       unknownError: 'unknown error',
       restartedTitle: 'Preview server restarted',
       reloadingNow: 'Reloading the preview now.',
       restartFailedTitle: 'Preview restart failed',
-      restartFailedMessage: 'Coco could not restart the server.',
+      restartFailedMessage: 'Hermes could not restart the server.',
       stillWorking:
-        'Coco is still working, but no restart result has arrived yet. The server command may be running in the foreground.',
+        'Hermes is still working, but no restart result has arrived yet. The server command may be running in the foreground.',
       workspaceReloading: 'Workspace changed, reloading preview',
       fileChanged: url => `File changed, reloading preview: ${url}`,
       filesChanged: (count, url) => `${count} file changes, reloading preview: ${url}`,
@@ -3852,7 +3835,7 @@ export const en: Translations = {
     thread: {
       loadingSession: 'Loading session',
       showEarlier: 'Show earlier messages',
-      loadingResponse: 'Coco is loading a response',
+      loadingResponse: 'Hermes is loading a response',
       loadingLocalModel: model => `Loading ${model} into memory`,
       processingPrompt: 'Processing prompt',
       resumeWhenBackgroundDone: count =>
@@ -3928,7 +3911,7 @@ export const en: Translations = {
       reject: 'Reject',
       alwaysTitle: 'Always allow this command?',
       alwaysDescription: pattern =>
-        `This adds the “${pattern}” pattern to your permanent allowlist (~/.hermes/config.yaml). Coco won’t ask again for commands like this — in this session or any future one.`,
+        `This adds the “${pattern}” pattern to your permanent allowlist (~/.hermes/config.yaml). Hermes won’t ask again for commands like this — in this session or any future one.`,
       alwaysAllow: 'Always allow'
     },
     clarify: {
@@ -4077,10 +4060,10 @@ export const en: Translations = {
     sudoSendFailed: 'Could not send sudo password',
     secretSendFailed: 'Could not send secret',
     sudoTitle: 'Administrator password',
-    sudoDesc: 'Coco needs your sudo password to run a privileged command. It is sent only to your local agent.',
+    sudoDesc: 'Hermes needs your sudo password to run a privileged command. It is sent only to your local agent.',
     sudoPlaceholder: 'sudo password',
     secretTitle: 'Secret required',
-    secretDesc: 'Coco needs a credential to continue.',
+    secretDesc: 'Hermes needs a credential to continue.',
     secretPlaceholder: 'secret value',
     vaultUnlockSendFailed: 'Could not send master password',
     vaultUnlockTitle: name => `Unlock ${name}`,
@@ -4092,7 +4075,7 @@ export const en: Translations = {
     vaultSaveSendFailed: 'Could not save the login',
     vaultSaveTitle: site => `Save your ${site} login?`,
     vaultSaveDesc: origin =>
-      `Coco reached a sign-in page at ${origin} and has no login for it. Enter it once here; it is encrypted on this machine and filled into the page without the model ever seeing the password.`,
+      `Hermes reached a sign-in page at ${origin} and has no login for it. Enter it once here; it is encrypted on this machine and filled into the page without the model ever seeing the password.`,
     vaultSaveIdentifierLabel: 'Email or username',
     vaultSaveIdentifierPlaceholder: 'you@example.com',
     vaultSavePasswordPlaceholder: 'Password',
@@ -4102,10 +4085,10 @@ export const en: Translations = {
     vaultCodeSendFailed: 'Could not send the code',
     vaultCodeTitle: site => `Verification code for ${site}`,
     vaultCodeDesc: site =>
-      `${site} is asking for a one-time code (text message, email or authenticator app). Enter it here and Coco types it into the page; the model never sees it.`,
+      `${site} is asking for a one-time code (text message, email or authenticator app). Enter it here and Hermes types it into the page; the model never sees it.`,
     vaultCodeLabel: 'Code',
     vaultCodeFootnote:
-      'Tip: save the authenticator key with this login in Settings → Passwords & Logins and Coco enters codes for you.',
+      'Tip: save the authenticator key with this login in Settings → Passwords & Logins and Hermes enters codes for you.',
     vaultCodeSkip: 'Skip',
     vaultCodeConfirm: 'Enter code'
   },
@@ -4167,8 +4150,8 @@ export const en: Translations = {
     sessionExportFailed: 'Could not export session',
     imageSaved: 'Image saved',
     downloadStarted: 'Download started',
-    restartToUseSaveImage: 'Restart Coco Desktop to use Save Image.',
-    restartToSaveImages: 'Restart Coco Desktop to save images',
+    restartToUseSaveImage: 'Restart Hermes Desktop to use Save Image.',
+    restartToSaveImages: 'Restart Hermes Desktop to save images',
     imageDownloadFailed: 'Image download failed',
     openImage: 'Open image',
     downloadImage: 'Download image',
@@ -4202,14 +4185,14 @@ export const en: Translations = {
       },
       skills: {
         title: 'Teach it once',
-        text: 'Skills are folders of instructions Coco loads when the work calls for them.'
+        text: 'Skills are folders of instructions Hermes loads when the work calls for them.'
       },
       messaging: {
-        title: 'Coco away from your desk',
+        title: 'Hermes away from your desk',
         text: 'Connect Telegram, Discord, Slack and more — same agent, same memory.'
       },
       artifacts: {
-        title: 'Everything Coco made',
+        title: 'Everything Hermes made',
         text: 'Images, files and links from every session, indexed in one place.'
       },
       cron: {

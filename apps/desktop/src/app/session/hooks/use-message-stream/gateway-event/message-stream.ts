@@ -344,7 +344,7 @@ export function handleMessageStreamEvent(ctx: GatewayEventContext): boolean {
     const failure =
       payload?.status === 'error'
         ? {
-            error: coerceGatewayText(payload.error).trim() || finalText || 'Coco reported an error',
+            error: coerceGatewayText(payload.error).trim() || finalText || 'Hermes reported an error',
             partial: Boolean(payload.partial),
             surface: parseErrorSurface(payload.error_surface)
           }

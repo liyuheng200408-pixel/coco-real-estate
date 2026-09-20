@@ -9,11 +9,9 @@ import {
   buildPinArgs,
   buildPosixPinArgs,
   cachedScriptPath,
-  downloadInstallScriptFromFirstSource,
   hasExistingGitCheckout,
   installedAgentInstallScript,
   installRefForStamp,
-  installScriptSourceUrls,
   isPinnedCommit,
   resolveInstallScript,
   resolveMarkerPinnedCommit,
@@ -84,7 +82,7 @@ test('existing checkout detection requires git metadata', () => {
 })
 
 test('fresh bootstrap args include the packaged commit pin', () => {
-  const installStamp = { commit: 'a'.repeat(40), branch: 'master' }
+  const installStamp = { commit: 'a'.repeat(40), branch: 'main' }
 
   assert.deepEqual(buildPinArgs(installStamp), ['-Commit', installStamp.commit, '-Branch', 'main'])
   assert.deepEqual(
@@ -98,7 +96,7 @@ test('fresh bootstrap args include the packaged commit pin', () => {
 })
 
 test('existing-checkout bootstrap args keep branch but skip the packaged commit pin', () => {
-  const installStamp = { commit: 'a'.repeat(40), branch: 'master' }
+  const installStamp = { commit: 'a'.repeat(40), branch: 'main' }
 
   assert.deepEqual(buildPinArgs(installStamp, { pinCommit: false }), ['-Branch', 'main'])
   assert.deepEqual(
@@ -113,7 +111,7 @@ test('existing-checkout bootstrap args keep branch but skip the packaged commit 
 })
 
 test('fallback install stamps use an unpinned branch ref', () => {
-  const stamp = { commit: ZERO_COMMIT, branch: 'master' }
+  const stamp = { commit: ZERO_COMMIT, branch: 'main' }
 
   assert.equal(isPinnedCommit(ZERO_COMMIT), false)
   assert.deepEqual(installRefForStamp(stamp), {
@@ -136,20 +134,20 @@ test('fallback install stamps use an unpinned branch ref', () => {
 test('resolveMarkerPinnedCommit prefers real HEAD over fallback stamp zeros', () => {
   const realHead = 'c'.repeat(40)
   assert.equal(
-    resolveMarkerPinnedCommit({ commit: ZERO_COMMIT, branch: 'master' }, '/tmp/checkout', {
+    resolveMarkerPinnedCommit({ commit: ZERO_COMMIT, branch: 'main' }, '/tmp/checkout', {
       resolveHead: () => realHead
     }),
     realHead
   )
   assert.equal(
-    resolveMarkerPinnedCommit({ commit: 'd'.repeat(40), branch: 'master' }, '/tmp/checkout', {
+    resolveMarkerPinnedCommit({ commit: 'd'.repeat(40), branch: 'main' }, '/tmp/checkout', {
       resolveHead: () => realHead
     }),
     'd'.repeat(40),
     'packaged real pin wins over checkout HEAD'
   )
   assert.equal(
-    resolveMarkerPinnedCommit({ commit: ZERO_COMMIT, branch: 'master' }, '/tmp/missing', {
+    resolveMarkerPinnedCommit({ commit: ZERO_COMMIT, branch: 'main' }, '/tmp/missing', {
       resolveHead: () => null
     }),
     null
@@ -164,7 +162,7 @@ test('resolveInstallScript downloads fallback stamps by branch instead of zero c
     const refs = []
 
     const result = await resolveInstallScript({
-      installStamp: { commit: ZERO_COMMIT, branch: 'master' },
+      installStamp: { commit: ZERO_COMMIT, branch: 'main' },
       sourceRepoRoot: null,
       hermesHome: home,
       emit: ev => logs.push(ev),
@@ -233,7 +231,7 @@ test('resolveInstallScript falls back to the installed agent checkout on a 404',
       sourceRepoRoot: null,
       hermesHome: home,
       emit: ev => logs.push(ev),
-      // Simulate every raw source returning HTTP 404 for the pinned commit.
+      // Simulate GitHub returning a 404 for the pinned commit.
       _download: async () => {
         throw new Error('Failed to download install.sh: HTTP 404')
       }
@@ -270,98 +268,6 @@ test('resolveInstallScript rethrows when the 404 fallback is unavailable', async
       }),
       /HTTP 404|Failed to download/
     )
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true })
-  }
-})
-
-test('installScriptSourceUrls orders the Coco sources Gitee -> jsDelivr -> GitHub raw', () => {
-  const urls = installScriptSourceUrls('main', 'install.sh')
-
-  assert.deepEqual(urls, [
-    'https://gitee.com/liyuheng200408/coco-real-estate/raw/main/scripts/install.sh',
-    'https://cdn.jsdelivr.net/gh/liyuheng200408-pixel/coco-real-estate@main/scripts/install.sh',
-    'https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/main/scripts/install.sh'
-  ])
-
-  // A pinned SHA ref lands in every source verbatim, and none of them points
-  // at the upstream Hermes repo any more.
-  const sha = 'a'.repeat(40)
-  const pinned = installScriptSourceUrls(sha, 'install.ps1')
-
-  assert.equal(pinned.length, 3)
-
-  for (const url of pinned) {
-    assert.ok(url.includes(sha), `ref in ${url}`)
-    assert.ok(url.endsWith('/scripts/install.ps1'), `script name in ${url}`)
-    assert.ok(!/NousResearch|hermes-agent/.test(url), `no upstream repo in ${url}`)
-  }
-})
-
-test('downloadInstallScriptFromFirstSource falls back to the next source when the first fails', async () => {
-  const home = mkTmpHome()
-
-  try {
-    const destPath = cachedScriptPath(home, 'fallback-order')
-    const urls = installScriptSourceUrls('main', SCRIPT_NAME)
-    const attempted = []
-
-    const result = await downloadInstallScriptFromFirstSource(urls, {
-      scriptName: SCRIPT_NAME,
-      destPath,
-      _fetch: async (url, dest) => {
-        attempted.push(url)
-
-        // First source (Gitee) is down / unreachable -> the driver must fall
-        // through to the next one instead of failing the whole bootstrap.
-        if (attempted.length === 1) {
-          throw new Error(`Failed to download ${SCRIPT_NAME}: HTTP 404 from ${url}`)
-        }
-
-        fs.mkdirSync(path.dirname(dest), { recursive: true })
-        fs.writeFileSync(dest, '#!/bin/sh\necho second source\n')
-      }
-    })
-
-    assert.equal(result, destPath)
-    // First failed, second won, third never contacted.
-    assert.deepEqual(attempted, [urls[0], urls[1]])
-    assert.ok(fs.existsSync(destPath), 'script written by the surviving source')
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true })
-  }
-})
-
-test('downloadInstallScriptFromFirstSource rejects only after every source failed', async () => {
-  const home = mkTmpHome()
-
-  try {
-    const urls = installScriptSourceUrls('main', SCRIPT_NAME)
-    const attempted = []
-
-    await assert.rejects(
-      downloadInstallScriptFromFirstSource(urls, {
-        scriptName: SCRIPT_NAME,
-        destPath: cachedScriptPath(home, 'all-sources-fail'),
-        _fetch: async url => {
-          attempted.push(url)
-          throw new Error(`Failed to download ${SCRIPT_NAME}: HTTP 404 from ${url}`)
-        }
-      }),
-      err => {
-        const message = err instanceof Error ? err.message : String(err)
-
-        assert.match(message, /^Failed to download /)
-        assert.ok(message.includes(`all ${urls.length} sources failed`), 'says every source failed')
-        assert.ok(message.includes('HTTP 404'), 'keeps the per-source HTTP status')
-        assert.ok(message.includes(urls[urls.length - 1]), 'names the last source tried')
-
-        return true
-      }
-    )
-
-    // All three sources were tried, in the declared order.
-    assert.deepEqual(attempted, urls)
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }

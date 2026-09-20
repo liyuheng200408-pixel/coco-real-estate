@@ -1,8 +1,8 @@
 {
   "name": "hermes",
-  "productName": "Coco",
+  "productName": "Hermes",
   "private": true,
-  "version": "0.21.3-55",
+  "version": "0.17.2",
   "description": "Native desktop shell for Hermes Agent.",
   "author": "Nous Research",
   "repository": {
@@ -189,8 +189,8 @@
   },
   "build": {
     "electronVersion": "40.10.2",
-    "appId": "cn.liyuheng.coco",
-    "productName": "Coco",
+    "appId": "com.nousresearch.hermes",
+    "productName": "Hermes",
     "executableName": "Hermes",
     "protocols": [
       {
@@ -200,7 +200,7 @@
         ]
       }
     ],
-    "artifactName": "Coco-${version}-${os}-${arch}.${ext}",
+    "artifactName": "Hermes-${version}-${os}-${arch}.${ext}",
     "icon": "assets/icon",
     "directories": {
       "output": "release"

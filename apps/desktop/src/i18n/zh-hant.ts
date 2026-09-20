@@ -150,19 +150,7 @@ export const zhHant = defineLocale({
       signInFailed: '登入失敗',
       signInToRemoteGateway: '登入遠端閘道',
       signInWithProvider: provider => `使用 ${provider} 登入`,
-      identityProvider: '您的身分提供方',
-      // COCO-PATCH: 本機模式的可攜式資料庫準備失敗（依退出碼分流）
-      localDb: {
-        title: '本機資料庫沒能啟動',
-        downloadFailed: '本機資料庫元件下載失敗。請檢查網路後重試；若一直失敗，可先改用「連線伺服器」模式。',
-        binMissing: '本機資料庫元件不完整，請點「修復安裝」重新補齊。',
-        startFailed: '本機資料庫無法啟動。請點「開啟日誌」，把最後幾行傳給我們。',
-        credentialsLost: '偵測到既有的資料庫，但憑證檔不見了。請從備份還原 .env.db，或點「重設密碼」——資料不會不見。',
-        selfTestFailed: '本機資料庫自我檢查未通過。為避免資料錯亂，機器人沒有啟動。',
-        configInvalid: '本機資料庫的設定被改過（監聽位址或連接埠），請點「修復安裝」。',
-        unexpected: '本機資料庫出現未預期的錯誤。請點「開啟日誌」，把最後幾行傳給我們。',
-        hint: (logPath: string) => (logPath ? `資料庫日誌：${logPath}` : '點「開啟日誌」可以看到資料庫的輸出。')
-      }
+      identityProvider: '您的身分提供方'
     }
   },
 

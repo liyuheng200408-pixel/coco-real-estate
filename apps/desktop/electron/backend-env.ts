@@ -88,19 +88,6 @@ function hermesManagedNodePathEntries(
   return platform === 'win32' ? [root, bin] : [bin, root]
 }
 
-function hermesManagedPostgresPathEntries(hermesHome, { platform = process.platform, pathModule = pathModuleForPlatform(platform) }: any = {}) {
-  // COCO-PATCH: Coco 本机模式自带便携 PostgreSQL，pg_dump/pg_restore/psql 只在这里，
-  // 而 scripts/backup_db.py 与 scripts/healthcheck.py 调的是裸命令名 —— 必须进 PATH。
-  // 位置在 Hermes 自带目录之后、继承来的 PATH 之前：只要压过系统里可能存在的
-  // 另一个 PostgreSQL（pg_dump 大版本不一致会备份失败）就够了，同时不打乱官方
-  // 既有的 node 目录优先顺序（backend-env.test.ts 盯着这一点）。
-  if (!hermesHome) {
-    return []
-  }
-
-  return [pathModule.join(hermesHome, 'pgsql', 'bin')]
-}
-
 function buildDesktopBackendPath({
   hermesHome,
   venvRoot,
@@ -110,11 +97,10 @@ function buildDesktopBackendPath({
 }: any = {}) {
   const delimiter = delimiterForPlatform(platform)
   const hermesNodeDirs = hermesManagedNodePathEntries(hermesHome, { platform, pathModule })
-  const postgresDirs = hermesManagedPostgresPathEntries(hermesHome, { platform, pathModule })
   const venvBin = venvRoot ? pathModule.join(venvRoot, platform === 'win32' ? 'Scripts' : 'bin') : null
   const saneEntries = platform === 'win32' ? [] : POSIX_SANE_PATH_ENTRIES
 
-  return appendUniquePathEntries([hermesNodeDirs, venvBin, postgresDirs, currentPath, saneEntries], { delimiter })
+  return appendUniquePathEntries([hermesNodeDirs, venvBin, currentPath, saneEntries], { delimiter })
 }
 
 function normalizeHermesHomeRoot(hermesHome, { pathModule = pathModuleForPlatform(process.platform) }: any = {}) {
@@ -136,7 +122,6 @@ function buildDesktopBackendEnv({
   hermesHome,
   pythonPathEntries = [],
   venvRoot,
-  databaseUrl = null,
   currentEnv = process.env,
   platform = process.platform,
   pathModule = pathModuleForPlatform(platform)
@@ -144,7 +129,8 @@ function buildDesktopBackendEnv({
   const delimiter = delimiterForPlatform(platform)
   const currentPythonPath = currentEnv?.PYTHONPATH || ''
   const key = pathEnvKey(currentEnv, platform)
-  const env: Record<string, string> = {
+
+  return {
     PYTHONPATH: appendUniquePathEntries([...pythonPathEntries, currentPythonPath], { delimiter }),
     // Force PEP 540 UTF-8 mode in the spawned Python backend so its stdio and
     // subprocess defaults are UTF-8 even on non-UTF-8 Windows locales (GBK,
@@ -161,14 +147,6 @@ function buildDesktopBackendEnv({
       pathModule
     })
   }
-
-  // COCO-PATCH: 本机模式把便携 PostgreSQL 的连接串注入后端进程。值必须来自
-  // <InstallDir>/.env.db（端口在冲突时会漂移），调用方读文件后传进来。
-  if (databaseUrl) {
-    env.DATABASE_URL = String(databaseUrl)
-  }
-
-  return env
 }
 
 export {
@@ -177,7 +155,6 @@ export {
   buildDesktopBackendPath,
   delimiterForPlatform,
   hermesManagedNodePathEntries,
-  hermesManagedPostgresPathEntries,
   normalizeHermesHomeRoot,
   pathEnvKey,
   POSIX_SANE_PATH_ENTRIES
