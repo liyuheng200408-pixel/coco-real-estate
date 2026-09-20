@@ -134,15 +134,13 @@ TOOLSETS = {
     # GUI-renderer affordances, enabled per desktop-sourced SESSION by the GUI
     # gateway (tui_gateway/server.py::_load_enabled_toolsets) — never by a
     # process env var, which is blind to a desktop client on a remote backend.
-    # COCO-PATCH: 桌面版/网页控制台也要能用房产业务工具（原来只有 hermes-feishu 带 real_estate，
-    # 导致在桌面客户端里问"有哪些房源"时模型看不到任何业务工具）。与官方 hermes-feishu 同一写法。
-    "desktop_ui": {**_ts(
+    "desktop_ui": _ts(
         "Desktop GUI affordances — in-app terminal/browser panes, pane focus, "
         "reactions (GUI sessions only)",
         ["read_terminal", "close_terminal", "desktop_preview", "drive_preview",
          "annotate_preview", "read_window_below", "focus_pane", "react_to_message",
          "setup_mcp", "gui_tour", "show_tip"],
-    ), "includes": ["real_estate"]},
+    ),
     "clarify": _ts("Ask the user clarifying questions (multiple-choice or open-ended)", ["clarify"]),
     "code_execution": _ts("Run Python scripts that call tools programmatically (reduces LLM round trips)", ["execute_code"]),
     "delegation": _ts("Spawn subagents with isolated context for complex subtasks", ["delegate_task"]),

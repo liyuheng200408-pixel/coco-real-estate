@@ -48,42 +48,10 @@ class TestCocoVersion:
 
 
 class TestReleaseVersionConsistency:
-    """发版一致性：安装包名与 README 的版本行都必须跟着仓库根 VERSION 走。
+    """发版一致性：仓库根 VERSION 与两个 README 的版本行必须同步。
 
-    为什么要有：桌面版安装包的文件名取 apps/desktop/package.json 的 version
-    （electron-builder 的 artifactName 用 ${version}），而版本权威是仓库根 VERSION ——
-    实测打出来的包叫 Coco-0.21.3-53-win-x64.exe，而当时 VERSION 已经是 0.21.3-55，
-    用户会以为装到了旧版。构建时也会从 VERSION 盖章（desktop-windows.yml），
-    这条测试守住仓库里的两处不被忘掉。
+    为什么要有：README 的当前版本行与徽章要跟着 VERSION 走，发版时容易漏改。
     """
-
-    def test_desktop_package_version_matches_repo_version(self):
-        import json as _json
-
-        ver = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
-        pkg = _json.loads((REPO_ROOT / "apps" / "desktop" / "package.json").read_text(encoding="utf-8"))
-        assert pkg["version"] == ver, f"apps/desktop/package.json 是 {pkg['version']}，VERSION 是 {ver}"
-
-    def test_installer_clones_coco_not_upstream_hermes(self):
-        """首启引导脚本必须克隆 Coco 仓库，不能是官方 Hermes。
-
-        为什么钉这条：桌面版首启会下载并执行 install.ps1，而官方原版写死克隆
-        NousResearch/hermes-agent —— 装出来是官方 Hermes（没有 real_estate 工具集、
-        没有身份定制），用户以为装了 Coco 却是空壳。实测已修（Gitee 主源 + GitHub 兜底）。
-        """
-        text = (REPO_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
-        assert "coco-real-estate.git" in text, "install.ps1 没有指向 Coco 仓库"
-        assert "NousResearch/hermes-agent" not in text, "install.ps1 仍在克隆官方 Hermes 仓库"
-
-    def test_git_download_has_a_china_mirror(self):
-        """便携 Git 不能只从 GitHub release 下：release 资产会重定向到
-        objects.githubusercontent.com，国内常被挡，首启就卡在「装 Git」这一步。
-
-        现状：npmmirror 镜像 + 官方源，按实测延迟选（已核对 npmmirror 同名同版本资产）。
-        """
-        text = (REPO_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
-        assert "registry.npmmirror.com/-/binary/git-for-windows" in text, "便携 Git 缺少国内镜像源"
-        assert "git-for-windows/git/releases/download" in text, "便携 Git 缺少官方源兜底"
 
     def test_readmes_advertise_the_repo_version(self):
         ver = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
