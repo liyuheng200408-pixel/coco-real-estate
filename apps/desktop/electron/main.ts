@@ -59,6 +59,8 @@ import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
 import { createBackendConnectionState } from './backend-connection-state'
 import { BackendDialClaims } from './backend-dial-claim'
 import { buildDesktopBackendEnv, hermesManagedNodePathEntries, normalizeHermesHomeRoot } from './backend-env'
+// COCO-PATCH: 本机模式的便携 PostgreSQL（连接串注入 + 引导脚本调用），见 portable-postgres.ts
+import { readDatabaseUrlFromEnvFile, runLocalPostgresSetup } from './portable-postgres'
 import { isReauthRequiredError, waitForHermesReady } from './backend-health'
 import { backendCommandMatches, createBackendOwnership, createBackendShutdownCoordinator } from './backend-ownership'
 import {
@@ -5013,7 +5015,9 @@ function createPythonBackend(root, label, backendArgs, options: any = {}) {
     env: buildDesktopBackendEnv({
       hermesHome: HERMES_HOME,
       pythonPathEntries: [root, ...getVenvSitePackagesEntries(venvRoot)],
-      venvRoot
+      venvRoot,
+      // COCO-PATCH: 本机模式的数据库连接串（缺 .env.db 时为 null，行为与官方一致）
+      databaseUrl: readDatabaseUrlFromEnvFile(path.join(root, '.env.db'))
     }),
     root,
     bootstrap: Boolean(options.bootstrap),
@@ -5037,7 +5041,9 @@ function createActiveBackend(backendArgs) {
     env: buildDesktopBackendEnv({
       hermesHome: HERMES_HOME,
       pythonPathEntries: [ACTIVE_HERMES_ROOT, ...getVenvSitePackagesEntries(VENV_ROOT)],
-      venvRoot: VENV_ROOT
+      venvRoot: VENV_ROOT,
+      // COCO-PATCH: 本机模式的数据库连接串（缺 .env.db 时为 null，行为与官方一致）
+      databaseUrl: readDatabaseUrlFromEnvFile(path.join(ACTIVE_HERMES_ROOT, '.env.db'))
     }),
     root: ACTIVE_HERMES_ROOT,
     bootstrap: true,
@@ -5222,6 +5228,42 @@ function resolveHermesBackend(backendArgs) {
   }
 }
 
+// COCO-PATCH: 本机模式的便携 PostgreSQL —— 每个进程生命周期只准备一次。
+// 失败不阻塞启动：后端会给出「未配置 DATABASE_URL，拒绝初始化数据库」这种明确报错，
+// 比在这里抛一个更晦涩的异常好排查；同时清掉缓存，允许用户修好网络后重试。
+let localPostgresSetup = null
+
+function ensureLocalPostgres() {
+  if (!IS_WINDOWS) {
+    return Promise.resolve(null)
+  }
+
+  if (!localPostgresSetup) {
+    localPostgresSetup = runLocalPostgresSetup({
+      hermesHome: HERMES_HOME,
+      installDir: ACTIVE_HERMES_ROOT,
+      repoRoot: SOURCE_REPO_ROOT || ACTIVE_HERMES_ROOT
+    })
+      .then(result => {
+        rememberLog(`[postgres] ${result.ok ? 'ready' : 'setup failed'}: ${result.message}`)
+
+        if (!result.ok && result.exitCode !== null) {
+          localPostgresSetup = null
+        }
+
+        return result
+      })
+      .catch(error => {
+        rememberLog(`[postgres] setup threw: ${error.message}`)
+        localPostgresSetup = null
+
+        return null
+      })
+  }
+
+  return localPostgresSetup
+}
+
 function ensureRuntime(backend: any): Promise<any> {
   return localBackendLifecycle.start(() => runEnsureRuntime(backend))
 }
@@ -5369,6 +5411,10 @@ async function runEnsureRuntime(backend: any): Promise<any> {
         'then relaunch Hermes.'
     )
   }
+
+  // COCO-PATCH: 出生后、拉起后端之前，先把本机数据库备好（幂等，已在跑就秒返回）。
+  // 顺序要求：数据库就绪 → 后端进程拿到 DATABASE_URL → 建表 → 网关启动。
+  await ensureLocalPostgres()
 
   const venvPython = getVenvPython(VENV_ROOT)
 
