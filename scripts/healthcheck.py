@@ -49,6 +49,7 @@ from healthcheck_lib import (  # noqa: E402
     TARGET_TZ,
     parse_tzutil,
     platform_defaults,
+    python_argv,
     python_in_venv,
     scan_gateway_log as _scan_gateway_log,
     service_probe_plan,
@@ -106,10 +107,36 @@ def to_beijing(ts: str) -> str:
 
 def sh(cmd, timeout=15):
     try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        out = r.stdout.strip()
-        if r.stderr.strip():
+        # 显式 UTF-8 解码：Windows 上 subprocess 默认按 locale（cp1252/GBK）解，
+        # 撞到别的字节会抛 UnicodeDecodeError 把整项检查带崩（真机 CI 实测）。
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace",
+        )
+        out = (r.stdout or "").strip()
+        if (r.stderr or "").strip():
             out = out + "\n" + r.stderr.strip()
+        return r.returncode == 0, out
+    except Exception as e:
+        return False, str(e)
+
+
+def run_python(code_or_args, timeout=25):
+    """用参数列表调 Python（不经过 shell）。
+
+    为什么不能用 sh()：它要拼 shell 命令行，Python 代码/URL 得靠 shlex 加引号 ——
+    那是 POSIX 规则，Windows 的 cmd 会把它吃掉。真机 CI 实测后果：体检的
+    [5] 数据库项报 SyntaxError（连不上库）、[6] 迁移项拿不到输出。
+    """
+    args = python_argv(PY, code_or_args)
+    try:
+        r = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace",
+        )
+        out = (r.stdout or "").strip()
+        if (r.stderr or "").strip():
+            out = (out + "\n" + r.stderr.strip()).strip()
         return r.returncode == 0, out
     except Exception as e:
         return False, str(e)
@@ -239,7 +266,7 @@ if ws_state == "OK":
 elif ws_state == "NO":
     bad("web_search 不可用（未检测到搜索后端），Coco 只能回复'未收录'",
         "确认 ddgs 已装: pip show ddgs; 再重启服务"
-        + ("" if IS_WINDOWS else ": systemctl --user rerestart hermes-gateway.service"))
+        + ("" if IS_WINDOWS else ": systemctl --user restart hermes-gateway.service"))
 else:
     warn(f"web_search 检查异常: {ws_state}", "把以下日志发技术顾问")
 
@@ -260,7 +287,7 @@ try:
 except Exception as ex:
     print('ERR:' + str(ex)[:120])
 """
-    rc, out = sh(f"{PY} -c {__import__('shlex').quote(db_code)}", timeout=20)
+    rc, out = run_python(db_code, timeout=20)
     if rc and out.startswith("OK"):
         ok(f"数据库连接正常（房源 {out.split('props=')[1].split()[0]} 条，客户 {out.split('custs=')[1]} 条）")
     else:
@@ -277,7 +304,7 @@ else:
 # ---- 6. 数据库迁移状态 ----
 print("\n[6] 数据库迁移")
 if db_url:
-    mig_rc, mig_out = sh(f"{PY} {INSTALL_DIR}/scripts/migrate.py --database-url {__import__('shlex').quote(db_url)} --status", timeout=20)
+    mig_rc, mig_out = run_python([os.path.join(INSTALL_DIR, "scripts", "migrate.py"), "--database-url", db_url, "--status"], timeout=20)
     if mig_rc and "待执行: 0" in mig_out:
         ok("数据库结构已是最新（无待执行迁移）")
     elif mig_rc:

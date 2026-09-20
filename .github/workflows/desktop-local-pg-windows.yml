@@ -176,7 +176,7 @@ jobs:
           # 所以用一个真 venv + 把生成的 .env.db 放到安装目录（与线上安装的布局一致）
           python -m venv "$install\venv"
           # 体检的「数据库连接」项用 sqlalchemy 连库；装上驱动才能得到真正的 PASS
-          & (Join-Path $install 'venv\Scripts\python.exe') -m pip install -q --disable-pip-version-check sqlalchemy psycopg2-binary
+          & (Join-Path $install 'venv\Scripts\python.exe') -m pip install -q --disable-pip-version-check sqlalchemy psycopg2-binary cryptography
           Copy-Item (Join-Path $env:HERMES_HOME 'hermes-agent\.env.db') (Join-Path $install '.env.db') -Force
 
           $script = 'apps/desktop/scripts/local-backup.ps1'
@@ -217,6 +217,15 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $py = Join-Path $env:GITHUB_WORKSPACE 'venv\Scripts\python.exe'
           $env:COCO_PYTHON = $py
+
+          # 先把业务表建出来（与 install.sh 的 setup_tables 同一入口），这样体检的
+          # 「数据库连接」项才是真的 PASS，而不是报「表不存在」
+          $url = [regex]::Match((Get-Content (Join-Path $env:GITHUB_WORKSPACE '.env.db') -Raw), '(?m)^DATABASE_URL=(.+)$').Groups[1].Value.Trim()
+          $env:DATABASE_URL = $url
+          Push-Location $env:GITHUB_WORKSPACE
+          & $py -c "from agent.real_estate_db import init_real_estate_db; init_real_estate_db(); print('TABLES_OK')"
+          Pop-Location
+
           $out = (& $py 'scripts/healthcheck.py' 2>&1 | Out-String)
           $out | Write-Host
 

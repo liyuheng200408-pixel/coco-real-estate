@@ -48,6 +48,21 @@ def test_service_probe_plan_splits_systemd_from_windows_local():
     assert lib.service_probe_plan("win32") == "windows-local"
 
 
+def test_python_argv_never_uses_shell_quoting():
+    """带引号的 URL/代码必须靠参数列表传，不能拼成 shell 命令行（Windows 会吃掉引号）"""
+    url = 'postgresql://hermes:pw@127.0.0.1:5432/hermes_agent'
+
+    argv = lib.python_argv('C:\\venv\\Scripts\\python.exe', ['scripts/migrate.py', '--database-url', url, '--status'])
+
+    assert argv[0].endswith('python.exe')
+    assert url in argv, '连接串必须是独立参数，而不是被引号包在一整条命令里'
+    assert not any(' ' in a and 'postgresql://' in a for a in argv), '不能把 URL 拼进带空格的命令串'
+
+    snippet = lib.python_argv('/usr/bin/python', 'print("hi")')
+    assert snippet[1] == '-c'
+    assert snippet[2] == 'print("hi")'
+
+
 def test_windows_probes_avoid_posix_commands():
     proc_cmd = lib.windows_process_command()
 
