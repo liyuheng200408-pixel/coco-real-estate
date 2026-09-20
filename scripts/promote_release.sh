@@ -56,8 +56,23 @@ for r in "${REMOTES[@]}"; do
     git fetch -q "$r" || fail "拉取 $r 失败（网络问题？）"
 done
 
-FROM_SHA="$(git rev-parse "origin/$FROM_BRANCH" 2>/dev/null || git rev-parse "$FROM_BRANCH")"
-TO_SHA="$(git rev-parse "origin/$TO_BRANCH")"
+# 晋升的必须是"测试通道上已经发布出去的内容"：本地测试分支若还有未推送的提交，
+# 先把它推齐再晋升。否则会拿旧的 SHA 做校验（误报失败），还会把标签打到错误的位置。
+LOCAL_TEST_SHA="$(git rev-parse "$FROM_BRANCH")"
+SYNCED=0
+for r in "${REMOTES[@]}"; do
+    remote_test_sha="$(git ls-remote "$r" "refs/heads/$FROM_BRANCH" | cut -f1)"
+    if [[ "$remote_test_sha" != "$LOCAL_TEST_SHA" ]]; then
+        if [[ "$SYNCED" == "0" ]]; then
+            info "测试通道本地领先远程，先把 $FROM_BRANCH 推齐（晋升的是测试通道上的内容）"
+            SYNCED=1
+        fi
+        git push "$r" "$FROM_BRANCH" || fail "推送 $FROM_BRANCH 到 $r 失败（先让测试通道齐了再晋升）"
+    fi
+done
+
+FROM_SHA="$(git ls-remote origin "refs/heads/$FROM_BRANCH" | cut -f1)"
+TO_SHA="$(git ls-remote origin "refs/heads/$TO_BRANCH" | cut -f1)"
 
 if [[ "$FROM_SHA" == "$TO_SHA" ]]; then
     ok "$TO_BRANCH 与 $FROM_BRANCH 已经是同一个提交（${TO_SHA:0:7}），无需晋升"

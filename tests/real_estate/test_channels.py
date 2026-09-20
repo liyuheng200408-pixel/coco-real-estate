@@ -320,3 +320,41 @@ class TestRuntimeFilesDoNotBlockSwitch:
         r = _run(["bash", str(work / "scripts" / "coco_channel.sh"), "switch", "next"], cwd=work)
         assert r.returncode == 0, r.stdout + r.stderr
         assert _git(work, "branch", "--show-current").stdout.strip() == "next"
+
+
+class TestPromoteSyncsTestChannelFirst:
+    """晋升前必须先让测试通道与远程一致 —— 真缺陷记录：
+
+    本地 next 有未推送提交时，旧脚本按 origin/next（旧 SHA）校验，结果**误报失败**
+    （远程其实已更新），并且把标签打到了旧提交上。所以现在先推齐测试分支，再按远程 SHA 晋升。
+    """
+
+    def test_promote_pushes_test_channel_before_promoting(self, tmp_path):
+        work = _init_repo(tmp_path / "work")
+        (work / "scripts").mkdir(exist_ok=True)
+        for name in ("coco_channel.sh", "promote_release.sh"):
+            shutil.copy(SCRIPTS / name, work / "scripts" / name)
+        _commit_all(work, "init")
+        for name in ("gitee.git", "github.git"):
+            subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / name)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(tmp_path / "gitee.git")], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "github", str(tmp_path / "github.git")], check=True)
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "master"], check=True)
+        # 测试分支：推一版旧的，然后在本地再加一个"未推送"的提交
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "next"], check=True)
+        (work / "old.txt").write_text("old", encoding="utf-8")
+        _commit_all(work, "pushed to test channel")
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "next"], check=True)
+        (work / "new.txt").write_text("new", encoding="utf-8")
+        tip = _commit_all(work, "not pushed yet")
+
+        r = _run(["bash", "scripts/promote_release.sh"], cwd=work)
+        out = r.stdout + r.stderr
+        assert r.returncode == 0, out
+        assert "推齐" in out, out
+        assert subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                              capture_output=True, text=True).stdout.strip() == tip
+        assert subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "next"],
+                              capture_output=True, text=True).stdout.strip() == tip, "测试通道也应被推齐"
