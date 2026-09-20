@@ -232,6 +232,15 @@ CONTENT_CHECKS = [
         "本机模式后端会以「未配置 DATABASE_URL 环境变量，拒绝初始化数据库」失败。\n"
         "处理：按 patches/09-desktop-local-pg.patch 恢复（ensureLocalPostgres 必须早于后端拉起）。",
     ),
+    (
+        "19",
+        "安装器的本机数据库阶段",
+        "scripts/install.ps1",
+        [r"COCO-PATCH", r"coco-database", r"Stage-CocoDatabase"],
+        "官方快照覆盖后，桌面版首启的进度界面里不再有「准备本机数据库」这一步（数据库只会在\n"
+        "后端启动路径上被静默准备），且 Coco 的本机模式在安装阶段不再写 .env.db。\n"
+        "处理：按 patches/10-install-ps1-local-db-stage.patch 恢复（阶段位置在依赖之后、PATH 之前）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示
@@ -256,6 +265,8 @@ PATH_CHECKS = [
     ("A18", "便携数据库引导脚本", "apps/desktop/scripts/portable-postgres.ps1", "file", 1, "本机模式的数据库引导脚本丢失（本机装不出数据库）"),
     ("A19", "便携数据库接线模块", "apps/desktop/electron/portable-postgres.ts", "file", 1, "桌面版与本机数据库的接线模块丢失（PATH/连接串都不再注入）"),
     ("A20", "便携数据库等价验证夹具", "apps/desktop/scripts/tests/portable-postgres-linux-e2e.sh", "file", 1, "本机数据库的 Linux 等价验证夹具丢失"),
+    ("A21", "本机备份脚本", "apps/desktop/scripts/local-backup.ps1", "file", 1, "本机模式的每日备份脚本丢失（数据将没有自动备份）"),
+    ("A22", "体检平台纯函数库", "scripts/healthcheck_lib.py", "file", 1, "体检的平台分支纯函数库丢失（Windows 上会误报）"),
 ]
 
 
