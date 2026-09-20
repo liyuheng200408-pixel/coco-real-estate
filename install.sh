@@ -383,6 +383,23 @@ setup_tables() {
     source "$INSTALL_DIR/.env.db" 2>/dev/null || true
     set +a
     "$INSTALL_DIR/venv/bin/python" -c "from agent.real_estate_db import init_real_estate_db; init_real_estate_db(); print('[Coco] 数据库表创建完成')" || warn "建表失败（首次工具调用时会自动重试）"
+
+    # COCO-PATCH(2026-09-20)：迁移与配置对齐原先只在"标准向导"路径下触发，
+    # 用户若从网页控制台或命令行配模型就会漏掉（实测：漏 8 个迁移 → 工具查不到数据、只能满盘 find）。
+    # 这里无条件补上，两者都幂等。
+    info "应用数据库迁移..."
+    if (cd "$INSTALL_DIR" && "$INSTALL_DIR/venv/bin/python" scripts/migrate.py >/dev/null 2>&1); then
+        ok "数据库结构已是最新（迁移幂等）"
+    else
+        warn "迁移未完成，可稍后重跑：$INSTALL_DIR/venv/bin/python $INSTALL_DIR/scripts/migrate.py"
+    fi
+
+    info "对齐 Coco 标准配置（轮次 / 压缩阈值 / 时区）..."
+    if (cd "$INSTALL_DIR" && "$INSTALL_DIR/venv/bin/python" scripts/coco_config_align.py >/dev/null 2>&1); then
+        ok "运行时配置已对齐 Coco 标准"
+    else
+        warn "配置对齐未完成，可稍后重跑：$INSTALL_DIR/venv/bin/python $INSTALL_DIR/scripts/coco_config_align.py"
+    fi
 }
 
 # ==================== gateway 用户服务环境补丁 ====================
@@ -540,6 +557,14 @@ start_service() {
     else
         warn "定时备份设置失败（crontab 不可用），可稍后手动设置"
     fi
+    # COCO-PATCH(2026-09-20)：首次备份 + 自检汇总，让用户装完就看到"部署健康"
+    if (cd "$INSTALL_DIR" && "$INSTALL_DIR/venv/bin/python" scripts/backup_db.py backup --force >/dev/null 2>&1); then
+        ok "已建立首份数据库备份"
+    else
+        warn "首次备份未完成，可稍后重跑：cd $INSTALL_DIR && venv/bin/python scripts/backup_db.py backup --force"
+    fi
+    info "部署自检（coco check）..."
+    "$INSTALL_DIR/venv/bin/coco" check 2>/dev/null | tail -6 || true
 }
 
 # ==================== 打印结果 ====================
