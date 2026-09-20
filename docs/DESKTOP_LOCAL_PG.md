@@ -89,11 +89,12 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 
 ### 2.1 何时跑
 
-1. **首次运行向导**：用户选「我没有服务器 → 本机安装」后，在现有
-   `apps/desktop/electron/bootstrap-runner.ts` 驱动的 `install.ps1` 流程里，
-   把本机 PG 作为一个 stage 插在**后端 venv 建好之后、网关首次启动之前**：
-   - 前后顺序要求：`pg 就绪 → 建表（init_real_estate_db） → 启网关`，
-     否则网关起来时 `DATABASE_URL` 还没写，会撞上「无 DATABASE_URL 即 raise」。
+1. **首次运行向导**（已实现）：`scripts/install.ps1` 里新增阶段 `coco-database`
+   （`Stage-CocoDatabase` → `Install-CocoLocalDatabase`），位置在 `node-deps` 之后、
+   `path` 之前 —— 顺序要求：`pg 就绪 → 建表（init_real_estate_db） → PATH/网关`，
+   否则网关起来时 `DATABASE_URL` 还没写，会撞上「无 DATABASE_URL 即 raise」。
+   安装器把这一步显示成「Preparing the local database」，失败即标红（附数据库日志路径）；
+   `COCO_SKIP_LOCAL_DB=1` 可跳过。
 2. **每次应用启动**：调 `-Action setup`（幂等：已在跑就原样返回，端口/口令都不动）。
    失败不要直接弹"无法启动"，先按退出码分流（见 2.5）。
 
@@ -199,6 +200,7 @@ gh workflow run desktop-local-pg-windows.yml --ref <branch>   # 合并到默认�
 | 停库 | `-Action stop` 正常，退出码 0 |
 | **每日备份** | 计划任务注册成功（`schtasks /Query` 通过）；立刻跑出的 dump 有效；`enc_key.txt` 与 `env.db.bak` 都在；`-Action status` 判定正常 |
 | **部署体检** | 按本机模式口径：`[PASS] 本机数据库在运行（便携 PostgreSQL）`、`检测到 9 个 Hermes/数据库相关进程`、`[PASS] 数据库连接正常（房源 0 条，客户 0 条）`；输出里**没有** systemd/journalctl/timedatectl |
+| **安装器阶段** | `-Manifest` 里含 `coco-database`（位置在 `node-deps` 之后、`path` 之前）；`-Stage coco-database` 单跑成功且产出 `.env.db`（幂等：已有数据目录时只做「确保在跑」） |
 
 ### 真机上踩到、并已修的三个坑（都只会在 Windows 上现形）
 
@@ -226,9 +228,10 @@ gh workflow run desktop-local-pg-windows.yml --ref <branch>   # 合并到默认�
 
 ### 还没验的（下一步）
 
-- 经纪人电脑上的**完整安装包流程**（安装 → 首启装后端 → 本机库 → 飞书配对 → 说话 → 落库）；
-- 任务计划程序自启、与桌面版进程的退出联动；
-- `install.ps1` 里本机 PG stage 的接线（当前接线在 `runEnsureRuntime()`，尚未做成独立 stage）。
+- 经纪人电脑上的**完整安装包流程**（安装 → 首启装后端 → 本机库 → 飞书配对 → 说话 → 落库）
+  —— 这是唯一还没走过的一整条链路，必须在真机上跑（安装包里有 Electron 壳与 install.ps1）；
+- 任务计划程序**开机自启**（备份任务已注册并验证，但自启后桌面版/数据库是否自动恢复在线未验）；
+- 「连接服务器」模式与本机模式在同一台机器上切换的表现。
 
 ---
 
