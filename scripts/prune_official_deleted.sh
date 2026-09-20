@@ -52,6 +52,7 @@ judge(){
   if [[ ! -e "$REPO_ROOT/$rel" ]]; then echo "absent"; return; fi
   if ! git -C "$REPO_ROOT" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then echo "untracked"; return; fi
   if ! git -C "$REPO_ROOT" diff --quiet -- "$rel" 2>/dev/null; then echo "locally-modified"; return; fi
+  if ! git -C "$REPO_ROOT" diff --cached --quiet -- "$rel" 2>/dev/null; then echo "staged-changes"; return; fi
   echo "ok"
 }
 
@@ -89,7 +90,7 @@ prune(){
   printf '%s\n' "${accepted[@]}" > "$dir/pruned.txt"
   printf '%s\n' "${skipped[@]}"  > "$dir/skipped.txt"
 
-  git -C "$REPO_ROOT" rm -q -- "${accepted[@]}" || { err "git rm 失败"; exit 1; }
+  git -C "$REPO_ROOT" rm -q -f -- "${accepted[@]}" || { err "git rm 失败（清单已存档，可人工处理）"; exit 1; }
   ok "已删除 ${#accepted[@]} 个官方历史残留文件（删除前的内容仍在 git 历史里）"
   echo "  清单存档: $dir/"
   echo "  误删回滚: git -C $REPO_ROOT checkout HEAD -- ${accepted[*]}"
@@ -118,6 +119,13 @@ selftest(){
   COCO_PRUNE_REPO_ROOT="$t" bash "$0" "$t/list.txt" >/dev/null 2>&1
   [[ ! -e "$t/apps/desktop/src/old-util.ts" ]] && echo "  OK 官方基线内的旧文件被删除" || { err "应删而未删: old-util.ts"; fail=1; }
   [[ ! -e "$t/tests/run_agent/test_old.py" ]] && echo "  OK 官方基线内的旧测试被删除" || { err "应删而未删: test_old.py"; fail=1; }
+  # 有暂存改动的文件不碰（真实缺陷：文件处于暂存态会让 git rm 直接失败）
+  mkdir -p "$t/tests/run_agent"
+  printf 'staged\n' > "$t/tests/run_agent/test_old.py"
+  printf 'tests/run_agent/test_old.py\n' > "$t/list2.txt"
+  ( cd "$t" && git add tests/run_agent/test_old.py >/dev/null 2>&1 )
+  COCO_PRUNE_REPO_ROOT="$t" bash "$0" "$t/list2.txt" >/dev/null 2>&1
+  [[ -e "$t/tests/run_agent/test_old.py" ]] && echo "  OK 有暂存改动的文件被跳过" || { err "误删有暂存改动的文件"; fail=1; }
   [[ -e "$t/README.md" ]] && echo "  OK Coco 自有文档被保护（README.md 仍在）" || { err "误删 README.md"; fail=1; }
   [[ -e "$t/apps/desktop/src/our-file.ts" ]] && echo "  OK 不在官方基线的自有文件被保护" || { err "误删自有文件"; fail=1; }
   [[ -e "$t/ghost.ts" ]] || true
