@@ -35,7 +35,7 @@ test('fromLocalGit reads HEAD + branch + dirty status', () => {
   }
   assert.deepEqual(fromLocalGit('/repo', execFn), {
     commit: 'b'.repeat(40),
-    branch: 'main',
+    branch: 'master',
     dirty: true,
     source: 'local'
   })
