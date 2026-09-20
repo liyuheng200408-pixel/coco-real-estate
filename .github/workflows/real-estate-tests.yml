@@ -32,7 +32,14 @@ jobs:
           python -m pip install --upgrade pip
           # 最小依赖：必须覆盖被测代码真正的运行依赖
           # 2026-09-20 修：海报功能依赖 Pillow（PIL），此前漏装 → CI 红而本地绿
-          pip install sqlalchemy cryptography pytest pyyaml httpx python-dateutil pillow requests
+          # 2026-09-20 再修：qrcode 也是运行依赖（海报二维码 + pyproject 的 feishu 附加项），
+          # 此前漏装 → 本地有它才过、CI 里相关断言失败
+          pip install sqlalchemy cryptography pytest pyyaml httpx python-dateutil pillow requests qrcode
+
+      - name: Install the SVG renderer (librsvg)
+        # 海报渲染走 rsvg-convert；不装它，所有 @needs_rsvg 渲染测试会被静默跳过 ——
+        # 绿灯但零覆盖（同样属于「依赖清单必须覆盖运行依赖」这一类问题）
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq librsvg2-bin
 
       - name: Syntax check (compileall)
         run: |
