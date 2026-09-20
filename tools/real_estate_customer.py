@@ -230,6 +230,8 @@ TOOLS = [
             "location": {"type": "string"}, "renovation": {"type": "string"},
             "notes": {"type": "string"}, "status": {"type": "string", "enum": ["active", "paused", "closed"]},
             "source": {"type": "string", "description": "客户来源（如 抖音/贝壳/安居客/转介绍/门店/58/其他）"},
+            "wechat": {"type": "string", "description": "客户微信号（加密存储；建档后补录或修改都用这个参数）"},
+            "birthday": {"type": "string", "description": "客户生日，格式 MM-DD 或 YYYY-MM-DD"},
         },
         "required": ["customer_id"],
     }, "handler": lambda args, **kw: update_customer(**args)},
@@ -239,6 +241,7 @@ TOOLS = [
     {"name": "list_customers", "description": "列出客户列表", "parameters": {
         "type": "object", "properties": {
             "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型筛选：buy_new买一手房/buy_second_hand买二手房/rent租房"},
             "status": {"type": "string", "enum": ["active", "paused", "closed"]},
             "limit": {"type": "integer"},
         },

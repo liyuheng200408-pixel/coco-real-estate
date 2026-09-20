@@ -2,6 +2,8 @@
 Coco 房产工具 - 房源管理
 """
 import json
+import re
+
 from tools.registry import registry
 
 
@@ -51,8 +53,9 @@ def add_property(
     result = db.add_property(
         title=title, price=price, area=area, community=community,
         district=district, address=address,
-        rooms=rooms, halls=halls, bathrooms=bathrooms, floor=floor,
-        orientation=orientation, renovation=renovation, year_built=year_built,
+        rooms=rooms, halls=halls, bathrooms=bathrooms,
+        floor=_norm_floor(floor), orientation=_norm_orientation(orientation),
+        renovation=renovation, year_built=year_built,
         has_elevator=has_elevator, parking=parking, property_type=property_type,
         tags=tags, images=merged_images, agent_id=agent_id,
         tenant_requirements=tenant_requirements,
@@ -112,14 +115,26 @@ def update_property(
     property_id: int, title: str = None, price: int = None,
     area: float = None, status: str = None,
     community: str = None, district: str = None, renovation: str = None,
+    rooms: int = None, halls: int = None, bathrooms: int = None,
+    floor: str = None, orientation: str = None, address: str = None,
+    year_built: int = None, has_elevator: int = None, parking: int = None,
+    tags: str = None,
     owner_name: str = None, owner_phone: str = None, owner_wechat: str = None,
     task_id: str = None,
 ) -> str:
-    """更新房源信息（可同时补充业主联系方式：owner_name/owner_phone/owner_wechat，自动登记房东并关联）"""
+    """更新房源信息（可同时补充业主联系方式：owner_name/owner_phone/owner_wechat，自动登记房东并关联）
+
+    也支持补录/修改：户型(rooms/halls/bathrooms)、楼层(floor)、朝向(orientation)、
+    详细地址(address)、建造年份(year_built)、电梯(has_elevator)、车位(parking)、标签(tags)。
+    """
     db = _get_db()
     kwargs = {k: v for k, v in {
         'title': title, 'price': price, 'area': area, 'status': status,
         'community': community, 'district': district, 'renovation': renovation,
+        'rooms': rooms, 'halls': halls, 'bathrooms': bathrooms,
+        'floor': _norm_floor(floor), 'orientation': _norm_orientation(orientation),
+        'address': address, 'year_built': year_built,
+        'has_elevator': has_elevator, 'parking': parking, 'tags': tags,
     }.items() if v is not None}
     result = db.update_property(property_id, **kwargs)
     if not result:
@@ -169,6 +184,73 @@ def search_property(
 
 
 _TYPE_LABELS = {"new": "一手房", "second_hand": "二手房", "rental": "租房"}
+
+_CN_DIGITS = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+              "六": 6, "七": 7, "八": 8, "九": 9}
+_FLOOR_PRESETS = ("负一层", "负二层", "底层", "顶层", "低楼层", "中楼层", "高楼层")
+
+
+def _cn_to_int(text: str):
+    """把「十六」「二十」「三」这类中文数字转成整数（支持 1~99，认不出返回 None）"""
+    if "十" in text:
+        head, _, tail = text.partition("十")
+        tens = _CN_DIGITS.get(head, 1) if head else 1
+        ones = _CN_DIGITS.get(tail, 0) if tail else 0
+        return tens * 10 + ones if (head or tail) else None
+    return _CN_DIGITS.get(text)
+
+
+def _norm_floor(value):
+    """楼层归一：16楼/十六楼/16F → 16层；5/18层 → 5层（共18层）；低/中/高楼层、顶层、底层原样保留。
+
+    为什么要归一：经纪人写法五花八门，不统一的话海报上会出现「3楼/三楼/03F」，
+    筛选「中高楼层」也会漏。认不出的写法**原样保留**，绝不臆造。
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    s = s.replace("Ｆ", "F").replace("f", "F").replace("樓", "楼")
+    if s in _FLOOR_PRESETS:
+        return s
+    m = re.match(r"^(\d{1,3})\s*[/／]\s*(\d{1,3})\s*(?:楼|层|F)?$", s)       # 5/18层
+    if m:
+        return f"{int(m.group(1))}层（共{int(m.group(2))}层）"
+    m = re.match(r"^(?:共)?(\d{1,3})\s*(?:楼|层|F)$", s)                       # 16楼 / 16层 / 16F
+    if m:
+        return f"{int(m.group(1))}层"
+    m = re.match(r"^(?:共)?(\d{1,3})\s*层?\s*[/／]\s*共?\s*(\d{1,3})\s*层?$", s)  # 16层/共18层
+    if m:
+        return f"{int(m.group(1))}层（共{int(m.group(2))}层）"
+    m = re.match(r"^([一二三四五六七八九十两]{1,3})楼$", s)                        # 十六楼
+    if m:
+        n = _cn_to_int(m.group(1))
+        return f"{n}层" if n else s
+    return s
+
+
+def _norm_orientation(value):
+    """朝向归一：朝北/北向/北面/北向一线 → 北；南北通 → 南北通透；认不出的原样保留。"""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    s = s.replace(" ", "").replace("　", "")
+    s = re.sub(r"^(朝|面向|正向|向|正)", "", s)
+    stripped = re.sub(r"(向|面|方向)$", "", s)
+    if stripped:          # 剥完不能是空串（"一线看海"这类描述不该被剥没）
+        s = stripped
+    if s in ("南北通", "南北"):
+        return "南北通透"
+    if s in ("东西通", "东西"):
+        return "东西通透"
+    dirs = ("东南北", "西南北", "东南", "西南", "东北", "西北", "南", "北", "东", "西")
+    for d in dirs:
+        if s == d:
+            return d
+    return s
 _STATUS_LABELS = {"available": "在售", "sold": "已售", "rented": "已租"}
 
 
@@ -364,6 +446,14 @@ TOOLS = [
             "owner_name": {"type": "string", "description": "业主（房东）姓名。填了即自动登记房东并关联此房源"},
             "owner_phone": {"type": "string", "description": "业主（房东）手机号，加密存储"},
             "owner_wechat": {"type": "string", "description": "业主（房东）微信号，加密存储"},
+            "address": {"type": "string", "description": "详细地址（楼栋门牌等，如 7号楼2单元301）"},
+            "bathrooms": {"type": "integer", "description": "卫数"},
+            "floor": {"type": "string", "description": "楼层。经纪人怎么说都行（3楼/十六楼/16F/5/18层/低楼层/中楼层/高楼层/顶层），系统会归一成「16层」「5层（共18层）」这类写法"},
+            "orientation": {"type": "string", "description": "朝向。如 南/北/东/西/东南/西南/东北/西北/南北通透（朝南、南向、南北通都会归一）"},
+            "year_built": {"type": "integer", "description": "建造年份，如 2015"},
+            "has_elevator": {"type": "integer", "description": "有无电梯：1=有，0=无（默认 1）"},
+            "parking": {"type": "integer", "description": "有无车位：1=有，0=无（默认 0）"},
+            "tags": {"type": "string", "description": "特色标签，多个用逗号分隔，如 学区房,地铁房,精装修"},
             "force": {"type": "boolean", "description": "默认 false。true=跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用）"},
         }, "required": ["title", "price", "area"],
     }, "handler": lambda args, **kw: add_property(**args)},
@@ -372,6 +462,18 @@ TOOLS = [
             "property_id": {"type": "integer"}, "title": {"type": "string"},
             "price": {"type": "integer"}, "area": {"type": "number"},
             "status": {"type": "string", "enum": ["available", "sold", "rented"]},
+            "community": {"type": "string", "description": "小区名（录错时可改）"},
+            "district": {"type": "string", "description": "区域（录错时可改）"},
+            "renovation": {"type": "string", "enum": ["毛坯", "简装", "精装", "豪装"], "description": "装修状态（可改）"},
+            "rooms": {"type": "integer", "description": "室数"}, "halls": {"type": "integer", "description": "厅数"},
+            "bathrooms": {"type": "integer", "description": "卫数"},
+            "floor": {"type": "string", "description": "楼层（补录或修改；3楼/十六楼/16F/中楼层 都会归一成「16层」这类写法）"},
+            "orientation": {"type": "string", "description": "朝向（补录或修改；朝北/北向 → 北；南北通 → 南北通透）"},
+            "address": {"type": "string", "description": "详细地址"},
+            "year_built": {"type": "integer", "description": "建造年份"},
+            "has_elevator": {"type": "integer", "description": "有无电梯：1=有/0=无"},
+            "parking": {"type": "integer", "description": "有无车位：1=有/0=无"},
+            "tags": {"type": "string", "description": "特色标签，多个用逗号分隔"},
             "owner_name": {"type": "string", "description": "业主姓名。填了即自动登记房东并关联此房源"},
             "owner_phone": {"type": "string", "description": "业主手机号，加密存储"},
             "owner_wechat": {"type": "string", "description": "业主微信号，加密存储"},
@@ -384,6 +486,8 @@ TOOLS = [
             "min_area": {"type": "number"}, "max_area": {"type": "number"},
             "rooms": {"type": "integer"}, "district": {"type": "string"},
             "renovation": {"type": "string"},
+            "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型筛选：new(一手房)/second_hand(二手房)/rental(租房)"},
+            "limit": {"type": "integer", "description": "最多返回多少条（默认 20；要全量统计时显式给大值）"},
         },
     }, "handler": lambda args, **kw: search_property(**args)},
     {"name": "match_property", "description": "根据客户需求智能匹配房源", "parameters": {
