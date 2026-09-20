@@ -7,6 +7,7 @@ import { group, split } from '@/components/pane-shell/tree/model'
 import { $layoutTree, noteActiveTreeGroup } from '@/components/pane-shell/tree/store'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { registry } from '@/contrib/registry'
+import { cocoEntryVisible } from '@/lib/coco-ui-profile'
 import { $selectedStoredSessionId, $sessions } from '@/store/session'
 import { $removedSessionIds } from '@/store/session-removal'
 import { makeSessionInfo } from '@/test/session-info'
@@ -130,16 +131,18 @@ describe('ChatSidebar navigation activity', () => {
       $sessions.set(sessionRows)
     })
 
-    for (const [pathname, currentView, label] of [
-      ['/skills', 'skills', 'Capabilities'],
-      ['/messaging', 'messaging', 'Messaging'],
-      ['/artifacts', 'artifacts', 'Artifacts'],
-      ['/cron', 'cron', 'Scheduled jobs']
+    for (const [pathname, currentView, label, entryId] of [
+      ['/skills', 'skills', 'Capabilities', 'nav.skills'],
+      ['/messaging', 'messaging', 'Messaging', 'nav.messaging'],
+      ['/artifacts', 'artifacts', 'Artifacts', 'nav.artifacts'],
+      ['/cron', 'cron', 'Scheduled jobs', 'nav.cron']
     ] as const) {
       cleanup()
       focus('workspace-group')
       renderSidebar(pathname, currentView)
-      expectOnlyCurrent(label)
+      // 中介版收起了技术向入口（见 src/lib/coco-ui-profile.ts）：路径仍然可达，但侧栏
+      // 没有那一行，因此没有「当前」行可标 —— 收起时断言的就是这件事。
+      expectOnlyCurrent(cocoEntryVisible(entryId) ? label : null)
       expectOnlySelectedSession(null)
 
       focus('tile-one-group')

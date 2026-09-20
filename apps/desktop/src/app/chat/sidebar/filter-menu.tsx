@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { useI18n } from '@/i18n'
+import { COCO_ENTRY, cocoEntryVisible } from '@/lib/coco-ui-profile'
 import { desktopGit } from '@/lib/desktop-git'
 import { cn } from '@/lib/utils'
 import {
@@ -190,9 +191,14 @@ export function SidebarFilterMenu({ className }: { className?: string }) {
 
   const foldCollapsed = foldIds.length > 0 && foldIds.every(id => nodeOpen[id] === false)
 
-  const groupings = GROUPINGS.map(option =>
-    option.id === 'profile' ? { ...option, label: t.sidebar.gatewayGroups.grouping } : option
-  )
+  const groupings = GROUPINGS
+    // Coco 中介界面：不提供「按项目分组」。已选中的那一项仍留着，否则持久化的旧选择
+    // 会让选择器显示空白 —— 见 src/lib/coco-ui-profile.ts。
+    .filter(
+      option =>
+        option.id !== 'project' || grouping === 'project' || cocoEntryVisible(COCO_ENTRY.sidebarProjectGrouping)
+    )
+    .map(option => (option.id === 'profile' ? { ...option, label: t.sidebar.gatewayGroups.grouping } : option))
 
   const groupingLabel = groupings.find(option => option.id === grouping)?.label
 
@@ -371,7 +377,7 @@ export function SidebarFilterMenu({ className }: { className?: string }) {
             </DropdownMenuSubContent>
           </DropdownMenuSub>
 
-          {projects.length > 1 && (
+          {cocoEntryVisible(COCO_ENTRY.sidebarProjectFilter) && projects.length > 1 && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Project</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="max-h-80 overflow-y-auto">

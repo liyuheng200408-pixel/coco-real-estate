@@ -45,6 +45,7 @@ import {
   updateCronJob
 } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
+import { COCO_ENTRY, cocoEntryVisible } from '@/lib/coco-ui-profile'
 import { AlertTriangle } from '@/lib/icons'
 import { requestModelOptions } from '@/lib/model-options'
 import { asText } from '@/lib/text'
@@ -1107,6 +1108,13 @@ function CronEditorDialog({
     setError(null)
   }, [blueprint])
 
+  // Coco 中介界面：不提供「自定义排程」（裸 cron 表达式）。已经是自定义排程的任务仍列出
+  // 这一项，否则编辑既有任务时选择器会变空白 —— 见 src/lib/coco-ui-profile.ts。
+  const scheduleOptions = SCHEDULE_OPTIONS.filter(
+    option =>
+      option.value !== 'custom' || schedulePreset === 'custom' || cocoEntryVisible(COCO_ENTRY.cronCustomSchedule)
+  )
+
   const selectedScheduleOption =
     SCHEDULE_OPTIONS.find(candidate => candidate.value === schedulePreset) ?? SCHEDULE_OPTIONS[0]
 
@@ -1314,7 +1322,7 @@ function CronEditorDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {SCHEDULE_OPTIONS.map(option => (
+                    {scheduleOptions.map(option => (
                       <SelectItem key={option.value} value={option.value}>
                         {c.scheduleLabels[option.value]}
                       </SelectItem>
@@ -1334,7 +1342,9 @@ function CronEditorDialog({
               </Field>
             </div>
 
-            {!scriptOnlyJob && (
+            {/* Coco 中介界面：按任务的模型覆盖属技术向，收起 —— lib/coco-ui-profile.ts。
+                字段不渲染也会照旧提交已存的值，不丢配置。 */}
+            {!scriptOnlyJob && cocoEntryVisible(COCO_ENTRY.cronModel) && (
               <Field htmlFor="cron-model" label={c.modelLabel} optional optionalLabel={c.optional}>
                 <Select onValueChange={setModelChoice} value={modelChoice}>
                   <SelectTrigger className="h-9 rounded-md" id="cron-model">

@@ -25,6 +25,7 @@ import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { COCO_ENTRY, cocoEntryVisible } from '@/lib/coco-ui-profile'
 import { comboTokens } from '@/lib/keybinds/combo'
 import { sessionMatchesSearch } from '@/lib/session-search'
 import { normalizeSessionSource, sessionSourceLabel } from '@/lib/session-source'
@@ -232,6 +233,10 @@ const SIDEBAR_NAV: SidebarNavItem[] = [
     keybindActionId: 'nav.cron'
   }
 ]
+
+// Coco 中介界面：技术向页面（技能与工具 / 消息平台 / 产物）不进侧栏。开关与清单在
+// src/lib/coco-ui-profile.ts —— 路由本身不动，深链接照常可用。
+const SIDEBAR_NAV_VISIBLE: SidebarNavItem[] = SIDEBAR_NAV.filter(item => cocoEntryVisible(item.id))
 
 // Two modes via the `compact` height variant (styles.css):
 //   tall    → each section is shrink-0, capped, its own scroller; Sessions is flex-1.
@@ -1474,7 +1479,7 @@ export function ChatSidebar({
         <SidebarGroup className="shrink-0 p-0 pb-2 pt-[calc(var(--titlebar-height)+0.375rem)]">
           <SidebarGroupContent>
             <SidebarMenu className="gap-px">
-              {[...SIDEBAR_NAV, ...contributedNav].map(item => {
+              {[...SIDEBAR_NAV_VISIBLE, ...contributedNav].map(item => {
                 const isInteractive = Boolean(item.action) || Boolean(item.route)
 
                 const active =
@@ -1868,7 +1873,8 @@ export function ChatSidebar({
               />
             )}
 
-            {!trimmedQuery &&
+            {cocoEntryVisible(COCO_ENTRY.sidebarMessagingGroups) &&
+              !trimmedQuery &&
               !worktreeGroupingActive &&
               messagingGroups.map(group => {
                 const visible = messagingVisible[group.sourceId] ?? NON_SESSION_INITIAL_ROWS

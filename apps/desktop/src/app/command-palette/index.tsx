@@ -22,6 +22,7 @@ import { getHermesConfigRecord, listAllProfileSessions } from '@/hermes'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useI18n } from '@/i18n'
 import { sessionTitle } from '@/lib/chat-runtime'
+import { COCO_ENTRY, cocoEntryVisible, cocoPaletteRowVisible, cocoSettingsTabVisible } from '@/lib/coco-ui-profile'
 import {
   Activity,
   AppWindow,
@@ -448,6 +449,10 @@ const NON_CONFIG_SETTINGS: ReadonlyArray<{
   { icon: Info, keywords: ['version', 'about'], labelKey: 'about', tab: 'about' }
 ]
 
+// Coco 中介界面：技术向设置行从命令面板去掉（开关与清单见 lib/coco-ui-profile.ts）。
+// 设置页的导航用同一套判定，所以两边永远一致。
+const NON_CONFIG_SETTINGS_VISIBLE = NON_CONFIG_SETTINGS.filter(entry => cocoSettingsTabVisible(entry.tab))
+
 const THEME_MODES: ReadonlyArray<{ icon: IconComponent; mode: ThemeMode }> = [
   { icon: Sun, mode: 'light' },
   { icon: Moon, mode: 'dark' },
@@ -850,7 +855,9 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             label: t.starmap.title,
             run: go(STARMAP_ROUTE)
           }
-        ]
+          // Coco 中介界面：技术向页面（技能与工具 / 消息平台 / 产物）不进命令面板。
+          // 与侧栏同一份开关与清单 —— src/lib/coco-ui-profile.ts。
+        ].filter(item => cocoPaletteRowVisible(item.id))
       },
       projectGroup,
       // Registry-contributed rows (core features + plugins) — one group,
@@ -984,7 +991,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             label: settingsSectionLabel(section),
             run: go(settingsTab(`config:${section.id}`))
           })),
-          ...NON_CONFIG_SETTINGS.map(entry => ({
+          ...NON_CONFIG_SETTINGS_VISIBLE.map(entry => ({
             icon: entry.icon,
             id: `set-${entry.tab}`,
             keywords: ['settings', ...(entry.keywords ?? [])],
@@ -1079,39 +1086,42 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     // jump to the exact tab (matches the "not just the top lvl" ask).
     const capLabel = t.commandCenter.nav.skills.title
 
-    result.push({
-      heading: capLabel,
-      items: [
-        {
-          icon: Wrench,
-          id: 'cap-skills',
-          keywords: ['skills', 'capabilities'],
-          label: `${capLabel}: ${t.skills.tabSkills}`,
-          run: go(`${SKILLS_ROUTE}?tab=skills`)
-        },
-        {
-          icon: SlidersHorizontal,
-          id: 'cap-toolsets',
-          keywords: ['tools', 'toolsets', 'capabilities'],
-          label: `${capLabel}: ${t.skills.tabToolsets}`,
-          run: go(`${SKILLS_ROUTE}?tab=toolsets`)
-        },
-        {
-          icon: Layers3,
-          id: 'cap-mcp',
-          keywords: ['mcp', 'servers', 'tools', 'capabilities', 'model context protocol'],
-          label: `${capLabel}: ${t.skills.tabMcp}`,
-          run: go(`${SKILLS_ROUTE}?tab=mcp`)
-        },
-        {
-          icon: Package,
-          id: 'cap-plugins',
-          keywords: ['plugins', 'extensions', 'desktop plugins', 'agent plugins', 'catalog', 'addon', 'add-on'],
-          label: `${capLabel}: ${t.skills.tabPlugins}`,
-          run: go(`${SKILLS_ROUTE}?tab=plugins`)
-        }
-      ]
-    })
+    // Coco 中介界面：技能与工具已收起，就别再从搜索里深链进去 —— lib/coco-ui-profile.ts
+    if (cocoEntryVisible(COCO_ENTRY.navSkills)) {
+      result.push({
+        heading: capLabel,
+        items: [
+          {
+            icon: Wrench,
+            id: 'cap-skills',
+            keywords: ['skills', 'capabilities'],
+            label: `${capLabel}: ${t.skills.tabSkills}`,
+            run: go(`${SKILLS_ROUTE}?tab=skills`)
+          },
+          {
+            icon: SlidersHorizontal,
+            id: 'cap-toolsets',
+            keywords: ['tools', 'toolsets', 'capabilities'],
+            label: `${capLabel}: ${t.skills.tabToolsets}`,
+            run: go(`${SKILLS_ROUTE}?tab=toolsets`)
+          },
+          {
+            icon: Layers3,
+            id: 'cap-mcp',
+            keywords: ['mcp', 'servers', 'tools', 'capabilities', 'model context protocol'],
+            label: `${capLabel}: ${t.skills.tabMcp}`,
+            run: go(`${SKILLS_ROUTE}?tab=mcp`)
+          },
+          {
+            icon: Package,
+            id: 'cap-plugins',
+            keywords: ['plugins', 'extensions', 'desktop plugins', 'agent plugins', 'catalog', 'addon', 'add-on'],
+            label: `${capLabel}: ${t.skills.tabPlugins}`,
+            run: go(`${SKILLS_ROUTE}?tab=plugins`)
+          }
+        ]
+      })
+    }
 
     // Apply a theme directly from the root search (e.g. "nous" → Nous). Live
     // preview via keepOpen, mirroring the nested theme picker. If the theme
@@ -1288,7 +1298,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             label: settingsSectionLabel(section),
             run: go(settingsTab(`config:${section.id}`))
           })),
-          ...NON_CONFIG_SETTINGS.map(entry => ({
+          ...NON_CONFIG_SETTINGS_VISIBLE.map(entry => ({
             icon: entry.icon,
             id: `sp-${entry.tab}`,
             keywords: ['settings', ...(entry.keywords ?? [])],

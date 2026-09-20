@@ -13,6 +13,8 @@
  *    — the agent's/user's doors, watched + hot-reloaded by the runtime loader.
  */
 
+import { cocoPluginVisible } from '@/lib/coco-ui-profile'
+
 import { createPluginContext, type HermesPlugin } from './plugin'
 import { pluginActive, publishPlugin } from './plugins-store'
 import { watchRuntimePlugins } from './runtime-loader'
@@ -38,6 +40,12 @@ export function discoverBundledPlugins(): void {
     if (!plugin?.id || typeof plugin.register !== 'function') {
       console.warn(`[plugins] ${path} has no valid default HermesPlugin export — skipped`)
 
+      continue
+    }
+
+    // Coco 中介界面：技术向内建插件（目前只有 Bot Mode）整块不注册 —— 页签、名册、
+    // 例程面板与 @提及都不进界面。开关在 src/lib/coco-ui-profile.ts。
+    if (!cocoPluginVisible(plugin.id)) {
       continue
     }
 

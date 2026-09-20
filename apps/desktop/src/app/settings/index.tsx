@@ -7,6 +7,7 @@ import { KbdCombo } from '@/components/ui/kbd'
 import { Tip } from '@/components/ui/tooltip'
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { cocoSettingsViewVisible } from '@/lib/coco-ui-profile'
 import { triggerHaptic } from '@/lib/haptics'
 import {
   Archive,
@@ -316,6 +317,10 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
     [activeView, keysView, providerView, t, setActiveView, openProviderView, openKeysView]
   )
 
+  // Coco 中介界面：技术向设置项（账单 / 提供方 / 工具与密钥）不进导航。开关与清单在
+  // src/lib/coco-ui-profile.ts —— 视图本身不动，`?tab=billing` 这类深链接照常可用。
+  const visibleNavGroups = navGroups.filter(entry => cocoSettingsViewVisible(entry.id))
+
   // Type-to-search: printable keystrokes on the Settings surface (outside any
   // field) open the settings-scoped palette, seeded with the character — same
   // reflex as the chat surface's type-to-focus, pointed at search instead.
@@ -441,7 +446,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
   return (
     <OverlayView closeLabel={t.settings.closeSettings} edgeBadge={searchPill} onClose={onClose}>
       <OverlaySplitLayout>
-        <OverlayNav footer={navFooter} groups={navGroups} />
+        <OverlayNav footer={navFooter} groups={visibleNavGroups} />
 
         <OverlayMain className="px-0 pb-0">{activeSettingsContent}</OverlayMain>
       </OverlaySplitLayout>
