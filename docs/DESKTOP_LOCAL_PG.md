@@ -123,16 +123,23 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 - 开机自启（设计）：任务计划程序注册一条用户级登录任务调 `-Action setup`
   （无需管理员）；不要注册成 Windows 服务（要管理员，且违反"不写系统服务"的约束）。
 
-### 2.4 备份 / 恢复
+### 2.4 备份 / 恢复（已实现：`apps/desktop/scripts/local-backup.ps1`）
 
-- 备份复用现成脚本：`venv\Scripts\python.exe scripts\backup_db.py backup`
-  （PATH 里要有 `pgsql\bin`），产物落 `~/backups/real_estate/*.dump`。
-- 首次安装成功后自动建一条**每日备份**计划任务，并把 `enc_key.txt` 一并备份
-  （`install.sh` 的既有做法：备份密钥到 `~/backups/real_estate/enc_key.txt`）。
-- 恢复：`backup_db.py restore_migration --migration-tar <包>`（顺序：库→图片→密钥），
-  恢复完 `-Action setup` 确保服务在跑。
-- 「一键导出」给经纪人：把 dump + `enc_key.txt` + 图片打成迁移包，提示存网盘
-  （本机模式下数据在用户电脑上，备份是用户自己的责任边界）。
+本机模式的数据在用户自己电脑上，**没有服务器那份每日 cron 兜底**，所以数据库就绪后
+桌面版会自动注册一条用户级计划任务（`-Action register`）：
+
+- 触发器：每天 12:00 + 每次登录（`StartWhenAvailable=true`，笔记本中午关机也能在开机后补跑）；
+- 主体：当前用户、`InteractiveToken`、`LeastPrivilege` —— 不需要管理员权限，不注册系统服务；
+- 备份内容（与服务器版恢复流程对齐）：
+  `scripts/backup_db.py backup --backup-dir <目录>` 产出的 `*.dump`、
+  `enc_key.txt`（客户手机号/微信的加密密钥）、`env.db.bak`（整个 .env.db，恢复时不用猜口令）；
+- 注册时会**立刻跑一次**备份，装完就有第一份；注册失败不阻断启动（只记日志，App 照常起）；
+- 其它入口：`-Action run`（计划任务调的就是它）/ `-Action status`（任务是否在、最近备份是否新鲜）/
+  `-Action unregister`。
+
+恢复沿用现成脚本：`backup_db.py restore_migration --migration-tar <包>`（库→图片→密钥），
+恢复完 `-Action setup` 确保服务在跑。「一键导出」给经纪人则是把 dump + 密钥 + 图片打成迁移包，
+提示存网盘（数据在用户电脑上，备份是用户自己的责任边界）。
 
 ### 2.5 失败时的用户提示（文案落点）
 
@@ -190,6 +197,7 @@ gh workflow run desktop-local-pg-windows.yml --ref <branch>   # 合并到默认�
 | **NTFS 权限** | `.env.db` 与数据目录「ACL 已断开继承，仅当前用户」 |
 | 连接串 | 用 `.env.db` 里的 DATABASE_URL 跑 psql：`hermes\|hermes_agent\|127.0.0.1` |
 | 停库 | `-Action stop` 正常，退出码 0 |
+| **每日备份** | 计划任务注册成功（`schtasks /Query` 通过）；立刻跑出的 dump 有效；`enc_key.txt` 与 `env.db.bak` 都在；`-Action status` 判定正常 |
 
 ### 真机上踩到、并已修的三个坑（都只会在 Windows 上现形）
 
@@ -202,6 +210,10 @@ gh workflow run desktop-local-pg-windows.yml --ref <branch>   # 合并到默认�
 3. **psql 的选项必须写在连接串之前**：Windows 的 psql 不做 GNU 式参数重排，写在 URL 后面的
    `-t -A -c` 会被当成「多余参数」静默忽略 → 进交互模式、什么都没查却返回 0（假绿）。
    检查项还要断言输出内容，不能只看退出码。
+4. **Python 打印中文会在 Windows 控制台上崩**：stdout 默认跟随控制台代码页（cp1252/GBK），
+   `print("...")` 抛 `UnicodeEncodeError` 直接把备份带崩（实测：计划任务注册成功、一跑备份就失败）。
+   修法有两层：调用方给 `PYTHONIOENCODING=utf-8`（只设 `PYTHONUTF8=1` 会被它盖掉），
+   脚本自己在入口 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` 兜底。
 
 ### 还没验的（下一步）
 
