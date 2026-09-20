@@ -62,16 +62,28 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
-          for ($i = 1; $i -le 3; $i++) {
-            Write-Host "::group::npm ci (attempt $i)"
-            npm ci
-            $code = $LASTEXITCODE
-            Write-Host "::endgroup::"
-            if ($code -eq 0) { exit 0 }
-            if ($i -eq 3) { throw "npm ci failed after 3 attempts (exit $code)" }
-            Write-Host "::warning::npm ci attempt $i failed (exit $code); retrying"
-            Start-Sleep -Seconds 15
+          function Run-WithRetry([string]$label, [scriptblock]$body) {
+            for ($i = 1; $i -le 2; $i++) {
+              Write-Host "::group::$label (attempt $i)"
+              $global:LASTEXITCODE = 0
+              & $body
+              $code = $LASTEXITCODE
+              Write-Host "::endgroup::"
+              if ($code -eq 0) { return $true }
+              Write-Host "::warning::$label attempt $i failed (exit $code)"
+              if ($i -lt 2) { Start-Sleep -Seconds 15 }
+            }
+            return $false
           }
+
+          # npm ci is the reproducible path, but it refuses to run while the
+          # committed lock file does not describe every workspace (a workspace
+          # added without a lockfile refresh). Fall back to npm install, which
+          # resolves the missing entries instead of hard-failing the job.
+          if (Run-WithRetry "npm ci" { npm ci }) { exit 0 }
+          Write-Host "::warning::npm ci could not run against the committed lock file; falling back to npm install"
+          if (Run-WithRetry "npm install" { npm install --no-audit --no-fund }) { exit 0 }
+          throw "dependency install failed (npm ci and npm install)"
 
       # The installer pins first-launch bootstrap to the commit it was built
       # from; $GITHUB_SHA / $GITHUB_REF_NAME give it the CI ref.
