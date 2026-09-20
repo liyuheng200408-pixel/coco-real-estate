@@ -2,7 +2,7 @@
   "name": "hermes",
   "productName": "Coco",
   "private": true,
-  "version": "0.17.2",
+  "version": "0.21.3-53",
   "description": "Native desktop shell for Hermes Agent.",
   "author": "Nous Research",
   "repository": {
@@ -200,7 +200,7 @@
         ]
       }
     ],
-    "artifactName": "Hermes-${version}-${os}-${arch}.${ext}",
+    "artifactName": "Coco-${version}-${os}-${arch}.${ext}",
     "icon": "assets/icon",
     "directories": {
       "output": "release"
