@@ -12,6 +12,16 @@
 name: Desktop local PG (Windows)
 
 on:
+  # workflow_dispatch 只在工作流已存在于默认分支后才可点；这条分支还没合并，
+  # 所以先用「只在 feat/desktop-local-pg 上触发的 push」拿到真机结果。
+  # 分支限定保证不会给 master/tag 制造噪声；合并后可只留 workflow_dispatch。
+  push:
+    branches:
+      - feat/desktop-local-pg
+    paths:
+      - 'apps/desktop/scripts/portable-postgres.ps1'
+      - 'apps/desktop/scripts/tests/portable-postgres-windows-selfcheck.ps1'
+      - '.github/workflows/desktop-local-pg-windows.yml'
   workflow_dispatch:
 
 jobs:
