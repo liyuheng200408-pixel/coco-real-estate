@@ -12,7 +12,7 @@
 https://www.liyuheng.cn/static/dl-6e98b9/Coco-0.21.3-55-win-x64.exe
 ```
 
-- sha256（下完可核对）：`4a91b68f5c91b427b689cbd7a620710981df01aa34b4df0c7525728cc3dccf84`
+- sha256（下完可核对）：`68a461d0be963d45682cf7e3c07167db02877ed8243316e71884b50ac1f64336`
 - 这个包在构建时钉住了首启要取用的代码 commit（含 2026-09-20 的「首启克隆 Coco 而不是官方
   Hermes」修复）；**换安装包时必须重新构建**，旧包钉的还是旧代码。
 - 备用入口：Actions 页面 `Desktop Windows installer` 最近一次成功运行 → Artifacts → `coco-desktop-windows-installer`，
@@ -21,6 +21,14 @@ https://www.liyuheng.cn/static/dl-6e98b9/Coco-0.21.3-55-win-x64.exe
 已知前置：**Git for Windows**（官方也要求）。首启 bootstrap 的 `Stage-Git` 会尝试自动装便携 Git 到
 `%LOCALAPPDATA%\hermes\git\`；上一版（0.21.3-53）在 Windows 上实测卡在
 「Git for Windows is required for Hermes on Windows」——本清单第 3 步专门验这一点。
+
+## 0.5 先清掉上一版留下的"远程网关"配置（否则它一直弹「连不上远程网关」）
+
+那个报错说明 App 当前处于「连接服务器」模式，正在向一个远程网关要 WebSocket 票据。
+它存在 `%APPDATA%\Coco\connection.json` 里，重装 App 不会清：
+
+- 关掉 App → 把 `%APPDATA%\Coco\connection.json` 和 `connections.json` 删掉或改名 → 重开，
+  就会回到首启向导（这一步也能顺带确认 App 是从头开始的）。
 
 ## 1. 安装
 
