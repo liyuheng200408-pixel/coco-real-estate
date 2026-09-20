@@ -159,7 +159,28 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 前置说明建议写「本机模式会在你的电脑上运行数据库，**电脑关机时机器人不在线**；
 不需要管理员权限，数据全部保存在本机用户目录」。
 
-### 2.6 安全边界（保持不变的口径）
+### 2.6 首启装的是 Coco，不是官方 Hermes（换大脑的关键一处）
+
+链路：安装包（只含 Electron 壳）→ 首启读 `install-stamp.json` 里钉的 ref →
+下载 `scripts/install.ps1`（`bootstrap-runner.ts`，三源回退：Gitee →
+jsdelivr → raw.githubusercontent）→ 执行 `install.ps1` 的 repository 阶段克隆代码 →
+建 venv → 装依赖 → **本机数据库阶段** → 起后端。
+
+2026-09-20 查出并修掉的缺口：`install.ps1` 里写死克隆 `NousResearch/hermes-agent`
+—— 首启会把**官方 Hermes** 装到用户机器上（没有 real_estate 工具集、没有身份定制），
+用户以为装了 Coco 却是空壳。现在克隆源是 Coco 仓库，按仓库惯例多源：
+Gitee 主源 → GitHub 兜底（`-RepoUrl` 可覆盖）；ZIP 归档兜底按源区分路径
+（Gitee 是 `<repo>/repository/archive/<ref>.zip`，GitHub 是
+`<repo>/archive/refs/heads/<ref>.zip`）。
+
+实测（`-Stage repository`）：origin = `gitee.com/liyuheng200408/coco-real-estate.git`，
+工作区含 `agent/real_estate_db.py`，`VERSION` 与仓库一致。防护见自检第 20 项、
+`patches/10-install-ps1-coco-patches.patch`、单测负向断言与真机 CI 守卫。
+
+⚠ 注意安装包会**钉住构建时的 commit**（新装时按它取 `install.ps1`）：改了首启相关的脚本，
+必须**重新打安装包**，旧包钉的还是旧代码。
+
+### 2.7 安全边界（保持不变的口径）
 
 只监听 `127.0.0.1`（IPv4 回环；**不监听 `::1`**，避免 `localhost` 解析到 IPv6 造成连不上）；
 `pg_hba.conf` 只放行 `127.0.0.1/32` 且强制 `scram-sha-256`（无 trust、无 LAN、无公网）；
@@ -204,6 +225,8 @@ gh workflow run desktop-local-pg-windows.yml --ref <branch>   # 合并到默认�
 | **每日备份** | 计划任务注册成功（`schtasks /Query` 通过）；立刻跑出的 dump 有效；`enc_key.txt` 与 `env.db.bak` 都在；`-Action status` 判定正常 |
 | **部署体检** | 按本机模式口径：`[PASS] 本机数据库在运行（便携 PostgreSQL）`、`检测到 9 个 Hermes/数据库相关进程`、`[PASS] 数据库连接正常（房源 0 条，客户 0 条）`；输出里**没有** systemd/journalctl/timedatectl |
 | **安装器阶段** | `-Manifest` 里含 `coco-database`（位置在 `node-deps` 之后、`path` 之前）；`-Stage coco-database` 单跑成功且产出 `.env.db`（幂等：已有数据目录时只做「确保在跑」） |
+| **首启克隆 Coco** | `-Stage repository` 跑完 origin = `gitee.com/liyuheng200408/coco-real-estate.git`，工作区含 `agent/real_estate_db.py`，`VERSION` 与仓库一致（真机 CI 有守卫步骤） |
+| **便携包镜像** | Gitee Release 附件 `pgsql-v1/coco-portable-pgsql-16.4.1-win-x64.zip`：40.8MB，sha256 `183dde85…`（与本地构建一致），实测从 Gitee 下载 1.35MB/s、脚本据此解出 1627 项 / 125MB、`bin/initdb.exe` 在位 |
 
 ### 真机上踩到、并已修的三个坑（都只会在 Windows 上现形）
 

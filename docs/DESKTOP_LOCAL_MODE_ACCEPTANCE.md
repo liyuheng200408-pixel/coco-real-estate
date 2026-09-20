@@ -12,7 +12,9 @@
 https://www.liyuheng.cn/static/dl-6e98b9/Coco-0.21.3-55-win-x64.exe
 ```
 
-- sha256（下完可核对）：`b546c218c043f912a91ab65fbb86aadc033509f06ecce30b43496fe828b81f1a`
+- sha256（下完可核对）：`4a91b68f5c91b427b689cbd7a620710981df01aa34b4df0c7525728cc3dccf84`
+- 这个包在构建时钉住了首启要取用的代码 commit（含 2026-09-20 的「首启克隆 Coco 而不是官方
+  Hermes」修复）；**换安装包时必须重新构建**，旧包钉的还是旧代码。
 - 备用入口：Actions 页面 `Desktop Windows installer` 最近一次成功运行 → Artifacts → `coco-desktop-windows-installer`，
   或 `gh run download <run-id> -n coco-desktop-windows-installer --repo liyuheng200408-pixel/coco-real-estate`
 
