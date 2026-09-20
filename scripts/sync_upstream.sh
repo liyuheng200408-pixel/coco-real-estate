@@ -10,7 +10,9 @@
 #
 # 不做什么（安全边界）：
 #   · 不动未跟踪的运行时文件（.env.db / 加密密钥 / 缓存）
-#   · 不自动删除文件（官方删掉的文件只列出来，由人确认）
+#   · 默认不自动删除文件（官方删掉的文件只列出来，由人确认）；
+#     如需顺带清理，加 --prune-official-deleted（清理有保护规则：只删「官方基线里登记过」的
+#     文件，Coco 自有文件与挂钩点永不动；见 scripts/prune_official_deleted.sh）
 #     实现方式：每次同步把「官方文件清单」存进 .sync-baseline/upstream_files.txt；
 #     下次同步与它对比，即可精确算出「官方这次删了/改名了哪些文件」、「其中本地还留着几个」，
 #     避免官方已删的旧文件在本地越堆越多（堆积会让构建/导入读到过时版本）。
@@ -25,16 +27,20 @@ set -uo pipefail
 
 TAG="${1:-}"
 DRY_RUN=0
+# 可选：同步时顺带清理「官方已删/改名」的历史残留文件（有保护规则，见 prune_official_deleted.sh）
+PRUNE_OFFICIAL_DELETED=0
 for arg in "${@:2}"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
-    *) echo "未知参数: $arg（支持 --dry-run）" >&2; exit 1 ;;
+    --prune-official-deleted) PRUNE_OFFICIAL_DELETED=1 ;;
+    *) echo "未知参数: $arg（支持 --dry-run / --prune-official-deleted）" >&2; exit 1 ;;
   esac
 done
 
 if [[ -z "$TAG" ]]; then
-  echo "用法: bash scripts/sync_upstream.sh <官方版本tag> [--dry-run]"
+  echo "用法: bash scripts/sync_upstream.sh <官方版本tag> [--dry-run] [--prune-official-deleted]"
   echo "例:   bash scripts/sync_upstream.sh v2026.9.14 --dry-run"
+  echo "      bash scripts/sync_upstream.sh v2026.9.14 --prune-official-deleted   # 顺带清理官方已删的历史残留"
   echo "官方版本列表: gh release list --repo NousResearch/hermes-agent --limit 10"
   exit 1
 fi
@@ -166,7 +172,12 @@ if [[ $DRY_RUN == 1 ]]; then
   echo "  自有文件清单: $SNAP/local_only.txt"
   if [[ $UP_DELETED -gt 0 ]]; then
     echo "  官方删除清单: $SNAP/upstream_deleted.txt"
-    echo "  本地残留清单: $SNAP/stale_in_local.txt（$STALE_LOCAL 个，需人工确认后删）"
+    echo "  本地残留清单: $SNAP/stale_in_local.txt（$STALE_LOCAL 个）"
+    if [[ $PRUNE_OFFICIAL_DELETED == 1 ]]; then
+      echo "  本次带了 --prune-official-deleted：真实执行时会自动清理这 $STALE_LOCAL 个（按保护规则）"
+    else
+      echo "  需人工确认后删；如要顺带清理，执行时加上 --prune-official-deleted"
+    fi
   fi
   echo
   echo "确认无误后去掉 --dry-run 执行真实同步。"
@@ -219,6 +230,21 @@ mkdir -p "$REPO_ROOT/.sync-baseline"
 cp -a "$SNAP/up_all.txt" "$BASELINE_FILE"
 ok "官方文件清单基线已更新（.sync-baseline/upstream_files.txt：$UP_FILES 条）"
 
+# ---- 4c. 可选：清理官方已删/改名的历史残留 ---------------------------------
+PRUNED=0
+if [[ $PRUNE_OFFICIAL_DELETED == 1 ]]; then
+  if [[ ${STALE_LOCAL:-0} -gt 0 ]]; then
+    info "清理官方已删的历史残留（保护规则：只删官方基线里登记过的文件）"
+    if bash "$REPO_ROOT/scripts/prune_official_deleted.sh" "$SNAP/stale_in_local.txt"; then
+      PRUNED=$STALE_LOCAL
+    else
+      warn "清理未完成（见上面的输出），同步的其它步骤已完成"
+    fi
+  else
+    ok "没有需要清理的官方历史残留"
+  fi
+fi
+
 # ---- 5. 报告 ---------------------------------------------------------------
 git add -A >/dev/null 2>&1 || true
 ADDED=$(git diff --cached --numstat --diff-filter=A | wc -l)
@@ -249,11 +275,15 @@ echo "  ④ 验收通过后再提交推送（脚本不替你决定）："
 echo "       git commit -m 'chore: 同步官方 $TAG'"
 echo
 if [[ $UP_DELETED -gt 0 ]]; then
-  echo "  官方这次删掉/改名、本地还留着的旧文件：$STALE_LOCAL 个（需人工确认后删除）"
+  echo "  官方这次删掉/改名、本地还留着的旧文件：$STALE_LOCAL 个"
   if [[ $STALE_LOCAL -gt 0 ]]; then
-    head -8 "$SNAP/stale_in_local.txt" | sed 's|^|      · |'
-    [[ $STALE_LOCAL -gt 8 ]] && echo "      …（完整清单：$BACKUP/stale_in_local.txt）"
-    echo "      核对无误后删除：git rm --pathspec-from-file=$SNAP/stale_in_local.txt"
+    if [[ $PRUNED -gt 0 ]]; then
+      echo "      —— 已按 --prune-official-deleted 清理（清单存档在上面的 prune-* 目录）"
+    else
+      head -8 "$SNAP/stale_in_local.txt" | sed 's|^|      · |'
+      [[ $STALE_LOCAL -gt 8 ]] && echo "      …（完整清单：$BACKUP/stale_in_local.txt）"
+      echo "      需人工确认后删除；或下次同步加 --prune-official-deleted 自动清理"
+    fi
   fi
 else
   echo "  官方这次没有删除/改名文件（或基线文件尚未建立）"

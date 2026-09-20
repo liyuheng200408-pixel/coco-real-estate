@@ -33,6 +33,20 @@ bash scripts/sync_upstream.sh v2026.9.14   # 换成实际的官方版本 tag
 脚本会：拉官方快照 → 替换官方层文件 → **保留 Coco 自有文件** → 打印
 「需要人工处理的改动点」。
 
+官方在两次同步之间删掉/改名的旧文件会一直留在本地（快照式替换只增不减），脚本每次
+会把它们算出来并列出数量。要顺带清理，执行时加 `--prune-official-deleted`：
+
+```bash
+bash scripts/sync_upstream.sh v2026.9.14 --dry-run --prune-official-deleted   # 先演练看清单
+bash scripts/sync_upstream.sh v2026.9.14 --prune-official-deleted             # 真实执行并清理
+```
+
+清理走 `scripts/prune_official_deleted.sh`，保护规则是「**只删登记在官方基线里的文件**」——
+Coco 自有文件、挂钩点文件、我们的业务目录（`agent/real_estate_*`、`tools/real_estate_*`、
+`migrations/`、`patches/`、`docs/`、`tests/real_estate/`）永不在候选里；本地有未提交改动的
+文件也会跳过。删掉的清单存档在 `.sync-backup/prune-*/`，回滚用 `git checkout HEAD -- <路径>`。
+规则本身可自检：`bash scripts/prune_official_deleted.sh --selftest`。
+
 ### 第 3 步｜逐处重新应用 Coco 的改动
 按 `patches/README.md` 的语义说明，在新版代码里重新实现 **7 处改动**：
 
