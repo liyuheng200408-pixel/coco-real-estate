@@ -27,7 +27,9 @@ on:
 jobs:
   selfcheck:
     runs-on: windows-latest
-    timeout-minutes: 40
+    # 338MB 便携包 + initdb + 启动：慢机器上要留足时间。之前 40 分钟不够是因为下载
+    # 静默挂住（已修：脚本现在 60 秒无速度就换源），这里的余量是给正常慢场景的。
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -37,7 +39,29 @@ jobs:
         shell: pwsh
         run: $PSVersionTable | Out-String
 
-      - name: Portable PostgreSQL bootstrap + selftest (real Windows)
+      # 下载单独成步：把「网络问题」和「脚本逻辑问题」分开，失败时一眼看出是哪种。
+      # 带 --speed-limit/--speed-time：源被限速就 60 秒内失败，而不是静默挂半小时。
+      - name: Pre-download the portable PostgreSQL archive (visible progress)
+        id: download
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'postgresql-16.4-1-windows-x64-binaries.zip'
+          $url = 'https://get.enterprisedb.com/postgresql/postgresql-16.4-1-windows-x64-binaries.zip'
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          & curl.exe -fSL -o $zip `
+            --connect-timeout 20 --speed-limit 51200 --speed-time 60 `
+            --retry 3 --retry-delay 5 --max-time 1500 $url
+          $code = $LASTEXITCODE
+          $sw.Stop()
+          if ($code -ne 0) { throw "下载失败（curl 退出码 $code，用时 $([math]::Round($sw.Elapsed.TotalSeconds)) 秒）—— 说明 GitHub runner 到该源不通/被限速" }
+          $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+          $rate = [math]::Round($mb / [math]::Max($sw.Elapsed.TotalSeconds, 0.1), 2)
+          $line = "下载完成：$mb MB，用时 $([math]::Round($sw.Elapsed.TotalSeconds, 1)) 秒（$rate MB/s）"
+          $line | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+          if ($mb -lt 150) { throw "包体积异常：$mb MB" }
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Portable PostgreSQL bootstrap + selftest (real Windows, offline)
         id: selfcheck
         shell: pwsh
         continue-on-error: true
@@ -48,9 +72,9 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $script = 'apps/desktop/scripts/tests/portable-postgres-windows-selfcheck.ps1'
           New-Item -ItemType Directory -Force -Path $env:HERMES_HOME | Out-Null
-          & pwsh -NoLogo -NoProfile -File $script -KeepGoing
+          & pwsh -NoLogo -NoProfile -File $script -KeepGoing -ZipPath '${{ steps.download.outputs.zip }}'
           "selfcheck exit: $LASTEXITCODE" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
-          exit $LASTEXITCODE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Assert the bootstrap really produced a usable database
         shell: pwsh
@@ -100,13 +124,19 @@ jobs:
 
       - name: Collect artifacts
         if: always()
+        continue-on-error: true   # 缺文件不该把整个 job 判红（之前的失败就是这里）
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
           $dest = Join-Path $env:RUNNER_TEMP 'local-pg-artifacts'
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Copy-Item "$env:RUNNER_TEMP\summary.txt" $dest -ErrorAction SilentlyContinue
-          Copy-Item (Join-Path $env:HERMES_HOME 'pgsql-logs\selfcheck-*.txt') $dest -ErrorAction SilentlyContinue
-          Copy-Item (Join-Path $env:HERMES_HOME 'pgsql-data\coco-postgres.log') $dest -ErrorAction SilentlyContinue
+          foreach ($p in @(
+              (Join-Path $env:RUNNER_TEMP 'summary.txt'),
+              (Join-Path $env:HERMES_HOME 'pgsql-logs\selfcheck-*.txt'),
+              (Join-Path $env:HERMES_HOME 'pgsql-data\coco-postgres.log'))) {
+            Copy-Item -Path $p -Destination $dest -ErrorAction SilentlyContinue -Force
+          }
+          Get-ChildItem -Path $dest -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table | Out-String | Write-Host
 
       - name: Upload artifacts
         if: always()

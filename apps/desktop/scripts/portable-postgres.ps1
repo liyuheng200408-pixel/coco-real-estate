@@ -265,22 +265,31 @@ function Get-PgArchive {
         Info "[$i/$($sources.Count)] $url"
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         if ($curl) {
-            # -C - 断点续传：中断后重跑接着下
-            $cargs = @('-fSL', '-C', '-', '--retry', '2', '--retry-delay', '3', '--max-time', '3600', '-o', $part, $url)
-            $out = & $curl.Source @cargs 2>&1
+            # -C - 断点续传：中断后重跑接着下。
+            # --speed-limit / --speed-time 必须有：源被限速或半死不活时不加它就会一直挂着，
+            # 既没进度也没超时（实测在 CI 上静默挂了 40 分钟，最后被 job 超时掐掉）。
+            # 输出不捕获：curl 的进度必须实时可见，否则用户以为卡死。
+            $cargs = @(
+                '-fSL', '-C', '-',
+                '--connect-timeout', '20',
+                '--speed-limit', '51200', '--speed-time', '60',
+                '--retry', '2', '--retry-delay', '3',
+                '--max-time', '1800',
+                '-o', $part, $url
+            )
+            & $curl.Source @cargs
             if ($LASTEXITCODE -ne 0) {
                 $sw.Stop()
-                Warn "下载失败（curl 退出码 $LASTEXITCODE）：$(($out | Out-String).Trim())；换下一个源"
+                $got = 0
+                if (Test-Path -LiteralPath $part) { $got = [math]::Round((Get-Item -LiteralPath $part -Force).Length / 1MB, 1) }
+                Warn "下载中断（curl 退出码 $LASTEXITCODE，已下 $got MB，耗时 $([math]::Round($sw.Elapsed.TotalSeconds)) 秒）；常见原因：源不可达 / 被限速 / 代理阻断；换下一个源"
                 continue
             }
         } else {
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
             try {
-                $oldPref = $ProgressPreference
-                $ProgressPreference = 'SilentlyContinue'
-                Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing -TimeoutSec 3600
-                $ProgressPreference = $oldPref
+                Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing -TimeoutSec 1800
             } catch {
-                $ProgressPreference = 'Continue'
                 $sw.Stop()
                 Warn "下载失败（$($_.Exception.Message)）；换下一个源"
                 continue
