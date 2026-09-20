@@ -58,6 +58,54 @@ function Say([string]$Text, [string]$Color = 'Gray') {
     Add-Content -LiteralPath $report -Value $Text -Encoding UTF8
 }
 
+function Invoke-BootstrapStep {
+    <#
+      调引导脚本，输出实时可见，但**不用管道捕获**。
+
+      为什么不能用 `& pwsh ... | Tee-Object`：引导脚本会拉起常驻的 postgres.exe，而
+      postgres 会继承我们这条管道的句柄；管道不会 EOF，PowerShell 就一直等下去 ——
+      实测真机 CI 上 setup 明明已经打完「完成」，外面却再也不动了（卡到 job 超时）。
+      改成重定向到文件 + 边跑边读：输出照样实时可见，但没有任何管道会被常驻进程攥住。
+    #>
+    [CmdletBinding()]
+    param([string[]]$StepArgs)
+
+    $tmpOut = Join-Path ([System.IO.Path]::GetTempPath()) ('coco-selfcheck-' + [Guid]::NewGuid().ToString('N') + '.log')
+    try {
+        $proc = Start-Process -FilePath 'pwsh' -ArgumentList (@('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $bootstrap) + $StepArgs) `
+            -NoNewWindow -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError "$tmpOut.err"
+
+        $seen = 0
+        while (-not $proc.HasExited) {
+            Start-Sleep -Milliseconds 400
+            if (Test-Path -LiteralPath $tmpOut) {
+                $lines = @(Get-Content -LiteralPath $tmpOut -ErrorAction SilentlyContinue)
+                while ($seen -lt $lines.Count) {
+                    $line = $lines[$seen]
+                    Write-Host "  $line"
+                    Add-Content -LiteralPath $report -Value "  $line" -Encoding UTF8
+                    $seen++
+                }
+            }
+        }
+
+        # 收尾：把剩余行与 stderr 一起吐出来（子进程退出后文件不会再变）
+        foreach ($f in @($tmpOut, "$tmpOut.err")) {
+            if (Test-Path -LiteralPath $f) {
+                $lines = @(Get-Content -LiteralPath $f -ErrorAction SilentlyContinue)
+                while ($seen -lt $lines.Count) {
+                    Write-Host "  $($lines[$seen])"
+                    Add-Content -LiteralPath $report -Value "  $($lines[$seen])" -Encoding UTF8
+                    $seen++
+                }
+            }
+        }
+        return $proc.ExitCode
+    } finally {
+        Remove-Item -LiteralPath $tmpOut, "$tmpOut.err" -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Say "Coco 本机数据库自检  $stamp" 'Cyan'
 Say "系统      : $([System.Environment]::OSVersion.VersionString) / PowerShell $($PSVersionTable.PSVersion)"
 Say "Hermes 目录: $home_"
@@ -70,10 +118,7 @@ if ($ZipPath) { $commonArgs += @('-ZipPath', $ZipPath) }
 if ($SkipDownload) { $commonArgs += '-SkipDownload' }
 
 Say "== [1/3] 准备数据库（setup，幂等）==" 'Cyan'
-# 实时透传子进程输出（同时写进报告）：下载进度必须看得见，不能等它跑完才吐出来
-& pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap @commonArgs -Action setup 2>&1 |
-    Tee-Object -FilePath $report -Append | ForEach-Object { Write-Host "  $_" }
-$setupCode = $LASTEXITCODE
+$setupCode = Invoke-BootstrapStep -StepArgs ($commonArgs + @('-Action', 'setup'))
 Say "  退出码：$setupCode"
 if ($setupCode -ne 0) {
     $script:Problems++
@@ -89,9 +134,7 @@ if ($setupCode -ne 0) {
 
 Say ""
 Say "== [2/3] 自检（selftest）==" 'Cyan'
-& pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap @commonArgs -Action selftest 2>&1 |
-    Tee-Object -FilePath $report -Append | ForEach-Object { Write-Host "  $_" }
-$selfCode = $LASTEXITCODE
+$selfCode = Invoke-BootstrapStep -StepArgs ($commonArgs + @('-Action', 'selftest'))
 Say "  退出码：$selfCode"
 if ($selfCode -ne 0) { $script:Problems++ }
 

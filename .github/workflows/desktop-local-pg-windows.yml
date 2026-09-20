@@ -72,9 +72,33 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $script = 'apps/desktop/scripts/tests/portable-postgres-windows-selfcheck.ps1'
           New-Item -ItemType Directory -Force -Path $env:HERMES_HOME | Out-Null
-          & pwsh -NoLogo -NoProfile -File $script -KeepGoing -ZipPath '${{ steps.download.outputs.zip }}'
-          "selfcheck exit: $LASTEXITCODE" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # 同样不能用管道捕获：自检会拉起常驻 postgres.exe，它会继承管道的句柄，
+          # 管道不 EOF 就会一直等（实测卡到 job 超时）。文件重定向 + 边跑边读。
+          $log = Join-Path $env:RUNNER_TEMP 'selfcheck-output.log'
+          $proc = Start-Process -FilePath 'pwsh' -ArgumentList @(
+            '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script, '-KeepGoing',
+            '-ZipPath', '${{ steps.download.outputs.zip }}'
+          ) -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+
+          $seen = 0
+          while (-not $proc.HasExited) {
+            Start-Sleep -Milliseconds 500
+            if (Test-Path $log) {
+              $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
+              while ($seen -lt $lines.Count) { Write-Host $lines[$seen]; $seen++ }
+            }
+          }
+          foreach ($f in @($log, "$log.err")) {
+            if (Test-Path $f) {
+              $lines = @(Get-Content $f -ErrorAction SilentlyContinue)
+              while ($seen -lt $lines.Count) { Write-Host $lines[$seen]; $seen++ }
+            }
+          }
+
+          $code = $proc.ExitCode
+          "selfcheck exit: $code" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+          if ($code -ne 0) { exit $code }
 
       - name: Assert the bootstrap really produced a usable database
         shell: pwsh
@@ -121,6 +145,20 @@ jobs:
 
           if ($reached) { throw "端口 $port 在 $lan 上也能连上（应只监听回环）" }
           "OK: $lan`:$port 连不上（只监听回环）" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
+      # 退出前把数据库停掉：既是最干净的收尾，也避免常驻的 postgres 继续攥着
+      # 继承来的句柄让 runner 收尾时干等。
+      - name: Stop the portable database
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $bootstrap = 'apps/desktop/scripts/portable-postgres.ps1'
+          $home_ = $env:HERMES_HOME
+          & pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $bootstrap `
+              -Action stop -DataRoot (Join-Path $home_ 'pgsql') -DataDir (Join-Path $home_ 'pgsql-data') `
+              -EnvFile (Join-Path $home_ 'hermes-agent\.env.db') -PgBinDir (Join-Path $home_ 'pgsql\bin')
 
       - name: Collect artifacts
         if: always()
