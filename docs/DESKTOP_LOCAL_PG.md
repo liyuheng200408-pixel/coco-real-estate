@@ -172,6 +172,9 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 
 ## 三、Windows 真机验证
 
+> 整链路（安装包 → 首启 → 本机库 → 飞书配对 → 对话落库）的逐条验收清单见
+> `docs/DESKTOP_LOCAL_MODE_ACCEPTANCE.md` —— 那是唯一还没走过一遍的路径。
+
 跑法（两种，任选）：
 
 ```powershell
