@@ -81,7 +81,11 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 
 ---
 
-## 二、接入桌面版「本机模式」的设计（只设计，不改代码）
+## 二、接入桌面版「本机模式」（设计 + 已落地的接线）
+
+> 状态：**接线已实现**（见 `apps/desktop/electron/portable-postgres.ts` 与
+> `backend-env.ts` / `main.ts` 里的 COCO-PATCH 注释）；本文剩余部分仍是设计说明，
+> 供改这些代码时对照。
 
 ### 2.1 何时跑
 
@@ -93,15 +97,21 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 2. **每次应用启动**：调 `-Action setup`（幂等：已在跑就原样返回，端口/口令都不动）。
    失败不要直接弹"无法启动"，先按退出码分流（见 2.5）。
 
-### 2.2 环境注入（两个必须点）
+### 2.2 环境注入（两个必须点，均已实现）
 
-- `apps/desktop/electron/backend-env.ts` 的 `buildDesktopBackendPath()` 已经把
-  `%LOCALAPPDATA%\hermes\node`、venv 的 `Scripts` 拼进 PATH —— 在同一处**追加
-  `%LOCALAPPDATA%\hermes\pgsql\bin`**。这是 `backup_db.py`/`healthcheck.py` 能找到
-  `pg_dump`/`pg_restore`/`psql` 的唯一途径（它们调的是裸命令名）。
-- 后端进程环境里注入 `DATABASE_URL`（值直接取 `.env.db`，或调 `-Action print-env`
-  拿 `KEY=value` 行）。**不要**在 Electron 侧另算连接串 —— 端口可能因冲突漂移，
-  `.env.db` 是唯一权威。
+- `buildDesktopBackendPath()` 现在会带上 `%LOCALAPPDATA%\hermes\pgsql\bin`
+  （函数 `hermesManagedPostgresPathEntries()`）。位置：Hermes 自带的 node 目录与 venv
+  之后、**继承来的 PATH 之前** —— 既不打乱官方顺序（上游测试盯着），又能压过系统里
+  可能存在的另一个 PostgreSQL（`pg_dump` 大版本不一致会备份失败）。
+- `buildDesktopBackendEnv()` 新增可选参数 `databaseUrl`，只在**回环地址**的
+  postgres 连接串时才写入 `DATABASE_URL`；`main.ts` 的两个后端工厂
+  （`createPythonBackend` / `createActiveBackend`）都从 `<InstallDir>\.env.db` 读取后传入。
+  **不在 Electron 侧自己拼连接串** —— 端口会因冲突漂移，`.env.db` 是唯一权威。
+
+启动顺序（已接进 `runEnsureRuntime()`，在 Git Bash 预检之后、拉起后端之前）：
+数据库就绪 → 后端进程拿到 `DATABASE_URL` → 建表（后端首次工具调用）→ 网关启动。
+准备失败**不阻塞**启动：只记日志，让后端给出「未配置 DATABASE_URL，拒绝初始化数据库」
+的明确报错，同时清掉缓存以便用户修好网络后重试。
 
 ### 2.3 进程生命周期
 
@@ -154,11 +164,25 @@ pwsh -File portable-postgres.ps1 -Action <setup|start|stop|status|selftest|print
 
 ## 三、平台相关的部分（Windows 真机才能验）
 
+跑法（两种，任选）：
+
+```powershell
+# 用户真机：一条命令跑完并生成报告，把报告发回即可
+pwsh -File apps\desktop\scripts\tests\portable-postgres-windows-selfcheck.ps1
+```
+
+```bash
+# CI 真机（GitHub Actions 的 windows-latest，手动触发，不自动跑）
+gh workflow run desktop-local-pg-windows.yml --ref feat/desktop-local-pg
+```
+
+覆盖不到、只能真机确认的点：
+
 - 便携 zip 的下载与解压（EDB 发行包）、`initdb.exe`/`pg_ctl.exe` 的真实执行；
 - NTFS ACL 收紧（`%LOCALAPPDATA%\hermes\pgsql-data` 与 `.env.db` 只授权当前用户）；
 - 管理员账户下 `pg_ctl` 用受限令牌拉起 `postgres.exe`（不需要提权，这是 PG 在 Windows 的既定行为）；
 - 任务计划程序自启、与桌面版进程的退出联动；
-- `install.ps1` 里本机 PG stage 的接线。
+- `install.ps1` 里本机 PG stage 的接线（当前接线在 `runEnsureRuntime()`，尚未做成独立 stage）。
 
 ---
 
