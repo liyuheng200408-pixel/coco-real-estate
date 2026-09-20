@@ -44,6 +44,19 @@ def windows_log_paths(hermes_home: str):
     ]
 
 
+def python_argv(python_exe: str, code_or_args):
+    """拼出调用 Python 的 argv（列表形式，不经过 shell）。
+
+    体检里要跑几段 Python 片段与脚本（数据库检查、迁移状态）。老写法是
+    `sh(f"{py} -c {shlex.quote(code)}")` —— shlex 是 POSIX 引号规则，Windows 的
+    cmd 会把它吃掉，实测后果是数据库项报 SyntaxError、迁移项拿不到输出。
+    统一走参数列表就没有这层引号问题。
+    """
+    if isinstance(code_or_args, (list, tuple)):
+        return [python_exe, *code_or_args]
+    return [python_exe, "-c", str(code_or_args)]
+
+
 # ---- 服务探针 ----
 
 def service_probe_plan(platform: str) -> str:
