@@ -23,6 +23,8 @@ on:
       - 'apps/desktop/scripts/local-backup.ps1'
       - 'apps/desktop/scripts/tests/portable-postgres-windows-selfcheck.ps1'
       - 'scripts/backup_db.py'
+      - 'scripts/healthcheck.py'
+      - 'scripts/healthcheck_lib.py'
       - '.github/workflows/desktop-local-pg-windows.yml'
   workflow_dispatch:
 
@@ -201,6 +203,31 @@ jobs:
           $st | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) { throw '备份 status 判定为非正常' }
           "OK: 备份 status 正常" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
+      # 体检脚本的 Windows 分支：不能出现 systemd/journalctl/timedatectl 这类 Linux 专用
+      # 口径（照 Linux 查会把正常部署判成故障），且要按本机模式如实报数据库状态。
+      - name: Health check runs with the Windows probe (real Windows)
+        shell: pwsh
+        env:
+          HERMES_HOME: ${{ runner.temp }}\hermes
+          HERMES_AGENT_DIR: ${{ github.workspace }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $py = Join-Path $env:GITHUB_WORKSPACE 'venv\Scripts\python.exe'
+          $env:COCO_PYTHON = $py
+          $out = (& $py 'scripts/healthcheck.py' 2>&1 | Out-String)
+          $out | Write-Host
+
+          if ($out -match 'systemctl|journalctl|timedatectl') {
+            throw 'Windows 体检输出里仍出现 Linux 专用命令（会误导用户）'
+          }
+          if ($out -notmatch '本机数据库在运行') {
+            throw '体检没有按 Windows 本机模式报告数据库状态'
+          }
+          if ($out -notmatch '汇总:') {
+            throw '体检没有跑到底（没有汇总行）'
+          }
+          "OK: Windows 体检口径正确（无 systemd/journalctl，且报了本机数据库）" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
 
       # 退出前把数据库停掉：既是最干净的收尾，也避免常驻的 postgres 继续攥着
       # 继承来的句柄让 runner 收尾时干等。
