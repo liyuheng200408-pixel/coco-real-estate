@@ -175,6 +175,8 @@ jobs:
           # local-backup 需要 <InstallDir>\venv\Scripts\python.exe 与 <InstallDir>\scripts\backup_db.py，
           # 所以用一个真 venv + 把生成的 .env.db 放到安装目录（与线上安装的布局一致）
           python -m venv "$install\venv"
+          # 体检的「数据库连接」项用 sqlalchemy 连库；装上驱动才能得到真正的 PASS
+          & (Join-Path $install 'venv\Scripts\python.exe') -m pip install -q --disable-pip-version-check sqlalchemy psycopg2-binary
           Copy-Item (Join-Path $env:HERMES_HOME 'hermes-agent\.env.db') (Join-Path $install '.env.db') -Force
 
           $script = 'apps/desktop/scripts/local-backup.ps1'
@@ -227,7 +229,13 @@ jobs:
           if ($out -notmatch '汇总:') {
             throw '体检没有跑到底（没有汇总行）'
           }
-          "OK: Windows 体检口径正确（无 systemd/journalctl，且报了本机数据库）" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+          if ($out -notmatch '数据库连接正常') {
+            throw '体检没能连上本机数据库（数据库项没 PASS）'
+          }
+          "OK: Windows 体检口径正确（无 systemd/journalctl；本机数据库在跑；数据库连接正常）" | Tee-Object -Append "$env:RUNNER_TEMP\summary.txt"
+
+          # 体检自身会因「CI 里缺依赖/缺备份」等项返回 1 —— 那是预期，不该把这一步判红
+          exit 0
 
       # 退出前把数据库停掉：既是最干净的收尾，也避免常驻的 postgres 继续攥着
       # 继承来的句柄让 runner 收尾时干等。
