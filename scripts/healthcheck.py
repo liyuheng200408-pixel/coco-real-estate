@@ -32,6 +32,14 @@ import subprocess
 import sys
 import time
 
+# 控制台输出抗编码（Windows 上 stdout 跟随控制台代码页 cp1252/GBK，中文 print 会抛
+# UnicodeEncodeError 把脚本带崩；实测 2026-09-20 真机 CI）。日志文件仍按显式 UTF-8 写。
+for _stream in ("stdout", "stderr"):
+    try:
+        getattr(sys, _stream).reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 IS_WINDOWS = sys.platform.startswith("win")
 
 # 平台相关的决策（默认路径 / 服务探针 / 时区归一化 / 日志噪音过滤）都在 healthcheck_lib 里，

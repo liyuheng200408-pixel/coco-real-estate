@@ -24,6 +24,14 @@ import sys
 import time
 from pathlib import Path
 
+# 控制台输出抗编码（Windows 上 stdout 跟随控制台代码页 cp1252/GBK，中文 print 会抛
+# UnicodeEncodeError 把迁移带崩；同款处理见 scripts/backup_db.py 与 scripts/healthcheck.py）
+for _stream in ("stdout", "stderr"):
+    try:
+        getattr(sys, _stream).reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
