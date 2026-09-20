@@ -34,7 +34,7 @@ def test_poster_finds_property_beyond_default_limit(db, monkeypatch):
     target = ids[114]
     assert target > 50, "目标房源必须在默认 50 条之外，否则测不出问题"
     # 2026-09-19 新流程：主标题/信息齐全才出图，这里允许缺项直出，只验证"能按编号取到房源"
-    data = json.loads(po.generate_property_poster(property_id=target, poster_title="今日主推",
+    data = json.loads(po.generate_property_poster(property_id=target, poster_title="今日主推", template="A", show_room_no="full",
                                                  allow_missing=True))
     assert data.get("error") != "房源不存在或不在售", data
     assert data["success"] is True, data
@@ -46,7 +46,7 @@ def test_poster_finds_by_title_beyond_default_limit(db, monkeypatch):
     _patch_all(monkeypatch, db)
     monkeypatch.setenv("COCO_BRAND", "测试品牌")
     _seed_many(db)
-    data = json.loads(po.generate_property_poster(title="规模测试 115号楼115单元101",
+    data = json.loads(po.generate_property_poster(title="规模测试 115号楼115单元101", template="A", show_room_no="full",
                                                  poster_title="今日主推", allow_missing=True))
     assert data.get("error") != "房源不存在或不在售", data
 

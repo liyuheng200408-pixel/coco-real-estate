@@ -18,6 +18,7 @@ rsvg-convert 渲染，设计自由度接近网页，依赖却很轻（librsvg �
 from __future__ import annotations
 
 import base64
+import re
 import html
 import os
 import shutil
@@ -42,6 +43,42 @@ _MEASURE_FILES = {
     "body": ["/usr/local/share/fonts/coco/NotoSansCJKsc-Regular.otf",
              "/usr/local/share/fonts/coco/Alibaba-PuHuiTi-Bold.ttf"],
 }
+
+
+_ROOM_TAIL_RE = re.compile(r"[\s,，、\-]*(\d{3,4})(?:\s*(?:室|号|房))?\s*$")
+
+
+def strip_room_no(text) -> str:
+    """去掉末尾房号、保留楼栋/单元：「7号楼2单元1602」→「7号楼2单元」；「262栋1009」→「262栋」。
+
+    用途：经纪人要求海报上不写（或只写到楼栋）房号时，对房源标题做掩码 ——
+    渲染前的**兜底**，即使上游把带房号的标题塞进主标题也不会泄露。
+    """
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    m = _ROOM_TAIL_RE.search(s)
+    if m is None:
+        return s
+    if m.start() == 0:
+        return ""          # 整串就是房号（如「301」）→ 没有可保留的信息，交给调用方回退到小区名
+    return s[: m.start()].strip()
+
+
+def _code_line_for(d, p) -> str:
+    """按 room_no_mode 决定海报上那一行房源标识怎么显示。
+
+    full（默认）: 完整，如「7号楼2单元1602」
+    unit        : 只到楼栋/单元，如「7号楼2单元」
+    none        : 只显示小区名，如「海阔天空」（没有小区名时才退回掩码后的标题）
+    """
+    mode = str(d.get("room_no_mode") or "full").lower()
+    raw = d.get("code_line") or p.get("title") or p.get("community") or "房源"
+    if mode in ("none", "no", "hide"):
+        return p.get("community") or strip_room_no(raw) or "房源"
+    if mode in ("unit", "unit_only", "building"):
+        return strip_room_no(raw) or (p.get("community") or "房源")
+    return raw
 
 
 def _esc(text) -> str:
@@ -322,7 +359,10 @@ def template_a(d: dict) -> str:
     has_photo = bool(photo and os.path.exists(photo))
     sub = d.get("subtitle") or " · ".join(
         str(x) for x in [p.get("community"), p.get("district"), p.get("renovation")] if x)
-    code_line = d.get("code_line") or p.get("title") or p.get("community") or "房源"
+    code_line = _code_line_for(d, p)
+    if str(d.get("room_no_mode") or "full").lower() not in ("", "full"):
+        # 兜底：主标题里若被塞了房号，也一并掩掉（unit/none 档）
+        title = strip_room_no(title) or title
     tags = _tags_of(d, p)
     cards = [("建面", ("%s㎡" % p.get("area")) if p.get("area") else ""),
              ("户型", _layout_text(p)),

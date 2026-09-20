@@ -99,7 +99,8 @@ def test_title_candidates_by_type():
 def test_missing_info_blocks_render(wired):
     """名片没有 → 不出图，返回 missing 清单（老板规矩：信息不齐不许乱出）"""
     pid = _prop(wired)["id"]
-    res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="仅此一套"))
+    res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="仅此一套",
+                                                     template="A", show_room_no="full"))
     assert res["success"] is False
     assert res["need_info"] is True
     assert any("公司" in m for m in res["missing"])
@@ -110,7 +111,7 @@ def test_missing_info_blocks_render(wired):
 def test_missing_title_returns_candidates(wired):
     _save_card()
     pid = _prop(wired)["id"]
-    res = json.loads(poster.generate_property_poster(property_id=pid))
+    res = json.loads(poster.generate_property_poster(property_id=pid, template="A", show_room_no="full"))
     assert res["success"] is False
     assert res["need_title"] is True
     assert 2 <= len(res["candidates"]) <= 3
@@ -126,7 +127,8 @@ def test_missing_property_fields_listed(wired, monkeypatch):
                     "price": None, "area": None, "property_type": "second_hand"}
 
     monkeypatch.setattr(poster, "_get_db", lambda: _StubDB())
-    res = json.loads(poster.generate_property_poster(property_id=1, poster_title="今日主推"))
+    res = json.loads(poster.generate_property_poster(property_id=1, poster_title="今日主推",
+                                                     template="A", show_room_no="full"))
     assert res["need_info"] is True
     assert any("建筑面积" in m for m in res["missing"])
     assert any("价格" in m for m in res["missing"])
@@ -169,7 +171,8 @@ def test_allow_missing_renders_anyway(wired):
 def test_render_no_platform_branding_and_has_footer(wired, tmp_path):
     _save_card()
     pid = _prop(wired)["id"]
-    res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="仅此一套"))
+    res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="仅此一套",
+                                                     template="A", show_room_no="full"))
     assert res["success"] is True
     png = res["poster_path"]
     svg = open(png + ".svg", encoding="utf-8").read()
@@ -185,7 +188,8 @@ def test_render_includes_wechat_qr_caption(wired, tmp_path):
     """二维码=微信名片：有名片微信时海报要画出二维码与「扫码加我微信」"""
     _save_card()
     pid = _prop(wired)["id"]
-    res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="仅此一套"))
+    res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="仅此一套",
+                                                     template="A", show_room_no="full"))
     assert res["success"] is True
     svg = open(res["poster_path"] + ".svg", encoding="utf-8").read()
     assert "扫码加我微信" in svg
@@ -199,7 +203,8 @@ def test_company_absent_hides_brand_bar(tmp_path, db, monkeypatch):
     settings.save_agent_card(name="李经理", phone="138-0000-0000")
     pid = _prop(db)["id"]
     # 经纪人没给公司名 → 缺项拦截；他明确说"先出图"时才出，且不写品牌（不臆造）
-    blocked = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推"))
+    blocked = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推",
+                                                         template="A", show_room_no="full"))
     assert blocked["need_info"] is True and any("公司" in m for m in blocked["missing"])
     res = json.loads(poster.generate_property_poster(
         property_id=pid, poster_title="今日主推", allow_missing=True))
@@ -218,17 +223,86 @@ def test_template_auto_pick_prefers_b_for_high_end_with_photo(wired, tmp_path):
     Image.new("RGB", (300, 300), (30, 30, 30)).save(photo)
     _save_card()
     pid = _prop(wired, area=140.0, renovation="豪装", images=str(photo), floor="10层", orientation="朝南")["id"]
-    res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推"))
+    # 现在模板默认要问经纪人；"你看着办"= 传 auto 时才按房源特征自动挑（本用例测的正是这个）
+    res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推", template="auto"))
     assert res["template"] == "B"
     assert res["success"] is True
+
+
+class TestAskBeforeRendering:
+    """出图前必须先问：模板选哪款、房号要不要写（2026-09-21 老板要求）"""
+
+    def test_asks_template_when_not_specified(self, wired):
+        _save_card()
+        pid = _prop(wired)["id"]
+        res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推"))
+        assert res["success"] is False and res["need_template"] is True
+        codes = [t["code"] for t in res["templates"]]
+        assert codes == ["A", "B"]
+        assert any("模板" in m for m in res["missing"])
+
+    def test_asks_room_no_for_template_that_prints_it(self, wired):
+        """A 款会印房源标识行（含房号）→ 必须问经纪人要不要写"""
+        _save_card()
+        pid = _prop(wired)["id"]
+        res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推",
+                                                         template="A"))
+        assert res["success"] is False
+        assert any("房号" in m for m in res["missing"]), res["missing"]
+
+    def test_b_does_not_ask_room_no(self, wired, tmp_path):
+        """B 款不印房号 → 不该为它多问一轮"""
+        from PIL import Image
+
+        photo = tmp_path / "p.png"
+        Image.new("RGB", (300, 200), (10, 10, 10)).save(photo)
+        _save_card()
+        pid = _prop(wired, images=str(photo), floor="10层", orientation="北")["id"]
+        res = json.loads(poster.generate_property_poster(property_id=pid, poster_title="今日主推",
+                                                         template="B"))
+        assert res.get("success") is True, res    # 信息齐 → 直接出图，不再问房号
+        assert not any("房号" in m for m in (res.get("missing") or []))
+
+
+class TestRoomNoMasking:
+    PROP = {"title": "海口美兰区桂林洋海阔天空, 7号楼2单元1602", "community": "海阔天空",
+            "district": "美兰-桂林洋", "area": 110.0, "rooms": 3, "halls": 2, "price": 2_000_000,
+            "property_type": "second_hand", "floor": "16层", "orientation": "北"}
+
+    def _svg(self, mode):
+        from tools.real_estate_poster_svg import template_a
+
+        return template_a({"properties": [dict(self.PROP)], "agent": {"company": "某某地产", "name": "李"},
+                           "title": "今日主推", "room_no_mode": mode})
+
+    def test_full_keeps_room_no(self):
+        assert "1602" in self._svg("full")
+
+    def test_unit_hides_room_no_but_keeps_building(self):
+        svg = self._svg("unit")
+        assert "1602" not in svg
+        assert "7号楼2单元" in svg
+
+    def test_none_shows_community_only(self):
+        svg = self._svg("none")
+        assert "1602" not in svg and "海阔天空" in svg
+
+    def test_display_title_helper_masks(self):
+        assert poster._poster_display_title(self.PROP, "unit") == "海口美兰区桂林洋海阔天空, 7号楼2单元"
+        assert poster._poster_display_title(self.PROP, "none") == "海阔天空"
+        assert poster._poster_display_title(self.PROP, "full") == self.PROP["title"]
+
+    def test_normalize_room_no_mode_aliases(self):
+        for raw, want in (("完整", "full"), ("只写楼栋", "unit"), ("不写", "none"), (None, None)):
+            assert poster._norm_room_no_mode(raw) == want
 
 
 def test_pick_template_reason_and_alias():
     code, reason = poster._pick_template({"area": 80}, "premium", "")
     assert code == "A" and "指定" in reason
-    # 已删除的清单款应被忽略并回落到 A/B
-    code2, _ = poster._pick_template({"area": 80}, "list", "")
-    assert code2 in ("A", "B")
+    # 已删除的清单款：不再静默回落，而是返回 None 让 Coco 从模板库里重新问
+    code2, why2 = poster._pick_template({"area": 80}, "list", "")
+    assert code2 is None and "list" in why2
 
 
 # ---------------- 价格与文本工具 ----------------

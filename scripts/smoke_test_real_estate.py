@@ -194,7 +194,7 @@ CASES = [
     ("suggest_poster_titles", {"property_id":pid2}),
     ("get_agent_card", {}),
     ("save_agent_card", {"name":"测试经纪人","phone":"138-0000-0000","wechat":"test-wx","company":"测试房产"}),
-    ("generate_property_poster", {"property_id":pid2, "poster_title":"今日主推", "allow_missing":True}),
+    ("generate_property_poster", {"property_id":pid2, "poster_title":"今日主推", "allow_missing":True, "show_room_no":"unit"}),
     ("generate_poster_grid", {"property_ids":str(pid2)}),
     ("get_agent_brand", {}),
     ("get_coco_version", {}),

@@ -451,8 +451,55 @@ def _property_photo(p) -> str:
     return ''
 
 
+POSTER_TEMPLATES = [
+    # shows_room_no：这一款会不会把「房源标识行」（含房号）印在图上 —— 会印才需要问经纪人
+    {"code": "A", "name": "红金促销", "desc": "红金配色、促销感强；不需要照片也能出图；会印房源标识行（含房号）",
+     "need_photo": False, "shows_room_no": True},
+    {"code": "B", "name": "极简高级", "desc": "米白极简、适合有房源照片的房；会显示楼层/朝向两栏，不印房号",
+     "need_photo": True, "shows_room_no": False},
+]
+
+
+def _template_shows_room_no(code: str) -> bool:
+    return any(t["code"] == code and t.get("shows_room_no") for t in POSTER_TEMPLATES)
+TEMPLATE_CHOICES = "；".join(f"{t['code']} {t['name']}（{t['desc']}）" for t in POSTER_TEMPLATES) + "；auto（你看着办，按房源特征自动挑）"
+ROOM_NO_MODES = {
+    "full": "写完整房号（如 7号楼2单元1602）",
+    "unit": "只写楼栋单元、不写具体房号（如 7号楼2单元）",
+    "none": "不写房号，只显示小区名（如 海阔天空）",
+}
+_ROOM_NO_ALIAS = {"完整": "full", "全": "full", "full": "full", "写完整": "full",
+                  "楼栋": "unit", "只写楼栋": "unit", "单元": "unit", "unit": "unit",
+                  "不写": "none", "不要": "none", "隐藏": "none", "none": "none"}
+
+
+def _norm_room_no_mode(value):
+    """把经纪人的说法归一成 full / unit / none；认不出返回 None（继续追问）。"""
+    if value is None:
+        return None
+    key = str(value).strip().lower().replace(" ", "")
+    return _ROOM_NO_ALIAS.get(key)
+
+
+def _poster_display_title(p, room_no_mode: str = "full") -> str:
+    """海报上显示的房源标题：按房号档位做掩码（unit/none 档不显示具体房号）。
+
+    渲染前**兜底**：即便上游把带房号的标题塞进来，也不会把具体房号印到图上。
+    """
+    from tools.real_estate_poster_svg import strip_room_no
+
+    raw = p.get('title') or '优质房源'
+    mode = str(room_no_mode or "full").lower()
+    if mode in ("none", "no", "hide"):
+        return p.get('community') or strip_room_no(raw) or raw
+    if mode in ("unit", "unit_only", "building"):
+        return strip_room_no(raw) or (p.get('community') or raw)
+    return raw
+
+
 def _missing_poster_info(p, card, need_photo: bool, need_floor: bool = False,
-                         need_orientation: bool = False) -> list:
+                         need_orientation: bool = False, need_room_no: bool = False,
+                         room_no_mode: str = None) -> list:
     """出图前的信息齐全校验：返回缺失项清单（空列表 = 信息齐全，可以出图）
 
     need_floor / need_orientation：所选模板会显示这两栏（目前是 B 极简高级款）。
@@ -475,6 +522,8 @@ def _missing_poster_info(p, card, need_photo: bool, need_floor: bool = False,
         miss.append("楼层（如 11层；标题或地址里带房号如 301/1602 时系统会自动按房号推断，不必您提供）")
     if need_orientation and not p.get('orientation'):
         miss.append("朝向（如 朝南 / 南北通透；房号推不出朝向，需要您告知）")
+    if need_room_no and not room_no_mode:
+        miss.append("海报上要不要写房号（三选一：" + " / ".join(ROOM_NO_MODES.values()) + "）")
     return miss
 
 
@@ -501,12 +550,20 @@ def _title_candidates(p) -> list:
 
 
 def _pick_template(p, template: str, photo: str) -> tuple:
-    """返回 (模板代号, 选择理由)。template 为空时按房源特征自动挑。"""
+    """返回 (模板代号, 选择理由)。**模板为空时返回 (None, ...)，由上层询问经纪人**（2026-09-21 改）。
+
+    传 "auto"（或"你看着办"）才按房源特征自动挑 —— 保留这个逃生口，避免每次都问。
+    """
     alias = {"premium": "A", "modern": "B", "vibrant": "A", "promo": "A", "classic": "B"}
-    if template:
+    if template and str(template).strip().lower() in ("auto", "你看着办", "随便", "自动"):
+        template = ""
+    elif template:
         code = alias.get(str(template).lower(), str(template).upper())
         if code in ("A", "B"):
             return code, "按指定模板"
+        return None, f"模板「{template}」不在模板库里"
+    else:
+        return None, "未指定模板 —— 先问经纪人要哪一款"
     try:
         area = float(p.get('area') or 0)
     except (TypeError, ValueError):
@@ -519,11 +576,15 @@ def _pick_template(p, template: str, photo: str) -> tuple:
 
 def generate_property_poster(property_id: int = None, title: str = None, qr_content: str = None,
                             template: str = None, poster_title: str = None,
+                            show_room_no: str = None,
                             allow_missing: bool = False, task_id: str = None) -> str:
     """生成房源海报（1080x1920）
 
     property_id 或 title 二选一：传 id 精确匹配；传标题模糊匹配。
-    template 可选 A（红金促销）/B（极简高级，需照片）；不传按房源特征自动选。
+    template 可选 A（红金促销）/B（极简高级，需照片）/auto（你看着办，系统按房源特征挑）；
+    **不传则不出图，先返回模板库清单让经纪人挑**（2026-09-21 老板要求）。
+    show_room_no：海报上要不要写房号 —— full（完整）/unit（只写楼栋单元）/none（只显示小区名）；
+    **不传会并入待问清单**（不同经纪人对房号曝光的诉求不同，不能默认替他决定）。
     poster_title：海报主标题文案（先调 suggest_poster_titles 拿候选给经纪人挑）。
     allow_missing=True：经纪人明确说"先出图/信息就这些"时使用，缺的字段留空不编造。
     信息不齐时**不出图**，返回 missing 清单让 Coco 一次问清。
@@ -539,12 +600,20 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     card = _agent_card()
     photo = _property_photo(p)
     tpl, reason = _pick_template(p, template, photo)
+    need_template = tpl is None
+    if need_template and allow_missing:
+        tpl, reason = "A", "未指定模板（经纪人同意先出图）→ 用 A 红金促销款"
+        need_template = False
+    if tpl is None:
+        tpl = "A"          # 仅用于判断依赖（照片/楼层/朝向），真正的代号在拿到选择后才会用于渲染
+    room_no_mode = _norm_room_no_mode(show_room_no)
     if tpl == "B" and not photo:
         if allow_missing:
             tpl, reason = "A", "无照片（经纪人同意先出图）→ 改为不需要照片的促销款"
         else:
-            _need = ["房源照片"] + _missing_poster_info(p, card, need_photo=False,
-                                                       need_floor=True, need_orientation=True)
+            _need = (["模板：先用哪一款（" + TEMPLATE_CHOICES + "）"] if need_template else []) \
+                + ["房源照片"] + _missing_poster_info(
+                    p, card, need_photo=False, need_floor=True, need_orientation=True)
             return json.dumps({
                 "success": False,
                 "need_photo": True,
@@ -557,8 +626,11 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     # B 款会显示「楼层 / 朝向」两栏 —— 缺了就先问清，不要等出图后再补问
     _need_extras = tpl == "B"
     missing = (_missing_poster_info(p, card, need_photo=False,
-                                    need_floor=_need_extras, need_orientation=_need_extras)
+                                    need_floor=_need_extras, need_orientation=_need_extras,
+                                    need_room_no=_template_shows_room_no(tpl), room_no_mode=room_no_mode)
                if not allow_missing else [])
+    if need_template and not allow_missing:
+        missing.insert(0, "模板：用哪一款（" + TEMPLATE_CHOICES + "）")
     cands = _title_candidates(p) if not poster_title else []
     if missing or cands:
         payload = {
@@ -569,6 +641,9 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
                     + "拿齐后用 poster_title 传标题、必要时先 save_agent_card 存名片，再调用本工具。"
                       "经纪人若明确说「就这些，先出图」，带 allow_missing=true 再调一次。"),
         }
+        if need_template:
+            payload["need_template"] = True
+            payload["templates"] = POSTER_TEMPLATES
         if missing:
             payload["need_info"] = True
             payload["missing"] = missing
@@ -584,6 +659,7 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
 
     data = {
         "template": tpl,
+        "room_no_mode": room_no_mode or "full",
         "title": poster_title,
         "subtitle": " · ".join(str(x) for x in [p.get('community'), p.get('district'),
                                                p.get('renovation')] if x),
@@ -608,7 +684,7 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     if not result.get("success"):
         # 回落旧 Pillow 引擎（保证任何服务器都能出图）
         notes.append(f"已回落到旧引擎（原因：{result.get('error')}）")
-        path = _render_legacy(p, qr_content, tpl)
+        path = _render_legacy({**p, "title": _poster_display_title(p, room_no_mode)}, qr_content, tpl)
     else:
         path = result["png_path"]
 
@@ -672,10 +748,13 @@ def suggest_poster_titles(property_id: int = None, title: str = None, task_id: s
 
 
 # 九宫格（旧版 3x3 拼图，保留兼容）
-def generate_poster_grid(property_ids: str, qr_content: str = None, task_id: str = None) -> str:
+def generate_poster_grid(property_ids: str, qr_content: str = None, show_room_no: str = "unit",
+                         task_id: str = None) -> str:
     """生成朋友圈九宫格大图（3x3 拼图，最多9套房源）
 
     property_ids: 房源ID列表，逗号分隔（如 "1,2,3,4,5,6,7,8,9"），最多9个。
+    show_room_no: full / unit / none —— 每格标题里的房号显示方式，**默认 unit**
+    （批量图默认不逐个曝光具体房号；经纪人要显示完整房号时显式传 full）。
     """
     try:
         from PIL import Image, ImageDraw
@@ -706,7 +785,7 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, task_id: str
         c1, c2 = _type_colors(p.get('property_type'))
         card = _gradient((cell, cell), c1, c2)
         d = ImageDraw.Draw(card)
-        title = _ellipsis(d, p.get('title') or '房源', f_title, cell - 40)
+        title = _ellipsis(d, _poster_display_title(p, _norm_room_no_mode(show_room_no) or "unit"), f_title, cell - 40)
         d.text((20, 20), title, font=f_title, fill=(255, 255, 255))
         d.text((20, 130), _fmt_price(p), font=f_price, fill=(255, 255, 255))
         area = f"{p.get('area')}㎡" if p.get('area') else ''
@@ -726,13 +805,14 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, task_id: str
 registry.register(
     name="generate_property_poster",
     toolset="real_estate",
-    schema={"name": "generate_property_poster", "description": "生成房源海报图（1080x1920）。**出图前必须先把信息问齐**：B 极简高级款需要 照片+楼层+朝向，缺任一项都会拒绝出图并返回 missing 清单（一次问清，不要先出图再补问）；楼层若标题/地址带房号会自动推断。未提供主标题会返回 2~3 个候选让经纪人挑。模板 A 红金促销/B 极简高级(需照片)，不传自动选。返回图片路径，用 MEDIA:路径 发送", "parameters": {
+    schema={"name": "generate_property_poster", "description": "生成房源海报图（1080x1920）。**出图前必须先把信息问齐**（模板选哪款、房号要不要写、B 款还需要照片+楼层+朝向）：B 极简高级款需要 照片+楼层+朝向，缺任一项都会拒绝出图并返回 missing 清单（一次问清，不要先出图再补问）；楼层若标题/地址带房号会自动推断。未提供主标题会返回 2~3 个候选让经纪人挑。模板 A 红金促销/B 极简高级(需照片)，不传自动选。返回图片路径，用 MEDIA:路径 发送", "parameters": {
         "type": "object",
         "properties": {
             "property_id": {"type": "integer", "description": "房源ID（与 title 二选一，优先用 ID）"},
             "title": {"type": "string", "description": "房源标题关键词（与 property_id 二选一，模糊匹配）"},
             "poster_title": {"type": "string", "description": "海报主标题文案（先用 suggest_poster_titles 拿候选给经纪人挑）"},
-            "template": {"type": "string", "enum": ["A", "B"], "description": "可选：A 红金促销（默认，无需照片）/B 极简高级（需照片）"},
+            "template": {"type": "string", "enum": ["A", "B", "auto"], "description": "A 红金促销（不需要照片）/B 极简高级（需要照片）/auto（经纪人让你看着办时用，按房源特征自动挑）。**不传则不出图，会返回模板库清单让你先问经纪人选哪款**"},
+              "show_room_no": {"type": "string", "enum": ["full", "unit", "none"], "description": "海报上要不要写房号：full 写完整（如 7号楼2单元1602）/unit 只写楼栋单元（如 7号楼2单元）/none 不写、只显示小区名。**不传会并入待问清单先问经纪人**——不同经纪人对房号曝光的诉求不同，不要替他决定"},
             "qr_content": {"type": "string", "description": "可选：二维码内容；不传则用经纪人名片里的微信号（微信名片）"},
             "allow_missing": {"type": "boolean", "description": "仅当经纪人明确说「就这些，先出图」时传 true；缺的字段留空，不编造"},
         },
@@ -759,6 +839,7 @@ registry.register(
     schema={"name": "generate_poster_grid", "description": "生成朋友圈九宫格大图（3x3拼图，最多9套房源），返回图片路径，发消息时用 MEDIA:路径 发送图片", "parameters": {
         "type": "object",
         "properties": {
+              "show_room_no": {"type": "string", "enum": ["full", "unit", "none"], "description": "每格标题里的房号写法：full 完整 / unit 只到楼栋单元（默认）/ none 只显示小区名"},
             "property_ids": {"type": "string", "description": "房源ID列表，逗号分隔，最多9个，如 1,2,3,4,5,6,7,8,9"},
             "qr_content": {"type": "string", "description": "可选：二维码内容"},
         },
