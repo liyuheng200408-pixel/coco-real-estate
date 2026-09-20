@@ -37,6 +37,22 @@ STANDARD: "dict[str, object]" = {
     "timezone": "Asia/Shanghai",
 }
 
+# 官方 Hermes 的默认值 / 官方设置向导会写进去的值（权威来源：官方 v2026.9.14 的
+# hermes_cli/config_defaults.py 与 setup.py / setup_quick.py）。
+#
+# 为什么要这张表：**被官方流程写回默认值**跟"经纪人自己调过"是两回事。没有这张表时，
+# 两者都落在"∉ {标准值, 我们上次写的值}"里 → 一律被当成"经纪人改的"保留 → 而体检又按
+# "≠标准"报警、建议重跑 update.sh（重跑还是保留）→ 出现**永远修不好的 WARN**。
+# 真实案例：服务器 compression.threshold 被写回官方默认 0.5，体检一直 WARN。
+OFFICIAL_DEFAULTS: "dict[str, tuple]" = {
+    "agent.max_turns": (150, 90),                  # 官方向导 setup.py=150 / setup_quick.py=90
+    "compression.threshold": (0.5,),               # 官方默认 0.50
+    "compression.protect_last_n": (20,),           # 官方默认 20
+    "compression.hygiene_hard_message_limit": (5000,),
+    "timezone": ("", None),
+}
+
+
 # 人话说明（终端与体检输出用）
 LABELS: "dict[str, str]" = {
     "agent.max_turns": "单次任务最大轮次",
@@ -120,6 +136,75 @@ def _same(a, b) -> bool:
     return False
 
 
+def _is_official_default(key: str, value) -> bool:
+    """这个值是不是官方默认值 / 官方向导会写的值（= 被官方流程覆盖，不是经纪人的自定义）"""
+    return any(_same(value, v) for v in OFFICIAL_DEFAULTS.get(key, ()))
+
+
+def classify(effective: "dict[str, object] | None" = None, state: "dict | None" = None):
+    """把每个标准键分三类 —— **唯一判定入口**（plan()/apply()/体检都走这里，避免两套口径打架）。
+
+    返回 (aligned, reclaimable, custom)：
+      aligned     : [(key, 值)]           已是标准值
+      reclaimable : [(key, 值, 原因)]     应当拉回标准值；原因 ∈ missing / first-run / standard-upgrade / official-default
+      custom      : [(key, 值)]          经纪人自己设的值 → 保留（并用 --force 才拉回）
+    """
+    effective = effective_values() if effective is None else effective
+    state = _read_state() if state is None else state
+    last_written = dict(state.get("written") or {})
+    first_run = not last_written
+
+    aligned, reclaimable, custom = [], [], []
+    for key, want in STANDARD.items():
+        got = effective.get(key)
+        if _same(got, want):
+            aligned.append((key, got))
+            continue
+        if got in (None, ""):
+            reclaimable.append((key, got, "missing"))
+            continue
+        if first_run:
+            reclaimable.append((key, got, "first-run"))
+            continue
+        if _same(got, last_written.get(key)):
+            reclaimable.append((key, got, "standard-upgrade"))
+            continue
+        if _is_official_default(key, got):
+            reclaimable.append((key, got, "official-default"))
+            continue
+        custom.append((key, got))
+    return aligned, reclaimable, custom
+
+
+def summary(effective: "dict[str, object] | None" = None, state: "dict | None" = None) -> "dict":
+    """给终端 / 部署体检用的一句话结论（纯函数，便于单测）。
+
+    level=pass  → 已对齐
+    level=warn  → 需要拉回标准值（建议有效：跑 update.sh 真的能改）
+    level=info  → 是经纪人自己的设置，已保留（**不是故障，不该报 WARN**）
+    """
+    aligned, reclaimable, custom = classify(effective, state)
+    detail_reclaim = "；".join(
+        f"{LABELS.get(k, k)} 生效 {g!r} ≠ 标准 {STANDARD[k]!r}"
+        + ("（被官方默认值覆盖）" if r == "official-default" else "")
+        for k, g, r in reclaimable
+    )
+    detail_custom = "；".join(f"{LABELS.get(k, k)}={v}" for k, v in custom)
+
+    if not reclaimable and not custom:
+        return {"level": "pass", "message": "运行时配置已对齐 Coco 标准", "hint": None}
+    if reclaimable and not custom:
+        return {"level": "warn", "message": f"配置与 Coco 标准不一致：{detail_reclaim}",
+                "hint": "修复：bash ~/hermes-agent/scripts/update.sh（会自动拉回以上各项）"}
+    if custom and not reclaimable:
+        return {"level": "info",
+                "message": f"检测到你自己调整过的设置，已按「自定义优先」保留：{detail_custom}",
+                "hint": "如需拉回标准值：python3 ~/hermes-agent/scripts/coco_config_align.py --force"}
+    return {"level": "warn",
+            "message": f"配置与 Coco 标准不一致：{detail_reclaim}；另有你的自定义设置已保留：{detail_custom}",
+            "hint": "修复：bash ~/hermes-agent/scripts/update.sh（会自动拉回不一致项，自定义项仍保留）"}
+
+
 def plan(effective: "dict[str, object] | None" = None, state: "dict | None" = None):
     """决定每个键怎么处理。返回 (to_align, preserved)：
 
@@ -134,23 +219,9 @@ def plan(effective: "dict[str, object] | None" = None, state: "dict | None" = No
        - 当前值 ∉ {标准值, 上次写的}  → **经纪人改的 → 保留**
        - 当前值缺失/为空             → 对齐（补上）
     """
-    effective = effective_values() if effective is None else effective
-    state = _read_state() if state is None else state
-    last_written = dict(state.get("written") or {})
-    first_run = not last_written
-
-    to_align, preserved = [], []
-    for key, want in STANDARD.items():
-        got = effective.get(key)
-        if _same(got, want):
-            continue
-        if got in (None, "") or first_run:
-            to_align.append((key, got, want))
-            continue
-        if _same(got, last_written.get(key)):
-            to_align.append((key, got, want))     # 我们的标准升级了
-            continue
-        preserved.append((key, got))              # 经纪人自己改的 → 保留
+    _aligned, reclaimable, custom = classify(effective, state)
+    to_align = [(key, got, STANDARD[key]) for key, got, _reason in reclaimable]
+    preserved = [(key, got) for key, got in custom]
     return to_align, preserved
 
 
@@ -201,6 +272,10 @@ def apply(verbose: bool = False, force: bool = False) -> "list[tuple[str, object
             written[key] = want
     if changed or preserved:
         _write_state(written)
+    reclaimed = [(k, g, w) for k, g, w in changed if _is_official_default(k, g)]
+    if reclaimed:
+        names = "；".join(f"{LABELS.get(k, k)} {g} → {w}" for k, g, w in reclaimed)
+        print(f"  已拉回被官方默认值覆盖的设置（不是你改的，官方流程写回）：{names}")
     if preserved:
         names = "；".join(f"{LABELS.get(k, k)}={v}" for k, v in preserved)
         print(f"  已保留你自行调整的设置（未拉回标准值）：{names}")

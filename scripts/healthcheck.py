@@ -370,8 +370,10 @@ try:
     import coco_config_align as _align  # noqa: E402
 
     _eff = _align.effective_values()
-    _bad = _align.diffs(_eff)
-    if not _bad:
+    # 判定走 coco_config_align.summary()（与更新脚本同一套口径）：
+    # pass=已对齐 / warn=可拉回（建议有效）/ info=经纪人自己的设置（**不是故障，不报 WARN**）
+    _sum = _align.summary()
+    if _sum["level"] == "pass":
         ok(
             "运行时配置已对齐 Coco 标准"
             f"（轮次 {_eff.get('agent.max_turns')}、压缩阈值 {_eff.get('compression.threshold')}、"
@@ -379,12 +381,10 @@ try:
             f"网关卫生 {_eff.get('compression.hygiene_hard_message_limit')}、"
             f"时区 {_eff.get('timezone')}）"
         )
-    else:
-        _detail = "；".join(f"{k} 生效 {g!r} ≠ 标准 {w!r}" for k, g, w in _bad)
-        warn(
-            f"配置与 Coco 标准不一致：{_detail}",
-            "修复：bash ~/hermes-agent/scripts/update.sh（会自动对齐以上各项）",
-        )
+    elif _sum["level"] == "warn":
+        warn(_sum["message"], _sum["hint"])
+    else:  # info：自定义设置被保留，属预期行为
+        ok(f"{_sum['message']}（{_sum['hint']}）")
 except Exception as _exc:  # noqa: BLE001
     warn(f"配置核对未完成（{_exc}）", "修复：bash ~/hermes-agent/scripts/update.sh")
 
