@@ -19,6 +19,7 @@ def test_standard_values_are_the_agreed_ones():
         "compression.protect_last_n": 40,
         "compression.hygiene_hard_message_limit": 5000,
         "timezone": "Asia/Shanghai",
+        "approvals.destructive_slash_confirm": False,
     }
 
 
@@ -39,6 +40,7 @@ def test_diffs_flags_official_defaults():
         "compression.protect_last_n": 20,
         "compression.hygiene_hard_message_limit": 5000,
         "timezone": "UTC",
+        "approvals.destructive_slash_confirm": False,
     }
     bad = dict((k, (g, w)) for k, g, w in align.diffs(eff))
     assert set(bad) == {
@@ -57,6 +59,7 @@ def test_diffs_ok_when_aligned():
         "compression.protect_last_n": 40,
         "compression.hygiene_hard_message_limit": 5000,
         "timezone": "Asia/Shanghai",
+        "approvals.destructive_slash_confirm": False,
     }
     assert align.diffs(eff) == []
 
@@ -76,6 +79,7 @@ def test_check_mode_passes_when_aligned(monkeypatch, capsys):
         "compression.protect_last_n": 40,
         "compression.hygiene_hard_message_limit": 5000,
         "timezone": "Asia/Shanghai",
+        "approvals.destructive_slash_confirm": False,
     }
     monkeypatch.setattr(align, "effective_values", lambda: eff)
     assert align.main(["--check"]) == 0
@@ -89,6 +93,7 @@ def test_apply_is_noop_when_aligned(monkeypatch):
         "compression.protect_last_n": 40,
         "compression.hygiene_hard_message_limit": 5000,
         "timezone": "Asia/Shanghai",
+        "approvals.destructive_slash_confirm": False,
     }
     monkeypatch.setattr(align, "effective_values", lambda: eff)
     assert align.apply() == []
@@ -125,7 +130,8 @@ def test_apply_backs_up_config(monkeypatch, tmp_path):
 def _eff(**over):
     base = {"agent.max_turns": 500, "compression.threshold": 0.8,
             "compression.protect_last_n": 40, "compression.hygiene_hard_message_limit": 5000,
-            "timezone": "Asia/Shanghai"}
+            "timezone": "Asia/Shanghai",
+            "approvals.destructive_slash_confirm": False}
     base.update(over)
     return base
 
@@ -143,7 +149,7 @@ def test_plan_preserves_broker_customisation():
     eff = _eff(**{"agent.max_turns": 300})
     state = {"written": {"agent.max_turns": 500, "compression.threshold": 0.8,
                          "compression.protect_last_n": 40,
-                         "compression.hygiene_hard_message_limit": 5000, "timezone": "Asia/Shanghai"}}
+                         "compression.hygiene_hard_message_limit": 5000, "timezone": "Asia/Shanghai", "approvals.destructive_slash_confirm": False}}
     to_align, preserved = align.plan(eff, state)
     assert to_align == []
     assert preserved == [("agent.max_turns", 300)]

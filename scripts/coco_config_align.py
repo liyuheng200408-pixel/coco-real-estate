@@ -35,6 +35,9 @@ STANDARD: "dict[str, object]" = {
     "compression.protect_last_n": 40,
     "compression.hygiene_hard_message_limit": 5000,
     "timezone": "Asia/Shanghai",
+    # 对话清空类命令（/new、/clear、/reset、/undo）不再弹确认框：经纪人不会输入 /always，
+    # 三选一反而卡住「开新会话」；关掉后直接执行（业务数据都在库里，不受影响）。
+    "approvals.destructive_slash_confirm": False,
 }
 
 # 官方 Hermes 的默认值 / 官方设置向导会写进去的值（权威来源：官方 v2026.9.14 的
@@ -50,6 +53,7 @@ OFFICIAL_DEFAULTS: "dict[str, tuple]" = {
     "compression.protect_last_n": (20,),           # 官方默认 20
     "compression.hygiene_hard_message_limit": (5000,),
     "timezone": ("", None),
+    "approvals.destructive_slash_confirm": (True,),   # 官方默认 True（弹确认框）
 }
 
 
@@ -60,6 +64,7 @@ LABELS: "dict[str, str]" = {
     "compression.protect_last_n": "保留最近消息条数",
     "compression.hygiene_hard_message_limit": "网关强制压缩消息上限",
     "timezone": "时区",
+    "approvals.destructive_slash_confirm": "清空对话类命令的确认框",
 }
 
 

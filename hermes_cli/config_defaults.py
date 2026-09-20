@@ -1576,7 +1576,9 @@ DEFAULT_CONFIG = {
         # /clear, /new, /reset, /undo confirm before discarding state (Approve Once / Always Approve
         # / Cancel via tools.slash_confirm; native buttons on Telegram/ Discord/Slack). "Always
         # Approve" → false. HERMES_TUI_NO_CONFIRM=1 skips the TUI modal.
-        "destructive_slash_confirm": True,
+        # COCO-PATCH 2026-09-21：Coco 默认关闭这个确认框 —— 经纪人不会去输入 /always，
+        # 弹出的三选一反而卡住「开新会话」这个高频动作；且清空对话不损失任何业务数据（都在库里）。
+        "destructive_slash_confirm": False,
     },
     # Permanently allowed dangerous command patterns (added via "always" approval).
     "command_allowlist": [],

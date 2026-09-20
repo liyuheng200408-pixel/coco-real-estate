@@ -22,7 +22,8 @@ if str(SCRIPTS) not in sys.path:
 from coco_config_align import STANDARD, classify, plan, summary  # noqa: E402
 
 
-def eff(threshold=0.8, max_turns=500, protect=40, hygiene=5000, tz="Asia/Shanghai"):
+def eff(threshold=0.8, max_turns=500, protect=40, hygiene=5000, tz="Asia/Shanghai",
+        slash_confirm=False):
     """造一份运行时生效值（默认=标准值）"""
     return {
         "agent.max_turns": max_turns,
@@ -30,6 +31,7 @@ def eff(threshold=0.8, max_turns=500, protect=40, hygiene=5000, tz="Asia/Shangha
         "compression.protect_last_n": protect,
         "compression.hygiene_hard_message_limit": hygiene,
         "timezone": tz,
+        "approvals.destructive_slash_confirm": slash_confirm,
     }
 
 
@@ -70,6 +72,32 @@ class TestClassify:
     def test_missing_value_is_reclaimable(self):
         _a, reclaimable, _c = classify(eff(threshold=None), st())
         assert {k: r for k, _v, r in reclaimable}.get("compression.threshold") == "missing"
+
+
+class TestDestructiveSlashConfirmDefault:
+    """经纪人不会输入 /always：Coco 默认关闭「清空对话类命令」的确认框（2026-09-21 老板要求）"""
+
+    def test_standard_and_official_cover_the_key(self):
+        assert STANDARD["approvals.destructive_slash_confirm"] is False
+        from coco_config_align import OFFICIAL_DEFAULTS
+
+        assert True in OFFICIAL_DEFAULTS["approvals.destructive_slash_confirm"]
+
+    def test_official_true_is_reclaimed(self):
+        """服务器上是官方默认 True（弹框）→ 应被拉回成 False（不弹框）"""
+        _a, reclaimable, custom = classify(eff(slash_confirm=True), st())
+        assert {k: r for k, _v, r in reclaimable}.get("approvals.destructive_slash_confirm") == "official-default"
+        assert not custom
+
+    def test_aligned_when_off(self):
+        aligned, reclaimable, _c = classify(eff(slash_confirm=False), st())
+        assert ("approvals.destructive_slash_confirm", False) in aligned
+
+    def test_code_default_is_off(self):
+        """代码默认值也必须是 False（否则新装实例还会弹框）"""
+        from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+        assert DEFAULT_CONFIG["approvals"]["destructive_slash_confirm"] is False
 
 
 class TestPlanAndSummary:
