@@ -146,11 +146,15 @@ if (Test-Path -LiteralPath $EnvFile) {
         $url = $line.Substring('DATABASE_URL='.Length).Trim()
         $psql = Join-Path (Join-Path $DataRoot 'bin') 'psql.exe'
         if (Test-Path -LiteralPath $psql) {
-            $probe = & $psql $url -t -A -c 'select current_user, current_database(), inet_server_port(), current_setting(''listen_addresses'')' 2>&1
+            # 注意参数顺序：选项必须在连接串之前。Windows 的 psql 不做 GNU 式参数重排，
+            # 写在 URL 后面会被当成「多余参数」静默忽略 → 变成进交互模式、什么都没查还返回 0
+            # （真机 CI 实测到的假绿）。下面还断言输出内容，防止再次静默通过。
+            $probe = (& $psql -t -A -c "select current_user || '|' || current_database() || '|' || current_setting('listen_addresses')" $url 2>&1 | Out-String).Trim()
             $probeCode = $LASTEXITCODE
             Say "  psql 输出：$probe"
             Say "  退出码  ：$probeCode"
             if ($probeCode -ne 0) { $script:Problems++ }
+            elseif ($probe -ne 'hermes|hermes_agent|127.0.0.1') { $script:Problems++; Say "  连接结果不符（期望 hermes|hermes_agent|127.0.0.1）" 'Red' }
         } else {
             $script:Problems++
             Say "  找不到 $psql（便携包不完整）" 'Red'
