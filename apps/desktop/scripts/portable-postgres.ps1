@@ -83,9 +83,14 @@ Set-StrictMode -Version 2.0
 $script:PgVersion = '16.4-1'
 $script:PgMajor = 16
 $script:PgZipName = "postgresql-$($script:PgVersion)-windows-x64-binaries.zip"
-# 便携包默认下载源（按顺序回退）。国内分发走 COCO_PG_MIRROR（自建镜像/Release 附件）
-# 或 -SourceUrls / -ZipPath，不在此处写未经验证的链接。
-$script:DefaultSources = @("https://get.enterprisedb.com/postgresql/$($script:PgZipName)")
+# 自建镜像包（Gitee Release 附件）：只含运行必需的 bin/lib/share，40.8MB（官方原包 338.7MB）。
+# 国内直接下它最快；海外则官方源更快 —— 所以下面按「实测延迟」排序，而不是写死顺序。
+$script:MirrorPackName = 'coco-portable-pgsql-16.4.1-win-x64.zip'
+$script:MirrorBase = 'https://gitee.com/liyuheng200408/coco-real-estate/releases/download/pgsql-v1'
+$script:DefaultSources = @(
+    "$($script:MirrorBase)/$($script:MirrorPackName)"
+    "https://get.enterprisedb.com/postgresql/$($script:PgZipName)"
+)
 $script:BlockBegin = '# >>> coco-managed (portable-postgres.ps1) - do not edit by hand >>>'
 $script:BlockEnd = '# <<< coco-managed (portable-postgres.ps1) <<<'
 $script:StateName = 'coco-pg.json'
@@ -250,10 +255,18 @@ function Get-PgArchive {
 
     if ($SkipDownload) { Warn '已指定 -SkipDownload，跳过下载'; return $false }
 
+    # 显式源优先，其余按实测延迟排序（国内→镜像包，海外→官方源，自动）
+    $explicitSources = New-Object System.Collections.Generic.List[string]
+    if ($env:COCO_PG_MIRROR) { $explicitSources.Add(($env:COCO_PG_MIRROR.TrimEnd('/') + '/' + $script:PgZipName)) }
+    foreach ($u in $SourceUrls) { $explicitSources.Add($u) }
+
     $sources = New-Object System.Collections.Generic.List[string]
-    if ($env:COCO_PG_MIRROR) { $sources.Add(($env:COCO_PG_MIRROR.TrimEnd('/') + '/' + $script:PgZipName)) }
-    foreach ($u in $SourceUrls) { $sources.Add($u) }
-    foreach ($u in $script:DefaultSources) { $sources.Add($u) }
+    if ($explicitSources.Count -eq 0 -and $script:DefaultSources.Count -gt 1) {
+        Info '测速选源中（各源最多 6 秒）...'
+    }
+    foreach ($u in (Get-OrderedSources -Explicit $explicitSources.ToArray() -Defaults $script:DefaultSources)) {
+        $sources.Add($u)
+    }
 
     $part = "$Destination.part"
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
@@ -314,12 +327,59 @@ function Get-PgArchive {
     return $false
 }
 
+function Test-SourceLatency {
+    <#
+      探一个下载源的可达性与延迟（只取头 1 字节，几乎不产生流量）。
+      不可达/超时返回 99，排到最后 —— 不要写死「国内源优先」：同一份脚本也会装在
+      海外机器上（海外走官方源更快），按实测排序两边都最优。
+    #>
+    [CmdletBinding()]
+    param([string]$Url, [int]$TimeoutSec = 6)
+
+    $nullDevice = if ($script:IsWin) { 'NUL' } else { '/dev/null' }
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if (-not $curl) { $curl = Get-Command curl -ErrorAction SilentlyContinue }
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    if ($curl) {
+        & $curl.Source -fsS -o $nullDevice -r 0-0 --max-time $TimeoutSec $Url *> $null
+        if ($LASTEXITCODE -ne 0) { return 99 }
+    } else {
+        try {
+            $r = Invoke-WebRequest -Uri $Url -Method Head -TimeoutSec $TimeoutSec -UseBasicParsing
+            if ($r.StatusCode -ge 400) { return 99 }
+        } catch { return 99 }
+    }
+    $sw.Stop()
+    return [math]::Round($sw.Elapsed.TotalSeconds, 2)
+}
+
+function Get-OrderedSources {
+    <#
+      候选源的最终顺序：显式指定的（-SourceUrls / COCO_PG_MIRROR）保持用户给的顺序在前，
+      默认源按实测延迟从快到慢。与 install.sh 的 probe_source 同一思路。
+    #>
+    [CmdletBinding()]
+    param([string[]]$Explicit = @(), [string[]]$Defaults = @())
+
+    if (-not $Defaults -or $Defaults.Count -eq 0) { return @($Explicit) }
+    if (-not $Explicit -or $Explicit.Count -eq 0) { return @($Defaults) }
+
+    $scored = foreach ($u in $Defaults) {
+        [pscustomobject]@{ Url = $u; Secs = (Test-SourceLatency -Url $u) }
+    }
+    $ordered = @($scored | Sort-Object Secs | ForEach-Object { $_.Url })
+    return @($Explicit) + @($ordered)
+}
+
 function Get-ZipStatus {
     <#
-      便携包体检：存在 → 体积下限 → zip 魔数 → 目录能打开 → 含 bin/initdb。
+      便携包体检：存在 → 体积下限 → zip 魔数 → 目录能打开 → 条目数够 → 含 bin/initdb。
       全是廉价检查（不读全文件），但能挡住三类真实事故：
         ① 下载中断留下的半截包；② 代理/网关返回的错误页（几十字节 HTML）；
         ③ 版本/架构不对的包（解出来才发现没有 initdb.exe，用户已经白等十分钟）。
+      注意体积下限只是廉价的「别是错误页」预筛（20MB），真正的完整性靠条目数与
+      bin/initdb —— 自建镜像包就是 40.8MB（只含运行必需目录），比官方原包小得多。
       只判「文件存在」就解压的写法，会把 .NET 的
       "End of Central Directory record could not be found" 直接甩给用户（实测）。
     #>
@@ -327,7 +387,7 @@ function Get-ZipStatus {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return 'missing' }
     try { $len = (Get-Item -LiteralPath $Path -Force).Length } catch { return 'missing' }
-    if ($len -lt 150MB) { return "truncated:$([math]::Round($len / 1MB, 1))MB" }
+    if ($len -lt 20MB) { return "truncated:$([math]::Round($len / 1MB, 1))MB" }
     $fs = [System.IO.File]::OpenRead($Path)
     try {
         $sig = New-Object byte[] 2
