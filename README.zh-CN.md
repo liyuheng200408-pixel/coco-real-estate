@@ -168,7 +168,6 @@ coco logs
 ```
 
 
-> 命令说明：`coco` 是 Coco 的命令入口，覆盖日常运维与安装配置；其中 `coco model` / `coco setup` / `coco gateway` / `coco pairing` 调用底层框架的对应功能；底层命令不对外暴露，排障时可用 `coco cli <子命令>`。
 ### 数据库备份
 
 安装时已自动设置每日凌晨 2 点备份，备份文件在 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。
@@ -249,7 +248,6 @@ coco uninstall                    # 选择卸载程度（1 保留数据 / 2 卸�
 ```
 
 - 1、2 档会在动手前自动备份数据库与加密密钥，并打印备份包路径与下载命令；3 档（彻底清理，含数据库）不备份，如需备份请先执行 `coco backup`。
-- 卸载会调用官方 `hermes uninstall` 清理程序本体，并一并清理 Coco 的定时备份任务与 `coco` 命令软链。
 
 ### 重装系统完整恢复流程
 
