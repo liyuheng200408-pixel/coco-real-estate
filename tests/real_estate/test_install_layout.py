@@ -211,11 +211,13 @@ class TestReadmesStayInSync:
 
 
 class TestPython313DownloadPath:
-    """26.04（自带 3.14）会走"准备 Python 3.13"这条路径 —— 必须国内加速、有超时、失败可读。
+    """系统 Python 超出窗口时（更老的发行版、或将来的 3.15）会走"准备 Python 3.13"这条路径 ——
+    必须国内加速、有超时、失败可读。
 
     背景：这段以前把输出全丢掉、且没有任何超时，国内机器上看着像"卡死一小时"；
     而且它先用 `pip install` 装 uv —— Ubuntu 23.04 起系统 Python 禁止 pip 装包（PEP 668），
-    这一步在国内的 python3.14 机器上必然失败，于是只剩"去境外下 20MB uv"一条路。
+    这一步必然失败，于是只剩"去境外下 20MB uv"一条路。
+    （26.04 自带的 3.14 现在已在版本窗口内，不再走这条路；更老的系统与将来的 3.15 仍然要靠它。）
     """
 
     def test_domestic_mirror_for_cn(self):
@@ -266,3 +268,54 @@ class TestPython313DownloadPath:
             # 只禁止"让用户自己设置"的提示（允许提到变量名/告诉怎么关掉）
             if "export UV_PYTHON_INSTALL_MIRROR=" in line:
                 raise AssertionError(f"不要在用户提示里让他 export：{line.strip()}")
+
+
+class TestPythonVersionWindow:
+    """版本窗口 3.11 ~ 3.14：两端都要判（3.14 实测可用；3.15 未验证要拦住）。
+
+    判据与 pyproject.toml 的 requires-python 必须一致 —— 只改一边，装机时就会出现
+    "脚本放行、pip 拒绝"或反过来的错配。
+    """
+
+    def _py_ok_snippet(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        m = re.search(r"^_py_ok\(\) \{.*\}$", t, re.M)
+        assert m, "install.sh 里应有 _py_ok 版本窗口判据"
+        return m.group(0)
+
+    def _py_ok_accepts(self, tmp_path, version):
+        """拿 install.sh 里那段判据跑一遍：假 python 谎报版本，看放不放行。"""
+        fake = tmp_path / f"fakepython-{version}"
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys\n"
+            "sys.version_info = tuple(int(p) for p in os.environ['FAKE_VER'].split('.'))\n"
+            "code = sys.argv[sys.argv.index('-c') + 1]\n"
+            "exec(compile(code, '<fake>', 'exec'), {'__name__': '__main__'})\n",
+            encoding="utf-8")
+        fake.chmod(0o755)
+        runner = tmp_path / f"run-{version}.sh"
+        runner.write_text(
+            "set -uo pipefail\n" + self._py_ok_snippet() + f'\n_py_ok "{fake}"\n',
+            encoding="utf-8")
+        env = dict(os.environ, FAKE_VER=version)
+        r = subprocess.run(["bash", str(runner)], env=env, capture_output=True, text=True)
+        return r.returncode == 0
+
+    def test_window_boundaries(self, tmp_path):
+        for version, expected in (
+            ("3.10.14", False),
+            ("3.11.0", True),
+            ("3.12.9", True),
+            ("3.13.7", True),
+            ("3.14.7", True),
+            ("3.15.0", False),
+        ):
+            got = self._py_ok_accepts(tmp_path, version)
+            assert got is expected, f"Python {version} 的判定应为 {expected}，实际 {got}"
+
+    def test_pyproject_and_install_sh_agree(self):
+        pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        install = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert 'requires-python = ">=3.11,<3.15"' in pyproject, "pyproject 的窗口应放到 3.14"
+        assert "< (3, 15)" in install, "install.sh 的窗口判据要与 pyproject 一致"

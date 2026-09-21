@@ -84,9 +84,9 @@ install_deps() {
 }
 
 # ==================== Python 环境 ====================
-# 版本窗口 3.11 <= Python < 3.14（见 pyproject.toml 的 requires-python）
-# 上限原因：3.14 上 pydantic-core 等 Rust 依赖暂无 cp314 轮子；Ubuntu 26.04 默认即 3.14
-_py_ok() { "$1" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 14) else 1)' 2>/dev/null; }
+# 版本窗口 3.11 <= Python < 3.15（见 pyproject.toml 的 requires-python）
+# 3.14 实测可用：依赖全部走 wheel、单测全绿；Ubuntu 26.04 自带 3.14，直接用
+_py_ok() { "$1" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)' 2>/dev/null; }
 
 # ---- 取 uv 可执行文件：已装的 → PyPI 镜像下 wheel 解出二进制 → 官方安装脚本 ----
 # 用 pip download 而不是 pip install：下载不装包，不受系统 Python 的 PEP 668 限制
@@ -215,7 +215,7 @@ setup_python() {
     info "Python 版本: $PYTHON_VERSION"
 
     if ! _py_ok "$PYTHON_CMD"; then
-        for _cand in python3.13 python3.12 python3.11; do
+        for _cand in python3.14 python3.13 python3.12 python3.11; do
             if command -v "$_cand" &> /dev/null && _py_ok "$_cand"; then
                 PYTHON_CMD="$_cand"
                 PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
@@ -225,7 +225,7 @@ setup_python() {
         done
     fi
     if ! _py_ok "$PYTHON_CMD" && command -v apt-get &> /dev/null; then
-        info "当前 Python $PYTHON_VERSION 不在 3.11~3.13 范围内，尝试安装 python3.13..."
+        info "当前 Python $PYTHON_VERSION 不在 3.11~3.14 范围内，尝试安装 python3.13..."
         sudo apt-get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1 || true
         if command -v python3.13 &> /dev/null && _py_ok python3.13; then
             PYTHON_CMD="python3.13"
@@ -260,7 +260,7 @@ setup_python() {
         install_python_tarball || true
     fi
     if ! _py_ok "$PYTHON_CMD"; then
-        error "Python 版本不合适（当前 $PYTHON_VERSION，需要 3.11 ~ 3.13）。建议：① 系统换成 Ubuntu 24.04 LTS 后重跑本脚本；或 ② 自行安装 python3.13（含 python3.13-venv）后重跑。"
+        error "Python 版本不合适（当前 $PYTHON_VERSION，需要 3.11 ~ 3.14）。建议：① 系统换成 Ubuntu 24.04 / 26.04 LTS 后重跑本脚本；或 ② 自行安装 python3.13（含 python3.13-venv）后重跑。"
     fi
     if [[ -d "$INSTALL_DIR/venv" ]] && ! _py_ok "$INSTALL_DIR/venv/bin/python"; then
         warn "已有虚拟环境的 Python 版本不合适，重新创建"

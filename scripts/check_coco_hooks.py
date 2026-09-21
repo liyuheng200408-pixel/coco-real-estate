@@ -236,6 +236,16 @@ CONTENT_CHECKS = [
         [r'COCO_CHANNEL="\$\{COCO_CHANNEL:-master\}"'],
         "install.sh 默认通道不是 master —— 别人一条命令就会装到未验收的测试版。",
     ),
+    (
+        "B04",
+        "Python 版本窗口",
+        "pyproject.toml",
+        [r'requires-python = ">=3\.11,<3\.15"'],
+        "官方快照会把 requires-python 恢复成 <3.14，而 install.sh 与 README 都已按 3.11~3.14 放行\n"
+        "→ 出现「脚本放行、pip install -e . 拒绝」的错配（Ubuntu 26.04 自带 3.14 会装不上）。\n"
+        "处理：把 requires-python 改回 \">=3.11,<3.15\"，并确认 install.sh 的 _py_ok 判据一致\n"
+        "（单测 tests/real_estate/test_install_layout.py::TestPythonVersionWindow 会守这条）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示
