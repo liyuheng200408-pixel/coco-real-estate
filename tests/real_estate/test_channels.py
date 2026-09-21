@@ -522,3 +522,26 @@ class TestTestVersionTags:
         r = _run(["bash", "scripts/promote_release.sh", "--tag", "v0.0.0-1-test9"], cwd=work)
         assert r.returncode != 0
         assert "正式标签不能带 -test" in (r.stdout + r.stderr), r.stdout + r.stderr
+
+
+class TestTestChannelMatchesStableFlow:
+    """测试通道的更新流程必须与正式版**完全一致**（老板 2026-09-21 撤回"测试机不备份"）。
+
+    证据要求：`--test` / `--stable` 只负责换通道，不能顺带打开"跳过备份"之类的差异开关；
+    跳过备份只能由使用者显式传 `--skip-backup`。
+    """
+
+    def test_channel_flags_only_switch_branch(self):
+        text = (SCRIPTS / "update.sh").read_text(encoding="utf-8")
+        assert re.search(r'--test\)\s+FORCE_CHANNEL="next"', text), "缺少 --test → 测试通道的映射"
+        assert re.search(r'--stable\)\s+FORCE_CHANNEL="master"', text), "缺少 --stable 映射"
+        # 每个 SKIP_BACKUP=1 都必须出现在 --skip-backup 那一行（不得被通道参数暗开）
+        for line in text.split("\n"):
+            if "SKIP_BACKUP=1" in line:
+                assert "--skip-backup" in line, f"SKIP_BACKUP 被非显式参数打开：{line.strip()}"
+
+    def test_no_skip_backup_in_recommended_channel_commands(self):
+        """交付给老板的命令里不得再出现 --skip-backup（测试机也照常备份）"""
+        for rel in ("README.md", "README.zh-CN.md", "scripts/coco.sh"):
+            t = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            assert "--skip-backup" not in t, f"{rel} 里出现了 --skip-backup（不应作为推荐命令）"
