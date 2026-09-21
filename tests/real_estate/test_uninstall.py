@@ -295,3 +295,30 @@ class TestBackupPolicy:
         r = _run(["--dry-run"], _env(tmp_path, repo, crontab_bin, home), stdin_text="4\n")
         out = r.stdout
         assert "会自动备份" in out and "【不备份】" in out, out
+
+
+class TestDocsHaveBackupRestoreUninstall:
+    """README 必须有「备份 / 恢复 / 卸载」三小节且命令可用（老板 2026-09-21 要求），
+    同时不得再用会污染终端的老写法（`cd ... && ls` / `cd ... && tar`）。"""
+
+    def test_readmes_have_three_sections(self):
+        for rel in ("README.md", "README.zh-CN.md"):
+            t = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            for sec in ("### 备份", "### 恢复", "### 卸载"):
+                assert sec in t, f"{rel} 缺少小节：{sec}"
+            assert "coco uninstall" in t, f"{rel} 未给出卸载命令"
+            assert "coco backup" in t, f"{rel} 未给出手动备份命令"
+
+    def test_readmes_use_terminal_safe_commands(self):
+        for rel in ("README.md", "README.zh-CN.md"):
+            t = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            assert "cd ~/backups/real_estate && ls" not in t, f"{rel} 仍在用 cd 写法（会改变用户终端提示符）"
+            assert "cd ~/backups/real_estate && tar czf /root" not in t, f"{rel} 打包命令应写进括号子 shell"
+
+    def test_coco_help_lists_command_set(self):
+        r = subprocess.run(["bash", "scripts/coco.sh", "help"], capture_output=True, text=True, cwd=REPO_ROOT)
+        out = r.stdout
+        for cmd in ("version", "check", "backup", "uninstall"):
+            assert cmd in out, out
+        # 帮助文案要与实际行为一致：只有 1/2 档备份
+        assert "1/2 档" in out, out

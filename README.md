@@ -198,7 +198,7 @@ journalctl --user -u hermes-gateway -n 50 --no-pager
 
 **旧服务器打包（含数据库/图片/加密密钥）：**
 ```bash
-cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
+( cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz ./*.dump ./*.tar.gz ./enc_key.txt )
 ```
 
 **拷贝到新服务器后一键恢复：**
@@ -213,6 +213,46 @@ hermes gateway restart
 
 > 顺序说明：自动恢复数据库 → 图片 → 加密密钥（enc_key.txt 合并进 .env.db），任一步失败即中止并提示。密钥必须先于服务启动恢复，否则旧数据无法解密。
 
+### 备份
+
+每日凌晨 2 点自动备份到 `~/backups/real_estate/`，保留 30 天；加密密钥同时备份到 `~/backups/real_estate/enc_key.txt`。
+
+```bash
+coco backup                       # 手动备份数据库
+ls -la ~/backups/real_estate/     # 查看备份文件（.dump 数据库 / .tar.gz 图片 / enc_key.txt 密钥）
+```
+
+把备份打包成单个文件并下载到你的电脑（下面两条，第一条在服务器上执行、第二条在你自己的电脑上执行）：
+
+```bash
+( cd ~/backups/real_estate && tar czf ~/coco_backup_$(date +%Y%m%d).tar.gz ./*.dump ./*.tar.gz ./enc_key.txt )
+scp <用户名>@<服务器IP>:~/coco_backup_*.tar.gz ~/Desktop/
+```
+
+密钥（enc_key.txt）是解密客户手机号、微信的唯一凭证，请单独保存到机器之外（电脑 / U 盘 / 网盘）。
+
+### 恢复
+
+```bash
+# 从某个数据库备份恢复（备份文件名用上面的 ls 查看）
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
+
+# 从整机迁移包恢复（数据库 + 图片 + 加密密钥，顺序为数据库 → 图片 → 密钥）
+~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+
+hermes gateway restart            # 恢复后重启服务
+coco check                        # 体检核对（数据库 / 密钥 / 备份新鲜度）
+```
+
+### 卸载
+
+```bash
+coco uninstall                    # 选择卸载程度（1 保留数据 / 2 卸载并清理状态 / 3 彻底清理），输入 yes 确认
+```
+
+- 1、2 档会在动手前自动备份数据库与加密密钥，并打印备份包路径与下载命令；3 档（彻底清理，含数据库）不备份，如需备份请先执行 `coco backup`。
+- 卸载会调用官方 `hermes uninstall` 清理程序本体，并一并清理 Coco 的定时备份任务与 `coco` 命令软链。
+
 ### 重装系统完整恢复流程
 
 **重装会清空服务器所有数据，动手前务必完成前两步。**
@@ -226,12 +266,12 @@ hermes gateway restart
 
 **确认备份文件齐全：**
 ```bash
-cd ~/backups/real_estate && ls -la
+ls -la ~/backups/real_estate/
 ```
 
 **打包迁移文件：**
 ```bash
-cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
+( cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz ./*.dump ./*.tar.gz ./enc_key.txt )
 ```
 
 **下载迁移包到本地电脑（重装后服务器没数据了，务必下载）：**
