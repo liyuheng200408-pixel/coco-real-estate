@@ -179,28 +179,41 @@ A：自动保留 30 天，更早的自动删除。重要节点（如迁移前）
 
 ## 六、速查卡（复制到手机备忘录）
 
-```
-# 旧服务器打包
+**旧服务器打包：**
+```bash
 coco backup
 ( cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt )
+```
 
-# 电脑下载
+**电脑下载：**
+```bash
 scp root@旧IP:/root/coco_migration.tar.gz ~/Desktop/
+```
 
-# 新服务器一键安装
-# 按服务器所在地区选一条
-# 国内服务器（Gitee 源）
+**新服务器一键安装**（按服务器所在地区选一条）：
+
+**国内服务器（Gitee 源）：**
+```bash
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
-# 海外服务器（GitHub 源）
-# curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
+```
 
-# 新服务器配置（装完提示时做）
+**海外服务器（GitHub 源）：**
+```bash
+curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
+```
+
+**新服务器配置（装完提示时做）：**
+```bash
 coco model && coco setup
+```
 
-# 电脑上传迁移包
+**电脑上传迁移包：**
+```bash
 scp ~/Desktop/coco_migration.tar.gz root@新IP:/root/
+```
 
-# 新服务器恢复
+**新服务器恢复：**
+```bash
 coco restore --migration /root/coco_migration.tar.gz
 coco restart
 ```
