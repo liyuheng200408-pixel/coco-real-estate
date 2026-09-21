@@ -136,17 +136,118 @@ class TestDocsUseNewLayout:
         for rel in ("README.md", "README.zh-CN.md"):
             t = (REPO_ROOT / rel).read_text(encoding="utf-8")
             assert "~/coco" in t, f"{rel} 未使用新安装目录"
-            # 旧路径只允许出现在"老实例迁移说明"里
-            for line in t.split("\n"):
-                if "~/hermes-agent" in line:
-                    assert "migrate_install_dir" in line or "老实例" in line, f"{rel} 残留旧路径：{line.strip()[:80]}"
+            assert "~/hermes-agent" not in t, f"{rel} 残留旧安装目录（老板要求不写老实例迁移说明）"
 
     def test_equivalent_update_command_uses_new_dir(self):
         for rel in ("README.md", "README.zh-CN.md"):
             t = (REPO_ROOT / rel).read_text(encoding="utf-8")
             assert "git -C ~/coco pull" in t, f"{rel} 的等价更新写法未换到新目录"
 
-    def test_migration_notice_present(self):
+
+
+class TestInstallScriptSymlinkPolicyBehaviour:
+    """真跑一遍 install.sh 里的软链逻辑（属功能级核验，不是看字符串）：
+
+    · 默认（不设 COCO_EXPOSE_HERMES）：清掉指向本安装目录的旧 hermes 软链；
+    · COCO_EXPOSE_HERMES=1：创建 hermes 软链；
+    · 指向别处的同名软链一律不动。
+    """
+
+    def _run_block(self, tmp_path, expose_hermes=None):
+        import os
+
+        src = (REPO_ROOT / "install.sh").read_text(encoding="utf-8").split("\n")
+        start = next(i for i, l in enumerate(src) if l.strip().startswith("# hermes 命令（2026-09-21"))
+        # 到该块的收尾 fi（下一处与 start 同缩进的 fi）
+        indent = len(src[start]) - len(src[start].lstrip())
+        end = next(i for i in range(start + 1, len(src))
+                   if src[i].strip() == "fi" and (len(src[i]) - len(src[i].lstrip())) == indent)
+        block = "\n".join(src[start:end + 1])
+
+        install_dir = tmp_path / "coco-install"
+        (install_dir / "venv" / "bin").mkdir(parents=True)
+        (install_dir / "venv" / "bin" / "hermes").write_text("#!/bin/sh\n", encoding="utf-8")
+        (install_dir / "venv" / "bin" / "hermes").chmod(0o755)
+
+        fake_bin = tmp_path / "usr-local-bin"
+        fake_bin.mkdir()
+        fake_home = tmp_path / "home"
+        (fake_home / ".local" / "bin").mkdir(parents=True)
+        ours = fake_bin / "hermes"
+        ours.symlink_to(install_dir / "venv" / "bin" / "hermes")
+        theirs = fake_bin / "other-hermes"
+        theirs.symlink_to("/bin/true")
+
+        script = tmp_path / "block.sh"
+        script.write_text(
+            "set -uo pipefail\n"
+            'INSTALL_DIR="' + str(install_dir) + '"\n'
+            'HOME="' + str(fake_home) + '"\n'
+            'ok() { echo "  OK $*"; }\n'
+            'warn() { echo "  WARN $*"; }\n'
+            + block.replace("/usr/local/bin/hermes", str(ours)).replace("$HOME/.local/bin/hermes", str(fake_home / ".local" / "bin" / "hermes"))
+            + "\n",
+            encoding="utf-8")
+        env = dict(os.environ)
+        if expose_hermes is not None:
+            env["COCO_EXPOSE_HERMES"] = expose_hermes
+        else:
+            env.pop("COCO_EXPOSE_HERMES", None)
+        r = subprocess.run(["bash", str(script)], capture_output=True, text=True, env=env)
+        return r, ours, theirs
+
+    def test_default_removes_our_symlink(self, tmp_path):
+        r, ours, theirs = self._run_block(tmp_path)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert not ours.is_symlink(), "默认应当清掉我们自己的 hermes 软链"
+        assert theirs.is_symlink(), "指向别处的同名软链不能动"
+
+    def test_expose_flag_creates_symlink(self, tmp_path):
+        r, ours, _ = self._run_block(tmp_path, expose_hermes="1")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert ours.is_symlink(), "COCO_EXPOSE_HERMES=1 时应创建 hermes 软链"
+
+
+class TestSelfLocatingBehaviour:
+    def test_healthcheck_install_dir_follows_file_location(self, tmp_path):
+        import importlib.util
+        import shutil
+
+        fake = tmp_path / "renamed-coco"
+        (fake / "scripts").mkdir(parents=True)
+        shutil.copy(SCRIPTS / "healthcheck.py", fake / "scripts" / "healthcheck.py")
+        spec = importlib.util.spec_from_file_location("hc_fake", fake / "scripts" / "healthcheck.py")
+        mod = importlib.util.module_from_spec(spec)
+        # 只执行到读取常量即可：捕获导入期异常（该模块导入时会定义常量）
+        try:
+            spec.loader.exec_module(mod)
+        except SystemExit:
+            pass
+        assert str(mod.INSTALL_DIR).startswith(str(fake)), f"安装目录未跟随文件位置：{mod.INSTALL_DIR}"
+
+
+class TestDocsCommandsExist:
+    """文档里出现的每个 coco 子命令都必须真实存在（防文档写了不存在的命令）"""
+
+    def test_every_documented_coco_command_exists(self):
+        import re
+
+        coco = (SCRIPTS / "coco.sh").read_text(encoding="utf-8")
+        # 解析 case 分支标签（如 `version|--version|-v|"")`、`model|setup)`），只保留像命令的 token
+        known = set()
+        for group in re.findall(r"^\s{2}([^)\n]+)\)", coco, re.M):
+            for token in group.split("|"):
+                token = token.strip().strip('"')
+                if re.fullmatch(r"[a-z][a-z\-]*", token):
+                    known.add(token)
+        assert {"version", "check", "backup", "update", "uninstall", "model", "setup"} <= known, known
+        assert known, "未从 coco.sh 解析出子命令"
         for rel in ("README.md", "README.zh-CN.md"):
-            t = (REPO_ROOT / rel).read_text(encoding="utf-8")
-            assert "migrate_install_dir.sh" in t, f"{rel} 未说明老实例如何迁移"
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            # 只认"命令位置"的 coco（行首/空白/&&/;/|/反引号之后），避免把 `git -C ~/coco pull` 误判
+            for cmd in set(re.findall(r"(?:^|[\s;&|`])coco\s+([a-z][a-z\-]{2,})", text, re.M)):
+                assert cmd in known, f"{rel} 写了不存在的命令：coco {cmd}（已知：{sorted(known)}）"
+
+    def test_migrate_path_still_available(self):
+        coco = (SCRIPTS / "coco.sh").read_text(encoding="utf-8")
+        assert "migrate-path)" in coco, "迁移入口应在（工具保留；文档不再写老实例迁移说明）"

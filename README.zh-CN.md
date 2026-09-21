@@ -124,8 +124,6 @@ coco restart
 coco update
 ```
 
-> 安装目录：2026-09-21 起为 `~/coco`。老实例（目录仍是 `~/hermes-agent`）先执行 `git -C ~/hermes-agent pull`，再执行 `bash ~/hermes-agent/scripts/migrate_install_dir.sh --yes` 完成搬迁（会停服务重装服务，先加 `--dry-run` 可只看计划）。
-
 > 等价写法（老实例一直可用）：`git -C ~/coco pull && bash ~/coco/scripts/update.sh`
 
 > 更新只用这条命令。**不要用 `install.sh` 更新**（它会重建安装目录，清掉数据库密钥与图片缓存），**也不要直接跑 `hermes update`**（官方更新会重置你手改过的代码）。
