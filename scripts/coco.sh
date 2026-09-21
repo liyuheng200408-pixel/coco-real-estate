@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Coco 命令入口
-#   用法: coco [命令]        （不给参数 = version）
-#   uninstall = 卸载（三档菜单：保留数据 / 清状态 / 彻底清理，输 yes 确认）
-#     version  查看当前版本（默认）
-#     check    部署体检
-#     backup   手动备份数据库
-#     help     帮助
+# Coco 命令入口（一个前缀管到底）
 #
-# 为什么需要它：官方 `hermes --version` 显示的是底座（官方 Hermes）版本，
-# Coco 自己的版本号存在仓库根目录的 VERSION 文件里。本命令负责把它读出来。
+# 命令分三组：
+#   日常运维（我们自己的工具）：version / check / backup / backups / restore / update / uninstall
+#   服务与诊断：                status / logs / start / stop / restart
+#   安装配置（转发官方命令）：  model / setup / gateway / pairing
+#
+# 为什么配置文件里既有 coco 又有 hermes：
+#   `hermes` 是底层框架（Hermes Agent）的官方程序；`coco` 是本项目的封装。
+#   安装配置类动作本质是官方程序的命令，这里用 exec 原样转发 ——
+#   等于"换了个名字的同一个程序"：交互输入、TTY、Ctrl-C、退出码完全一致。
+#   官方 `hermes` 命令仍然可用，我们不删不改。
+#
+# 用法: coco [命令]        （不给参数 = version）
 # =============================================================================
 set -euo pipefail
 
@@ -20,6 +24,8 @@ if command -v readlink >/dev/null 2>&1 && readlink -f "$SELF" >/dev/null 2>&1; t
   SELF="$(readlink -f "$SELF")"
 fi
 REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+VENV_PY="$REPO_ROOT/venv/bin/python"
+HERMES_BIN="$REPO_ROOT/venv/bin/hermes"      # 官方程序：用绝对路径，不依赖 PATH
 COCO_VER="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION" 2>/dev/null || echo "未知")"
 COCO_BASE="${COCO_VER%%-*}"
 COCO_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "未知")"
@@ -27,43 +33,179 @@ COCO_BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || echo "")
 COCO_CHANNEL_LABEL="$(bash "$REPO_ROOT/scripts/coco_channel.sh" label "$COCO_BRANCH" 2>/dev/null || echo "")"
 COCO_TEST_TAG="$(bash "$REPO_ROOT/scripts/coco_channel.sh" test-tag 2>/dev/null || echo "")"
 
+# 转发给官方程序：找不到就明确报错（绝不假装成功）
+run_hermes() {
+  if [[ -x "$HERMES_BIN" ]]; then
+    exec "$HERMES_BIN" "$@"
+  elif command -v hermes >/dev/null 2>&1; then
+    exec hermes "$@"
+  else
+    echo "找不到官方 hermes 程序（期望位置：$HERMES_BIN）" >&2
+    echo "请确认 Coco 已安装：ls ~/hermes-agent/venv/bin/hermes" >&2
+    exit 1
+  fi
+}
+
+# 依赖本地 Python 环境的子命令：缺了就明确报错（不要抛裸的 shell 错误）
+need_venv() {
+  if [[ ! -x "$VENV_PY" ]]; then
+    echo "找不到 Coco 的 Python 环境（$VENV_PY）" >&2
+    echo "请确认已安装：ls ~/hermes-agent/venv/bin/python" >&2
+    exit 1
+  fi
+}
+
+# 危险操作先确认（输 yes）
+confirm_yes() {   # $1=提示
+  printf "%s\nType 'yes' to confirm: " "$1"
+  local answer=""
+  read -r answer || answer=""
+  if [[ "$(echo "${answer:-}" | tr -d '[:space:]' | tr 'A-Z' 'a-z')" != "yes" ]]; then
+    echo "已取消，未做任何修改。"
+    exit 0
+  fi
+}
+
 case "${1:-version}" in
+  # ---------- 日常运维 ----------
   version|--version|-v|"")
     echo "Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）· 提交 ${COCO_COMMIT}${COCO_CHANNEL_LABEL:+ · ${COCO_CHANNEL_LABEL}}${COCO_TEST_TAG:+ · 测试号 ${COCO_TEST_TAG}}"
     ;;
   check)
-    exec "$REPO_ROOT/venv/bin/python" "$REPO_ROOT/scripts/healthcheck.py"
+    shift
+    need_venv
+    exec "$VENV_PY" "$REPO_ROOT/scripts/healthcheck.py" "$@"
     ;;
   backup)
-    exec "$REPO_ROOT/venv/bin/python" "$REPO_ROOT/scripts/backup_db.py" backup
+    shift
+    need_venv
+    exec "$VENV_PY" "$REPO_ROOT/scripts/backup_db.py" backup "$@"
+    ;;
+  backups)
+    need_venv
+    exec "$VENV_PY" "$REPO_ROOT/scripts/backup_db.py" list
+    ;;
+  restore)
+    shift
+    R_FILE=""; R_MIGRATION=""; R_YES=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --file|-f) R_FILE="${2:-}"; shift 2 ;;
+        --migration|-m) R_MIGRATION="${2:-}"; shift 2 ;;
+        --yes|-y) R_YES=1; shift ;;
+        *) echo "未知参数: $1" >&2
+           echo "用法: coco restore --file <数据库备份.dump>   或   coco restore --migration <迁移包.tar.gz>" >&2
+           exit 1 ;;
+      esac
+    done
+    if [[ -z "$R_FILE" && -z "$R_MIGRATION" ]]; then
+      echo "用法: coco restore --file <数据库备份.dump>   或   coco restore --migration <迁移包.tar.gz>" >&2
+      echo "备份文件名可用 coco backups 查看。" >&2
+      exit 1
+    fi
+    if [[ "$R_YES" != "1" ]]; then
+      echo "恢复会覆盖当前数据库，建议先执行 coco backup 留一份还原点。"
+      confirm_yes "确认恢复？"
+    fi
+    need_venv
+    if [[ -n "$R_MIGRATION" ]]; then
+      exec "$VENV_PY" "$REPO_ROOT/scripts/backup_db.py" restore_migration --migration-tar "$R_MIGRATION"
+    else
+      exec "$VENV_PY" "$REPO_ROOT/scripts/backup_db.py" restore --restore-file "$R_FILE"
+    fi
+    ;;
+  update)
+    shift
+    if [[ -f "$REPO_ROOT/scripts/update.sh" ]]; then
+      exec bash "$REPO_ROOT/scripts/update.sh" "$@"
+    fi
+    echo "找不到更新脚本（$REPO_ROOT/scripts/update.sh）" >&2
+    echo "请改用：git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh" >&2
+    exit 1
     ;;
   uninstall)
     shift
     exec bash "$REPO_ROOT/scripts/uninstall.sh" "$@"
     ;;
+
+  # ---------- 服务与诊断 ----------
+  status)
+    if [[ -x "$HERMES_BIN" ]] || command -v hermes >/dev/null 2>&1; then
+      run_hermes gateway status
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+      exec systemctl --user status hermes-gateway --no-pager
+    fi
+    echo "本机既没有 hermes 命令也没有 systemctl，无法查看服务状态。" >&2
+    exit 1
+    ;;
+  logs)
+    shift
+    LINES="${1:-50}"
+    if command -v journalctl >/dev/null 2>&1; then
+      exec journalctl --user -u hermes-gateway -n "$LINES" --no-pager
+    fi
+    echo "本机没有 journalctl，无法读取日志。" >&2
+    exit 1
+    ;;
+  start|stop|restart)
+    run_hermes gateway "$1"
+    ;;
+
+  # ---------- 安装配置（转发官方命令） ----------
+  model|setup)
+    run_hermes "$1"
+    ;;
+  gateway)
+    shift
+    run_hermes gateway "$@"
+    ;;
+  pairing)
+    shift
+    run_hermes pairing "$@"
+    ;;
+
+  # ---------- 帮助 ----------
   help|--help|-h)
     cat <<EOF
 Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）
 
 用法: coco <命令>
-  version  查看版本号（默认）
-  check    部署体检（服务/依赖/数据库/密钥/备份/日志等）
-  backup   手动备份数据库
-  uninstall  卸载 Coco（一条命令 → 三档菜单 → 输 yes 确认）
-             1/2 档会在动手前自动备份数据库与加密密钥，并给出备份包路径与下载命令
-  help     显示本帮助
 
-更新到最新版:
-  git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
-  （更新只跑这条。不要用 install.sh 更新：它会重建安装目录、清掉数据库密钥与图片缓存；
-    也不要直接跑 hermes update：官方更新会重置你手改过的代码。你的本地代码改动会被自动备份。）
+日常运维:
+  version    查看版本号（默认）
+  check      部署体检（服务/依赖/数据库/密钥/备份/日志等）
+  backup     手动备份数据库（coco backup --force 强制备份）
+  backups    查看备份列表
+  restore    恢复数据：coco restore --file <备份.dump> / --migration <迁移包.tar.gz>
+  update     更新到最新版（内部即完整更新流程：备份 → 拉代码 → 依赖 → 迁移 → 重启 → 体检）
+  uninstall  卸载 Coco（三档菜单 + 输 yes 确认；1/2 档会先自动备份，3 档不备份）
 
-说明: Coco 版本号存在 $REPO_ROOT/VERSION；官方 \`hermes --version\` 显示的是底座版本。
+服务与诊断:
+  status     服务状态        （等价于 hermes gateway status）
+  logs       查看日志，默认最近 50 行（coco logs 200）
+  start      启动服务        （等价于 hermes gateway start）
+  restart    重启服务        （等价于 hermes gateway restart）
+  stop       停止服务        （等价于 hermes gateway stop）
+
+安装配置（等价于官方 hermes 同名命令）:
+  model      选择模型 / 填 API Key     （hermes model）
+  setup      配置向导（飞书等）        （hermes setup）
+  gateway    服务安装等：coco gateway install
+  pairing    飞书配对批准：coco pairing approve feishu <配对码>
+
+  help       显示本帮助
+
+说明:
+  · 官方 hermes 命令仍然可用；coco 是日常使用的封装，两者对同一套程序生效。
+  · 版本号存在 $REPO_ROOT/VERSION；官方 hermes --version 显示的是底层框架版本。
+  · 更新也可以用：git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
+    （不要用 install.sh 更新：它会重建安装目录、清掉数据库密钥与图片缓存。）
 EOF
     ;;
   *)
     echo "未知命令: $1" >&2
-    echo "用法: coco [version|check|backup|uninstall|help]" >&2
+    echo "用法: coco help" >&2
     exit 1
     ;;
 esac

@@ -31,7 +31,8 @@ from typing import Optional
 REFUSAL_MESSAGE = (
     "【更新需要你在服务器终端执行】为了不打断我们当前的对话、并确保数据库迁移完整跑完，"
     "更新命令请你自己在服务器上执行：\n"
-    "  bash ~/hermes-agent/scripts/update.sh\n"
+    "  coco update\n"
+    "（等价写法：git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh）\n"
     "（我这边执行会重启网关服务，把我们的对话一起中断；官方 `hermes update` 也不要使用："
     "它不会跑 Coco 的数据库迁移，还可能覆盖你手改过的代码。）"
 )
@@ -44,6 +45,10 @@ _UPDATE_PATTERNS = (
     re.compile(r"""(?:^|[\s;&|(`])(?:sudo\s+)?(?:bash|sh|source|\.)\s+\S*scripts/update\.sh\b""", re.I),
     re.compile(r"""(?:^|[\s;&|(`])(?:sudo\s+)?\S*scripts/update\.sh\b""", re.I),   # 直接执行 update.sh
     re.compile(r"systemctl\s+(?:-\S+\s+)*(?:restart|stop|start)\b[^\n]*\bhermes[.\-]?gateway", re.I),
+    # coco 侧的写操作（2026-09-21 加）：coco 有了这些命令后，不拦就能绕过上面所有规则
+    re.compile(r"(?<![\w.\-/])coco\s+(?:update|start|stop|restart|uninstall|restore)\b", re.I),
+    re.compile(r"(?<![\w.\-/])coco\s+gateway\s+(?:install|start|stop|restart|uninstall)\b", re.I),
+    re.compile(r"(?<![\w.\-/])coco\s+(?:model|setup|pairing)\b", re.I),   # 配置类要人工交互，别在会话里跑
     # 直接在我们的安装目录里做 git 变更（会造成"跑着的代码"与磁盘代码错位）
     re.compile(r"git\s+(?:-C\s+\S*(?:hermes-agent|coco-real-estate)\S*\s+)?(?:pull|checkout|reset|clean|stash)\b", re.I),
 )

@@ -216,6 +216,13 @@ CONTENT_CHECKS = [
         "同第 12 项：前置检查与查库模板都用自定位写法（查库用 `export $(grep DATABASE_URL ~/hermes-agent/.env.db)` 或一次性取值）。",
     ),
     (
+        "B02",
+        "coco 转发组",
+        "scripts/coco.sh",
+        [r"run_hermes", r"gateway\s+\"\$@\"", r"pairing"],
+        "coco 缺少安装配置转发组（coco model/setup/gateway/pairing 会失效）。",
+    ),
+    (
         "B01",
         "安装默认通道",
         "install.sh",

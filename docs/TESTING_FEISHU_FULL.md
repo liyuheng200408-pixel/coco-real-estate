@@ -5,9 +5,9 @@
 ## 前置检查（服务器）
 
 ```bash
-git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh   # 更新到最新版并重启服务
+coco update   # 更新到最新版并重启服务
 git -C ~/hermes-agent log --oneline -1                                # 确认版本
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/healthcheck.py  # 预期 FAIL 0
+coco check  # 预期 FAIL 0
 ~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/smoke_test_real_estate.py  # 预期零崩溃
 ```
 

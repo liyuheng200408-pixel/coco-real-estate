@@ -91,19 +91,19 @@ coco version
 **3. 配置模型**。你需要一个 API Key（DeepSeek API Key 购买：[https://platform.deepseek.com/usage](https://platform.deepseek.com/usage)）：
 
 ```bash
-hermes model
+coco model
 ```
 
 **4. 配置飞书**（飞书开放平台：[https://open.feishu.cn/?lang=zh-CN](https://open.feishu.cn/?lang=zh-CN)）：
 
 ```bash
-hermes setup
+coco setup
 ```
 
 **5. 重启服务**：
 
 ```bash
-hermes gateway restart
+coco restart
 ```
 
 ### 第三步：测试智能体
@@ -112,7 +112,7 @@ hermes gateway restart
 
 **2. 发送一条消息**（如"你好"）
 
-**3. 智能体会回复配对码**，在终端执行批准：`hermes pairing approve feishu <配对码>`
+**3. 智能体会回复配对码**，在终端执行批准：`coco pairing approve feishu <配对码>`
 
 **4. 批准后再发消息**，智能体应该正常回复
 
@@ -123,8 +123,10 @@ hermes gateway restart
 使用单条命令更新至最新版本：
 
 ```bash
-git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
+coco update
 ```
+
+> 等价写法（老实例一直可用）：`git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh`
 
 > 更新只用这条命令。**不要用 `install.sh` 更新**（它会重建安装目录，清掉数据库密钥与图片缓存），**也不要直接跑 `hermes update`**（官方更新会重置你手改过的代码）。
 
@@ -146,29 +148,31 @@ coco help        # 查看全部可用命令（version / check / backup）
 
 **启动服务：**
 ```bash
-hermes gateway start
+coco start
 ```
 
 **停止服务：**
 ```bash
-hermes gateway stop
+coco stop
 ```
 
 **重启服务：**
 ```bash
-hermes gateway restart
+coco restart
 ```
 
 **查看状态：**
 ```bash
-hermes gateway status
+coco status
 ```
 
 **查看日志（最近 50 行）：**
 ```bash
-journalctl --user -u hermes-gateway -n 50 --no-pager
+coco logs
 ```
 
+
+> 命令说明：`coco` 是 Coco 的命令入口，覆盖日常运维与安装配置；其中 `coco model` / `coco setup` / `coco gateway` / `coco pairing` 等价于底层框架的 `hermes` 同名命令（`hermes` 命令仍然可以直接使用）。
 ### 数据库备份
 
 每日凌晨 2 点自动备份至 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。
@@ -177,17 +181,17 @@ journalctl --user -u hermes-gateway -n 50 --no-pager
 
 **手动备份：**
 ```bash
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py backup
+coco backup
 ```
 
 **查看备份列表：**
 ```bash
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py list
+coco backups
 ```
 
 **恢复备份：**
 ```bash
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
+coco restore --file real_estate_20260101_020000.dump
 ```
 
 ### 服务器迁移
@@ -203,12 +207,12 @@ journalctl --user -u hermes-gateway -n 50 --no-pager
 
 **拷贝到新服务器后一键恢复：**
 ```bash
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+coco restore --migration /root/coco_migration.tar.gz
 ```
 
 **重启服务（发"你好"即完成迁移）：**
 ```bash
-hermes gateway restart
+coco restart
 ```
 
 > 顺序说明：自动恢复数据库 → 图片 → 加密密钥（enc_key.txt 合并进 .env.db），任一步失败即中止并提示。密钥必须先于服务启动恢复，否则旧数据无法解密。
@@ -235,12 +239,12 @@ scp <用户名>@<服务器IP>:~/coco_backup_*.tar.gz ~/Desktop/
 
 ```bash
 # 从某个数据库备份恢复（备份文件名用上面的 ls 查看）
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore --restore-file real_estate_20260101_020000.dump
+coco restore --file real_estate_20260101_020000.dump
 
 # 从整机迁移包恢复（数据库 + 图片 + 加密密钥，顺序为数据库 → 图片 → 密钥）
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+coco restore --migration /root/coco_migration.tar.gz
 
-hermes gateway restart            # 恢复后重启服务
+coco restart            # 恢复后重启服务
 coco check                        # 体检核对（数据库 / 密钥 / 备份新鲜度）
 ```
 
@@ -261,7 +265,7 @@ coco uninstall                    # 选择卸载程度（1 保留数据 / 2 卸�
 
 **备份数据库（强制）：**
 ```bash
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py backup --force
+coco backup --force
 ```
 
 **确认备份文件齐全：**
@@ -298,18 +302,18 @@ scp ~/Desktop/coco_migration.tar.gz root@服务器IP:/root/
 
 **执行数据恢复：**
 ```bash
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/backup_db.py restore_migration --migration-tar /root/coco_migration.tar.gz
+coco restore --migration /root/coco_migration.tar.gz
 ```
 
 **重启服务：**
 ```bash
-hermes gateway restart
+coco restart
 ```
 
 **第 5 步：验证**
 
 ```bash
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/healthcheck.py
+coco check
 ```
 
 预期：数据库/密钥/备份新鲜度全部 PASS；在飞书给 Coco 发"看下房源统计"，数据完整返回（房源/客户/成交都在，品牌名保留）。
@@ -375,17 +379,17 @@ sudo systemctl start postgresql
 
 **查看服务状态：**
 ```bash
-hermes gateway status
+coco status
 ```
 
 **查看日志（最近 50 行）：**
 ```bash
-journalctl --user -u hermes-gateway -n 50 --no-pager
+coco logs
 ```
 
 ### 飞书消息收不到
 
-1. 检查 App ID / App Secret 是否正确（`hermes setup` 重新配置）
+1. 检查 App ID / App Secret 是否正确（`coco setup` 重新配置）
 2. 确认飞书应用已发布
 3. 确认事件订阅配置正确
 

@@ -90,3 +90,33 @@ def test_wired_into_terminal_tool_pre_exec_block():
     assert hasattr(terminal_tool, "coco_update_block"), "terminal_tool 未导入更新拦截守卫"
     assert terminal_tool.coco_update_block is coco_update_block
     assert terminal_tool.coco_update_block(command="hermes update") is not None
+
+
+class TestCocoWriteCommandsBlocked:
+    """coco 有了写操作命令后，守卫必须同步覆盖 —— 否则 Coco 可以绕过守卫
+    （`coco restart` 重启网关把自己与对话一起打断；`coco uninstall` 会删掉自己；
+    `coco restore` 会覆盖数据库）。只读命令要放行。"""
+
+    BLOCKED = ["coco update", "coco start", "coco stop", "coco restart", "coco uninstall",
+               "coco restore --file x.dump", "coco restore --migration /root/m.tar.gz",
+               "coco gateway install", "coco gateway restart", "coco model", "coco setup",
+               "coco pairing approve feishu 1234"]
+    ALLOWED = ["coco version", "coco help", "coco check", "coco status", "coco logs",
+               "coco logs 200", "coco backup", "coco backups"]
+
+    def test_write_commands_are_blocked(self):
+        from tools.real_estate_update_guard import is_update_command
+
+        for cmd in self.BLOCKED:
+            assert is_update_command(cmd), f"应当拦截：{cmd}"
+
+    def test_readonly_commands_are_allowed(self):
+        from tools.real_estate_update_guard import is_update_command
+
+        for cmd in self.ALLOWED:
+            assert not is_update_command(cmd), f"不该拦截：{cmd}"
+
+    def test_refusal_message_recommends_coco_update(self):
+        from tools.real_estate_update_guard import REFUSAL_MESSAGE
+
+        assert "coco update" in REFUSAL_MESSAGE, REFUSAL_MESSAGE
