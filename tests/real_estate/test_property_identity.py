@@ -140,32 +140,48 @@ def test_deduplicate_tool_reports_and_cleans(db, monkeypatch):
     assert db.get_stats().get("available_properties", 0) == 1
 
 
-def test_cleanup_protects_owner_info(db, monkeypatch):
-    """保守规则：重复项带业主信息、而保留项没有 → 跳过并写明原因（留着人工拍板）"""
+def test_keeper_prefers_owner_record(db, monkeypatch):
+    """带业主信息的那条优先保留，光版那条被删（优先级 + 保护规则共同作用的结果）"""
     import tools.real_estate_property as t
     monkeypatch.setattr(t, "_get_db", lambda: db)
-    make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0)
-    dup = make_property(db, title=NEW_TITLE, area=128.5)
-    db.link_owner_to_property(dup["id"], name="陈志强", phone="13800000000")
+    plain = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0)
+    owned = make_property(db, title=NEW_TITLE, area=128.5)
+    db.link_owner_to_property(owned["id"], name="陈志强", phone="13800000000")
 
     out = json.loads(t.deduplicate_properties(dry_run=False))
-    assert out["result"]["removable"] == [], out
-    assert out["result"]["skipped"][0]["id"] == dup["id"]
-    assert "业主" in out["result"]["skipped"][0]["reason"]
-    assert db.get_stats().get("available_properties", 0) == 2, "被保护的重复项不得被删"
+    assert out["result"]["groups"][0]["keep_id"] == owned["id"], out["result"]
+    assert out["result"]["removable"] == [plain["id"]], out["result"]
+    assert db.get_property(owned["id"]) is not None
 
 
-def test_cleanup_protects_images(db, monkeypatch):
-    """保守规则：重复项带图片、而保留项没有 → 同样跳过"""
+def test_keeper_prefers_record_with_images(db, monkeypatch):
+    """带图片的那条优先保留"""
     import tools.real_estate_property as t
     monkeypatch.setattr(t, "_get_db", lambda: db)
-    make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0)
-    dup = make_property(db, title=NEW_TITLE, area=128.5, images="/tmp/a.jpg")
+    plain = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0)
+    with_img = make_property(db, title=NEW_TITLE, area=128.5, images="/tmp/a.jpg")
 
     out = json.loads(t.deduplicate_properties(dry_run=False))
-    assert out["result"]["removable"] == [], out
-    assert "图片" in out["result"]["skipped"][0]["reason"]
-    assert db.get_stats().get("available_properties", 0) == 2
+    assert out["result"]["groups"][0]["keep_id"] == with_img["id"], out["result"]
+    assert out["result"]["removable"] == [plain["id"]]
+
+
+def test_protection_skips_when_drop_carries_the_only_owner(db, monkeypatch):
+    """被删项带业主、保留项没有（保留项靠"在售"胜出）→ 不合并时跳过，开 merge 才并进保留项"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    sold_with_owner = make_property(db, title=NEW_TITLE, area=128.0, status="sold")
+    db.link_owner_to_property(sold_with_owner["id"], name="陈志强", phone="13800000000")
+    live_plain = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0, status="available")
+
+    no_merge = json.loads(t.deduplicate_properties(dry_run=True))
+    skipped = no_merge["result"]["skipped"]
+    assert skipped and skipped[0]["id"] == sold_with_owner["id"], no_merge["result"]
+    assert "合并" in skipped[0]["reason"]
+
+    with_merge = json.loads(t.deduplicate_properties(dry_run=False, merge=True))
+    assert with_merge["result"]["removable"] == [sold_with_owner["id"]], with_merge["result"]
+    assert db.get_property(live_plain["id"])["owner_id"], "业主关联应并到在售那条上"
 
 
 def test_cleanup_still_removes_plain_duplicate(db, monkeypatch):
@@ -253,3 +269,93 @@ def test_real_library_duplicate_groups_are_found(db):
     assert len(groups) == 2, groups
     assert frozenset({ids[REAL_LIBRARY[0][0]], ids[REAL_LIBRARY[1][0]]}) in groups
     assert frozenset({ids[REAL_LIBRARY[2][0]], ids[REAL_LIBRARY[3][0]]}) in groups
+
+
+# ---------- 合并式去重（2026-09-21：保留项优先级 + 合并后再删）----------
+def test_keeper_prefers_available_over_sold(db):
+    """保留项优先级：在售 > 已售（老板实测第 3 组踩到"留了已售那条"）"""
+    sold = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0, status="sold")
+    live = make_property(db, title=NEW_TITLE, area=128.0, status="available")
+
+    out = db.remove_duplicate_properties(dry_run=True)
+    assert out["groups"][0]["keep_id"] == live["id"], out["groups"]
+    assert out["groups"][0]["duplicate_ids"] == [sold["id"]]
+
+
+def test_keeper_prefers_richer_when_same_status(db):
+    """同级比信息完整度：带业主/图片/朝向的那条优先（哪怕 id 更大）"""
+    thin = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0)
+    rich = make_property(db, title=NEW_TITLE, area=128.0, orientation="南", images="/tmp/a.jpg")
+    db.link_owner_to_property(rich["id"], name="陈志强", phone="13800000000")
+
+    out = db.remove_duplicate_properties(dry_run=True)
+    assert out["groups"][0]["keep_id"] == rich["id"], out["groups"]
+
+
+def test_merge_moves_unique_info_then_deletes(db, monkeypatch):
+    """选①合并：保留项靠业主/图片胜出，被删那条的独有字段（朝向/卫数/租客要求）并过去再删"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    keep = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0, images="/tmp/k.jpg")
+    db.link_owner_to_property(keep["id"], name="陈志强", phone="13800000000")
+    drop = make_property(db, title=NEW_TITLE, area=128.0, orientation="南",
+                         tenant_requirements="拎包入住", bathrooms=1)
+
+    dry = json.loads(t.deduplicate_properties(dry_run=True))
+    group = dry["result"]["groups"][0]
+    assert group["keep_id"] == keep["id"], group
+    plan = group["merge_plan"]
+    assert plan and plan[0]["id"] == drop["id"], plan
+    assert {"orientation", "tenant_requirements", "bathrooms"} <= set(plan[0]["unique"]), plan
+
+    done = json.loads(t.deduplicate_properties(dry_run=False, merge=True))
+    assert done["result"]["merged_count"] == 1, done["result"]
+    assert done["result"]["removable"] == [drop["id"]]
+
+    after = db.get_property(keep["id"])
+    assert after["orientation"] == "南", after          # 独有字段补过来了
+    assert after["tenant_requirements"] == "拎包入住", after
+    assert after["bathrooms"] == 1, after
+    assert (after.get("images") or "").strip(), after    # 自己的图片还在
+    assert db.get_property(drop["id"]) is None, "被删项应已删除"
+
+
+def test_merge_keeps_existing_values(db):
+    """合并是"只补空缺、不覆盖"：保留项已有的装修值不能被被删项的旧值冲掉"""
+    keep = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0, renovation="精装")
+    drop = make_property(db, title=NEW_TITLE, area=128.0, renovation="毛坯", orientation="南")
+
+    info = db.merge_duplicate_property(keep_id=keep["id"], drop_id=drop["id"], dry_run=False)
+    assert info.get("error") is None, info
+    after = db.get_property(keep["id"])
+    assert after["renovation"] == "精装", after        # 没被覆盖
+    assert after["orientation"] == "南", after         # 空缺的补上了
+
+
+def test_update_property_fill_missing_only(db, monkeypatch):
+    """录入命中 ② 只补空缺：库里已有值的字段一律不动，并在返回里说明"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    p = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0, renovation="精装")
+
+    out = json.loads(t.update_property(property_id=p["id"], renovation="豪装", orientation="南",
+                                       tags="地铁房", fill_missing_only=True))
+    assert out["success"] is True, out
+    assert out["property"]["renovation"] == "精装"          # 库里已有 → 不动
+    assert out["property"]["orientation"] == "南"           # 空缺 → 补上
+    assert "renovation" in out["kept_existing"], out         # 回显没动的字段
+
+
+def test_add_property_duplicate_returns_merge_preview(db, monkeypatch):
+    """录入命中重复：返回 merge_preview（库里独有/这次不同）+ 三档选项"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0, renovation="精装", orientation="南")
+
+    out = json.loads(t.add_property(title=NEW_TITLE, price=2_150_000, area=128.0, renovation="豪装"))
+    assert out["duplicate"] is True, out
+    preview = out["merge_preview"]
+    assert "朝向" in preview["will_keep"], preview          # 库里独有 → 会保留
+    assert preview["will_update"].get("装修"), preview       # 这次与库里不同 → 建议更新
+    assert len(out["options"]) == 3, out["options"]
+    assert "fill_missing_only" in out["error"], out["error"]

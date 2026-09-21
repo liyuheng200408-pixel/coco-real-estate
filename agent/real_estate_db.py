@@ -192,6 +192,49 @@ def suspected_same_property_identity(a, b):
     return community_relation(a["community"], b["community"]) == "same"
 
 
+# ==================== 合并式去重（2026-09-21 加） ====================
+# 去重不只会"删多余那条"：被删项常有保留项没有的信息（业主/图片/租客要求/朝向…）。
+# 合并时**只补空缺、绝不覆盖**（两边都是历史数据，互相冲会丢信息）。
+_PROPERTY_MERGE_FIELDS = (
+    "community", "district", "address", "rooms", "halls", "bathrooms", "floor",
+    "orientation", "renovation", "year_built", "has_elevator", "parking",
+    "tenant_requirements", "viewing_note", "defect_tags",
+)
+
+
+def _is_blank(v):
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return not v.strip()
+    if isinstance(v, (int, float)):
+        return v == 0
+    return False
+
+
+def _property_richness(p):
+    """信息完整度打分：挑保留项时"信息最全"用的（业主/图片/租客要求权重更高）"""
+    score = 0
+    if getattr(p, "owner_id", None):
+        score += 3
+    if (getattr(p, "images", "") or "").strip():
+        score += 2
+    if (getattr(p, "tenant_requirements", "") or "").strip():
+        score += 2
+    for f in _PROPERTY_MERGE_FIELDS:
+        if not _is_blank(getattr(p, f, None)):
+            score += 1
+    return score
+
+
+def _extra_csv_items(keep_value, drop_value):
+    """drop 比 keep 多出来的逗号分隔项（图片/标签用），返回逗号串或空串"""
+    keep_items = [x.strip() for x in (keep_value or "").split(",") if x.strip()]
+    drop_items = [x.strip() for x in (drop_value or "").split(",") if x.strip()]
+    extra = [x for x in drop_items if x not in keep_items]
+    return ",".join(extra)
+
+
 # ==================== 数据模型 ====================
 
 class Customer(Base):
@@ -1372,46 +1415,139 @@ class RealEstateDB:
             groups.setdefault(find(pid), []).append(pid)
         return [sorted(v) for v in groups.values() if len(v) > 1]
 
-    def remove_duplicate_properties(self, dry_run=True):
-        """去重：每组保留最早 id，删除其余（有牵挂的一律跳过，保守处理）
+    def remove_duplicate_properties(self, dry_run=True, keep=None, keep_id=None, merge=False):
+        """去重：每组挑出保留项、其余删除；merge=True 时先把独有信息并到保留项再删
 
-        dry_run=True 只统计不删除；返回 removable 列表供确认。
-        跳过（需人工拍板）：有关联带看/成交/跟进、带着业主或图片而保留项没有。
+        保留项优先级（老板 2026-09-21 定）：**在售 > 在租 > 已售**，同级比信息完整度
+        （业主/图片/租客要求权重更高），再同级取最早 id。
+        keep='richest' 只按信息完整度挑、'earliest' 退回旧行为（最早 id）。
+        keep_id 直接点名某组保留哪条（该组不用优先级）。
+        merge=True 先把被删项的独有字段补到保留项（**只补空缺、绝不覆盖**），再删除。
+        跳过（需人工拍板）：有关联带看/成交/跟进；带业主/图片而保留项没有且未开 merge。
         """
         dups = self.find_duplicate_properties()
-        removed, skipped = [], []
+        removed, skipped, merged_log = [], [], []
+        groups_detail = []
+        self._dedup_merge_total = 0
         with self.get_session() as s:
             for group in dups:
-                keep = s.query(Property).get(group[0])
-                for dup_id in group[1:]:
+                keeper_id = self._pick_keeper_id(s, group, keep=keep, keep_id=keep_id)
+                keep_row = s.query(Property).get(keeper_id)
+                plan_entries = []
+                for dup_id in group:
+                    if dup_id == keeper_id:
+                        continue
                     dup = s.query(Property).get(dup_id)
-                    reason = self._dedup_skip_reason(s, keep, dup, dup_id)
+                    plan = self.merge_plan(keep_row, dup) if (keep_row is not None and dup is not None) else {}
+                    if plan:
+                        plan_entries.append({'id': dup_id, 'title': dup.title, 'unique': plan})
+                    reason = self._dedup_skip_reason(s, keep_row, dup, dup_id, merge=merge)
                     if reason:
                         skipped.append({'id': dup_id, 'reason': reason})
                         continue
+                    if merge and dup is not None and keep_row is not None:
+                        info = self._apply_merge(s, keep_row, dup)
+                        merged_log.append({'keep_id': keeper_id, 'drop_id': dup_id, **info})
                     if not dry_run and dup is not None:
                         s.delete(dup)
                     removed.append(dup_id)
+                groups_detail.append({
+                    'keep_id': keeper_id, 'keep_title': keep_row.title if keep_row else None,
+                    'keep_status': getattr(keep_row, 'status', None),
+                    'duplicate_ids': [i for i in group if i != keeper_id],
+                    'merge_plan': plan_entries,
+                })
             if not dry_run:
                 s.commit()
-        groups_detail = []
-        with self.get_session() as s:
-            for group in dups:
-                keep = s.query(Property).get(group[0])
-                groups_detail.append({
-                    'keep_id': group[0], 'keep_title': keep.title if keep else None,
-                    'duplicate_ids': group[1:],
-                })
+            keep_titles = {g['keep_id']: g['keep_title'] for g in groups_detail}
+            for entry in merged_log:
+                entry['keep_title'] = keep_titles.get(entry['keep_id'])
         return {
             'duplicate_groups': len(dups),
             'duplicate_total': sum(len(g) - 1 for g in dups),
             'groups': groups_detail,
-            'removable': removed, 'skipped': skipped,
+            'removable': removed, 'skipped': skipped, 'merged': merged_log,
+            'merged_count': len(merged_log), 'merge': merge, 'keep': keep or 'available',
             'dry_run': dry_run,
         }
 
+    _STATUS_RANK = {'available': 0, 'rented': 1, 'sold': 2}
+
+    def _pick_keeper_id(self, s, group, keep=None, keep_id=None):
+        """在一组重复房源里挑保留项：在售 > 在租 > 已售 → 信息完整度 → 最早 id"""
+        if keep_id is not None and keep_id in group:
+            return keep_id
+        rows = [r for r in (s.query(Property).get(i) for i in group) if r is not None]
+        if not rows:
+            return group[0]
+        if keep == 'earliest':
+            return min(r.id for r in rows)
+        if keep == 'richest':
+            return sorted(rows, key=lambda p: (-_property_richness(p), p.id))[0].id
+        return sorted(rows, key=lambda p: (
+            self._STATUS_RANK.get(p.status or '', 3), -_property_richness(p), p.id))[0].id
+
     @staticmethod
-    def _dedup_skip_reason(s, keep, dup, dup_id):
+    def merge_plan(keep, drop):
+        """被删那条有哪些「保留项没有」的独有信息（dry_run 展示 + 决定要不要合并）"""
+        if keep is None or drop is None:
+            return {}
+        unique = {}
+        for f in _PROPERTY_MERGE_FIELDS:
+            if _is_blank(getattr(keep, f, None)) and not _is_blank(getattr(drop, f, None)):
+                unique[f] = getattr(drop, f)
+        if not getattr(keep, 'owner_id', None) and getattr(drop, 'owner_id', None):
+            unique['owner'] = f'业主（owner_id={drop.owner_id}）'
+        images = _extra_csv_items(keep.images, drop.images)
+        if images:
+            unique['images'] = images
+        tags = _extra_csv_items(keep.tags, drop.tags)
+        if tags:
+            unique['tags'] = tags
+        return unique
+
+    @staticmethod
+    def _apply_merge(s, keep, drop):
+        """把 drop 的独有信息并到 keep（只补空缺、不覆盖），返回本次并了什么"""
+        merged, images_added, owner_moved = {}, 0, False
+        for f in _PROPERTY_MERGE_FIELDS:
+            if _is_blank(getattr(keep, f, None)) and not _is_blank(getattr(drop, f, None)):
+                merged[f] = getattr(drop, f)
+                setattr(keep, f, getattr(drop, f))
+        if not getattr(keep, 'owner_id', None) and getattr(drop, 'owner_id', None):
+            keep.owner_id = drop.owner_id
+            owner_moved = True
+        images = _extra_csv_items(keep.images, drop.images)
+        if images:
+            keep.images = ','.join([x for x in (keep.images or '').split(',') if x.strip()] + images.split(','))
+            merged['images'] = images
+            images_added = len(images.split(','))
+        tags = _extra_csv_items(keep.tags, drop.tags)
+        if tags:
+            keep.tags = ','.join([x for x in (keep.tags or '').split(',') if x.strip()] + tags.split(','))
+            merged['tags'] = tags
+        return {'merged': merged, 'images_added': images_added, 'owner_moved': owner_moved}
+
+    def merge_duplicate_property(self, keep_id, drop_id, dry_run=True):
+        """把 drop 的独有信息并到 keep（只补空缺、不覆盖）并删除 drop；dry_run=True 只预演"""
+        with self.get_session() as s:
+            keep = s.query(Property).get(keep_id)
+            drop = s.query(Property).get(drop_id)
+            if keep is None or drop is None:
+                return {'error': f'房源不存在（keep_id={keep_id} drop_id={drop_id}）'}
+            reason = self._dedup_skip_reason(s, keep, drop, drop_id, merge=True)
+            if reason:
+                return {'error': f'不能自动合并删除：{reason}'}
+            info = self.merge_plan(keep, drop)
+            if dry_run:
+                return {'keep_id': keep_id, 'drop_id': drop_id, 'would_merge': info, 'dry_run': True}
+            applied = self._apply_merge(s, keep, drop)
+            s.delete(drop)
+            s.commit()
+            return {'keep_id': keep_id, 'keep_title': keep.title, 'drop_id': drop_id, **applied, 'dry_run': False}
+
+    @staticmethod
+    def _dedup_skip_reason(s, keep, dup, dup_id, merge=False):
         """自动清理前必须跳过的理由（None = 可以删）：有牵挂的留给人工，宁可留着不误删"""
         if dup is None:
             return '记录已不存在'
@@ -1419,12 +1555,12 @@ class RealEstateDB:
                    + s.query(Followup).filter(Followup.property_id == dup_id).count()
                    + s.query(Viewing).filter(Viewing.property_id == dup_id).count())
         if related:
-            return '有关联带看/成交/跟进记录'
-        if keep is not None:
+            return '有关联带看/成交/跟进记录（需人工处理）'
+        if keep is not None and not merge:
             if getattr(dup, 'owner_id', None) and not getattr(keep, 'owner_id', None):
-                return f'带着业主信息，而保留的 id={keep.id} 没有 → 需人工确认保留哪条'
-            if (dup.images or '').strip() and not (keep.images or '').strip():
-                return f'带房源图片，而保留的 id={keep.id} 没有 → 需人工确认保留哪条'
+                return f'带着业主信息，而保留的 id={keep.id} 没有 → 先合并再删（merge=true）或人工确认'
+            if _extra_csv_items(keep.images, dup.images):
+                return f'带房源图片，而保留的 id={keep.id} 没有 → 先合并再删（merge=true）或人工确认'
         return None
 
     def match_customers_for_property(self, property_id, top_n=5):
