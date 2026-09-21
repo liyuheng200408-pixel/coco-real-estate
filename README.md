@@ -1,6 +1,6 @@
 # Coco（可可）房产智能体
 
-> Coco（可可） 是一个开源房产项目。它不是简单的聊天机器人，而是一套专为房产中介打造的"第二大脑"：自动管理客户、智能匹配房源、主动跟进提醒、沉淀经营数据，一行命令即可安装到自己的云服务器。
+> Coco（可可） 是一个开源房产项目。它不是简单的聊天机器人，而是一套专为房产经纪人打造的"第二大脑"：自动管理客户、智能匹配房源、主动跟进提醒、沉淀经营数据，一行命令即可安装到自己的云服务器。
 
 [![Coco AI](https://img.shields.io/github/v/release/liyuheng200408-pixel/coco-real-estate?label=Coco%20AI)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/latest)
 
@@ -443,15 +443,31 @@ coco logs
 
 ### 飞书消息收不到
 
-1. 检查 App ID / App Secret 是否正确（`coco setup` 重新配置）
-2. 确认飞书应用已发布
-3. 确认事件订阅配置正确
+**1. 检查 App ID / App Secret 是否正确**（重新配置）：
+```bash
+coco setup
+```
+
+**2. 确认飞书应用已发布**
+
+**3. 确认事件订阅配置正确**
 
 ### 智能体不回复
 
-1. `coco status` 确认服务在运行
-2. `coco logs` 查看报错
-3. 确认模型 API Key 有效（`coco model` 重新配置）
+**1. 确认服务在运行：**
+```bash
+coco status
+```
+
+**2. 查看报错：**
+```bash
+coco logs
+```
+
+**3. 确认模型 API Key 有效**（重新配置）：
+```bash
+coco model
+```
 
 ## 🏁 总结
 
