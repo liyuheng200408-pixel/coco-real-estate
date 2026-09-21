@@ -13,6 +13,7 @@
 ③ 晋升脚本只做快进（master 不是 next 的祖先时必须拒绝，否则会破坏 --ff-only 更新）。
 """
 import json
+import re
 import os
 import shutil
 import subprocess
