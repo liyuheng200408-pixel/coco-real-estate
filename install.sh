@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
 # Coco（可可）房产智能体 - 一键安装脚本
-# 基于 Hermes Agent 定制版
 # 用法(国内): curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
 # 用法(海外): curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 # 强制指定源: COCO_SOURCE=github bash install.sh   （不指定则并行探测，谁快用谁）
