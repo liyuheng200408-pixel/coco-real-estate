@@ -23,6 +23,17 @@ os.environ.setdefault('COCO_IMG_DIR', '/tmp/coco_smoke_imgs')
 # 隔离 cron 存储（2026-08-13 加）：enable_cron 用例会真实注册任务，指向临时目录避免污染本机/服务器真实 cron
 os.environ.setdefault('HERMES_HOME', '/tmp/coco_smoke_cron')
 
+# 会话现场按**真实网关形态**（2026-09-21 加）：时间戳式会话编号 + 由框架绑定的会话上下文。
+# 不再手写 agent:main:feishu:dm:oc_xxx 这类格式——那正是 enable_cron 在真实飞书会话里
+# 报「无法确定推送会话」却一直冒烟全绿的根因（用假设证明假设）。
+from gateway.session_context import set_session_vars
+from hermes_state_ids import new_session_id
+
+SMOKE_CHAT_ID = 'oc_smoke_gateway_session'
+SMOKE_SESSION_ID = new_session_id()
+set_session_vars(platform='feishu', source='feishu', chat_id=SMOKE_CHAT_ID, chat_type='dm',
+                 session_key=f'agent:main:feishu:dm:{SMOKE_CHAT_ID}', session_id=SMOKE_SESSION_ID)
+
 from agent.real_estate_db import init_real_estate_db
 init_real_estate_db()
 
@@ -74,7 +85,7 @@ def call(tool, args=None):
     try:
         # 与网关一致：registry.dispatch 会注入 session_id/task_id 等运行时参数。
         # 裸调用测不出"handler 注册写错（**kw 直传）"这类故障（2026-09-18 get_property_form 事故）。
-        raw = entry.handler(args or {}, session_id='agent:main:feishu:dm:oc_smoke', task_id='smoke')
+        raw = entry.handler(args or {}, session_id=SMOKE_SESSION_ID, task_id='smoke')
     except Exception:
         return ('EXC', traceback.format_exc(limit=3))
     try:
@@ -210,7 +221,7 @@ CASES = [
     ("loan_compare", {"price": 1500000}),
     ("tax_breakdown_report", {"price": 1500000, "area": 100.0}),
     ("market_brief", {"district": "美兰"}),
-    ("enable_cron", {"chat_id":"oc_test"}),
+    ("enable_cron", {}),
     ("disable_cron", {}),
     ("get_owner", {"owner_id":oid}),
     ("list_owners", {}),
@@ -225,6 +236,19 @@ CASES = [
 
 for name, args in CASES:
     results[name] = call(name, args)
+
+# ---------- 2b. 定时任务落点校验（2026-09-21 加）----------
+# enable_cron 必须把提醒建到**当前会话**上。旧用例自己传 chat_id，等于绕过了会话寻址，
+# 真实飞书里报「无法确定推送会话」它也照绿。这里按真实形态复核一次落点。
+from cron.jobs import list_jobs
+call('enable_cron', {})
+_found = {j.get('name'): j.get('deliver') for j in list_jobs(include_disabled=True)}
+_expected = f'feishu:{SMOKE_CHAT_ID}'
+if _found and all(v == _expected for v in _found.values()):
+    print(f"[OK  ] 定时任务落点校验：{len(_found)} 条任务均指向当前会话")
+else:
+    print(f"[FAIL] 定时任务落点校验：{_found}（期望全部 {_expected}）")
+call('disable_cron', {})
 
 # ---------- 3. 汇总 ----------
 covered = set(results.keys())

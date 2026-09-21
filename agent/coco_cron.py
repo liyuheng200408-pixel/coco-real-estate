@@ -140,7 +140,7 @@ def enable_coco_cron_jobs(chat_id: str) -> dict:
     """
     result = {"registered": [], "skipped": []}
     if not _cron_store_ready():
-        return {"registered": [], "skipped": [], "error": "cron 存储不可用"}
+        return {"registered": [], "skipped": [], "error": "定时任务服务暂时不可用，请稍后再试。"}
     for item in _AVAILABLE_JOBS:
         job_name, schedule, name = item[0], item[1], item[2]
         if _job_exists(name):

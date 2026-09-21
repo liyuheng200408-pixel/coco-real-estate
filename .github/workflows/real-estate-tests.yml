@@ -34,7 +34,9 @@ jobs:
           # 2026-09-20 修：海报功能依赖 Pillow（PIL），此前漏装 → CI 红而本地绿
           # 2026-09-20 再修：qrcode 也是运行依赖（海报二维码 + pyproject 的 feishu 附加项），
           # 此前漏装 → 本地有它才过、CI 里相关断言失败
-          pip install sqlalchemy cryptography pytest pyyaml httpx python-dateutil pillow requests qrcode
+          # 2026-09-21 再修：croniter 是定时任务（enable_cron）的运行依赖，漏装则该
+          # 用例在 CI 里注册失败、断言拿不到任务（本地有它才过）
+          pip install sqlalchemy cryptography pytest pyyaml httpx python-dateutil pillow requests qrcode croniter
 
       - name: Install the SVG renderer (librsvg)
         # 海报渲染走 rsvg-convert；不装它，所有 @needs_rsvg 渲染测试会被静默跳过 ——

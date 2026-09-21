@@ -3,33 +3,41 @@ Coco 房产工具 - 定时任务自助开关（2026-08-12 加）
 经纪人一句话开启/关闭定时提醒（早报/午间/逾期），无需操作服务器。
 """
 import json
+import logging
+import os
+
 from tools.registry import registry
+
+logger = logging.getLogger(__name__)
 
 
 def _get_chat_id(task_id: str = None, **kwargs) -> str:
-    """获取飞书会话 ID：框架注入 > session_id 提取 > task_id > 环境变量 COCO_CHAT_ID
+    """获取飞书会话 ID：调用方指定 > 框架会话上下文 > session_id 提取 > task_id > 环境变量
 
-    2026-08-13 修复：原 handler 丢弃框架注入的 session_id，且 session_id 是复合格式
-    （agent:main:feishu:dm:oc_xxx），自动获取路径全部失效，只能手动配 COCO_CHAT_ID。
-    现支持从 session_id 各段中提取 oc_/ou_ 开头的会话 ID，全自动，无需再配环境变量。
+    2026-09-21 修（真实事故）：原实现只从 session_id 里切 oc_/ou_ 段，前提是那个值是
+    ``agent:main:feishu:dm:oc_xxx`` 形态；但网关交给工具的是时间戳式**会话编号**
+    （如 ``20260921_213802_4bf4a40d``），一段都切不出来 → 真实飞书会话里「开启定时任务」
+    永远落到 COCO_CHAT_ID 兜底（要改 .env.db 并重启进程才生效）。真正的会话地址由网关在
+    每轮对话开始时绑进会话上下文（``HERMES_SESSION_CHAT_ID``），读它即可，无需任何手工配置。
     """
-    # 1. 框架显式注入的会话 ID
     for key in ('chat_id', 'channel_id', 'conversation_id'):
         v = kwargs.get(key)
         if v:
             return str(v)
-    # 2. session_id 复合格式提取（agent:main:feishu:dm:oc_xxx → oc_xxx；
-    #    群聊含 user_id/thread_id 段时也能定位到 oc_/ou_ 段）
+    try:
+        from gateway.session_context import get_session_env
+        v = get_session_env('HERMES_SESSION_CHAT_ID', '')
+        if v:
+            return str(v)
+    except Exception as e:  # 官方重构或脱离网关运行时，不能连累开关功能
+        logger.debug("[Coco] 读取会话上下文失败，改用其它来源: %s", e)
     sid = kwargs.get('session_id')
     if sid:
         for seg in str(sid).split(':'):
             if seg.startswith(('oc_', 'ou_')):
                 return seg
-    # 3. task_id（注册任务时由调用方传入）
     if task_id and str(task_id).startswith(('oc_', 'ou_')):
         return task_id
-    # 4. 环境变量兜底（.env.db 配置 COCO_CHAT_ID=oc_xxx）
-    import os
     return os.getenv('COCO_CHAT_ID', '')
 
 
@@ -38,9 +46,13 @@ def enable_cron(task_id: str = None, **kwargs) -> str:
     from agent.coco_cron import enable_coco_cron_jobs
     chat_id = _get_chat_id(task_id, **kwargs)
     if not chat_id:
+        logger.warning(
+            "[Coco] enable_cron 取不到推送会话（session_id=%r task_id=%r，会话上下文为空）",
+            kwargs.get('session_id'), task_id,
+        )
         return json.dumps({
             "success": False,
-            "error": "无法确定推送会话，请在 .env.db 配置 COCO_CHAT_ID=oc_你的飞书会话ID 后重试",
+            "error": "没识别到当前对话，无法确定提醒发到哪里。请在飞书里重新发一句「开启定时任务」再试。",
         }, ensure_ascii=False)
     result = enable_coco_cron_jobs(chat_id)
     registered = result.get('registered', [])
