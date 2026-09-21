@@ -310,10 +310,16 @@ class TestDocsHaveBackupRestoreUninstall:
             assert "coco backup" in t, f"{rel} 未给出手动备份命令"
 
     def test_readmes_use_terminal_safe_commands(self):
+        """规则：不要用裸 `cd`（会改变用户终端提示符），必须包进括号子 shell；
+        查看备份用 `ls -la ~/backups/real_estate/`（不需要进目录）。"""
         for rel in ("README.md", "README.zh-CN.md"):
             t = (REPO_ROOT / rel).read_text(encoding="utf-8")
-            assert "cd ~/backups/real_estate && ls" not in t, f"{rel} 仍在用 cd 写法（会改变用户终端提示符）"
-            assert "cd ~/backups/real_estate && tar czf /root" not in t, f"{rel} 打包命令应写进括号子 shell"
+            for line in t.split("\n"):
+                if "cd ~/backups/real_estate" not in line:
+                    continue
+                stripped = line.strip()
+                assert stripped.startswith("("), f"{rel} 的 cd 必须包进括号子 shell：{stripped}"
+                assert "ls -la" not in stripped, f"{rel} 查看备份不需要进目录：{stripped}"
 
     def test_coco_help_lists_command_set(self):
         r = subprocess.run(["bash", "scripts/coco.sh", "help"], capture_output=True, text=True, cwd=REPO_ROOT)
