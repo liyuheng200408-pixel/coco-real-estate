@@ -209,6 +209,8 @@ scp <用户名>@<服务器IP>:~/coco_backup_*.tar.gz ~/Desktop/
 
 迁移到新服务器时，一条命令完成数据库 + 图片 + 加密密钥恢复：
 
+> 📖 **完整操作手册见 [docs/BACKUP_MIGRATION.md](docs/BACKUP_MIGRATION.md)**（含重装系统、换服务器、单独恢复、FAQ 速查卡）
+
 **旧服务器打包（含数据库/图片/加密密钥）：**
 ```bash
 ( cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz ./*.dump ./*.tar.gz ./enc_key.txt )

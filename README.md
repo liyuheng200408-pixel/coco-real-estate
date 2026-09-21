@@ -6,8 +6,6 @@
 
 > 🏷️ **当前版本：v0.21.3-68** · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-68)
 
-中文文档见 [README.zh-CN.md](README.zh-CN.md)。
-
 ## ⚠️ 免责声明
 
 **本项目的定位是个人学习与技术交流**，非商业产品。作者开源本项目仅为分享行业智能体的实现思路与代码，不提供任何形式的担保或技术支持。
@@ -178,7 +176,7 @@ coco logs
 
 ### 数据库备份
 
-每日凌晨 2 点自动备份至 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。
+安装时已自动设置每日凌晨 2 点备份，备份文件在 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。
 
 > 重要：请把 `enc_key.txt` 密钥文件保存到安全的地方（电脑/U盘/网盘）。密钥丢失将导致客户数据永久无法解密。首次使用智能体时 Coco 也会提醒您备份。
 
@@ -396,6 +394,12 @@ coco logs
 1. 检查 App ID / App Secret 是否正确（`coco setup` 重新配置）
 2. 确认飞书应用已发布
 3. 确认事件订阅配置正确
+
+### 智能体不回复
+
+1. `coco status` 确认服务在运行
+2. `coco logs` 查看报错
+3. 确认模型 API Key 有效（`coco model` 重新配置）
 
 ## 📄 License
 
