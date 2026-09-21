@@ -138,3 +138,44 @@ def test_deduplicate_tool_reports_and_cleans(db, monkeypatch):
     done = json.loads(t.deduplicate_properties(dry_run=False))
     assert done["result"]["removable"] == [dup["id"]]
     assert db.get_stats().get("available_properties", 0) == 1
+
+
+def test_cleanup_protects_owner_info(db, monkeypatch):
+    """保守规则：重复项带业主信息、而保留项没有 → 跳过并写明原因（留着人工拍板）"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0)
+    dup = make_property(db, title=NEW_TITLE, area=128.5)
+    db.link_owner_to_property(dup["id"], name="陈志强", phone="13800000000")
+
+    out = json.loads(t.deduplicate_properties(dry_run=False))
+    assert out["result"]["removable"] == [], out
+    assert out["result"]["skipped"][0]["id"] == dup["id"]
+    assert "业主" in out["result"]["skipped"][0]["reason"]
+    assert db.get_stats().get("available_properties", 0) == 2, "被保护的重复项不得被删"
+
+
+def test_cleanup_protects_images(db, monkeypatch):
+    """保守规则：重复项带图片、而保留项没有 → 同样跳过"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0)
+    dup = make_property(db, title=NEW_TITLE, area=128.5, images="/tmp/a.jpg")
+
+    out = json.loads(t.deduplicate_properties(dry_run=False))
+    assert out["result"]["removable"] == [], out
+    assert "图片" in out["result"]["skipped"][0]["reason"]
+    assert db.get_stats().get("available_properties", 0) == 2
+
+
+def test_cleanup_still_removes_plain_duplicate(db, monkeypatch):
+    """反向：保留项本身有业主、重复项没有 → 照常清理（保护不能变成一律不动）"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    keep = make_property(db, title="恒大美丽沙3号楼1单元1602", area=128.0)
+    db.link_owner_to_property(keep["id"], name="陈志强", phone="13800000000")
+    dup = make_property(db, title=NEW_TITLE, area=128.5)
+
+    out = json.loads(t.deduplicate_properties(dry_run=False))
+    assert out["result"]["removable"] == [dup["id"]], out
+    assert db.get_stats().get("available_properties", 0) == 1

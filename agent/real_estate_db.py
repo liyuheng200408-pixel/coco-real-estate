@@ -1342,25 +1342,24 @@ class RealEstateDB:
         return [sorted(v) for v in groups.values() if len(v) > 1]
 
     def remove_duplicate_properties(self, dry_run=True):
-        """去重：每组保留最早 id，删除其余（有关联记录则跳过，保守处理）
-        
+        """去重：每组保留最早 id，删除其余（有牵挂的一律跳过，保守处理）
+
         dry_run=True 只统计不删除；返回 removable 列表供确认。
+        跳过（需人工拍板）：有关联带看/成交/跟进、带着业主或图片而保留项没有。
         """
         dups = self.find_duplicate_properties()
         removed, skipped = [], []
         with self.get_session() as s:
             for group in dups:
-                keep_id = group[0]
+                keep = s.query(Property).get(group[0])
                 for dup_id in group[1:]:
-                    rel = (s.query(Deal).filter(Deal.property_id == dup_id).count()
-                           + s.query(Followup).filter(Followup.property_id == dup_id).count()
-                           + s.query(Viewing).filter(Viewing.property_id == dup_id).count())
-                    if rel > 0:
-                        skipped.append({'id': dup_id, 'reason': '有关联带看/成交/跟进记录'})
+                    dup = s.query(Property).get(dup_id)
+                    reason = self._dedup_skip_reason(s, keep, dup, dup_id)
+                    if reason:
+                        skipped.append({'id': dup_id, 'reason': reason})
                         continue
-                    if not dry_run:
-                        p = s.query(Property).get(dup_id)
-                        if p: s.delete(p)
+                    if not dry_run and dup is not None:
+                        s.delete(dup)
                     removed.append(dup_id)
             if not dry_run:
                 s.commit()
@@ -1379,6 +1378,23 @@ class RealEstateDB:
             'removable': removed, 'skipped': skipped,
             'dry_run': dry_run,
         }
+
+    @staticmethod
+    def _dedup_skip_reason(s, keep, dup, dup_id):
+        """自动清理前必须跳过的理由（None = 可以删）：有牵挂的留给人工，宁可留着不误删"""
+        if dup is None:
+            return '记录已不存在'
+        related = (s.query(Deal).filter(Deal.property_id == dup_id).count()
+                   + s.query(Followup).filter(Followup.property_id == dup_id).count()
+                   + s.query(Viewing).filter(Viewing.property_id == dup_id).count())
+        if related:
+            return '有关联带看/成交/跟进记录'
+        if keep is not None:
+            if getattr(dup, 'owner_id', None) and not getattr(keep, 'owner_id', None):
+                return f'带着业主信息，而保留的 id={keep.id} 没有 → 需人工确认保留哪条'
+            if (dup.images or '').strip() and not (keep.images or '').strip():
+                return f'带房源图片，而保留的 id={keep.id} 没有 → 需人工确认保留哪条'
+        return None
 
     def match_customers_for_property(self, property_id, top_n=5):
         """房源反匹配：新房源 → 扫描活跃客户，按需求匹配推荐（2026-08-29 起放宽到所有活跃客户，不再只 S/A）

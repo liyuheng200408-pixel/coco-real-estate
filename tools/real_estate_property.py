@@ -667,7 +667,8 @@ def deduplicate_properties(dry_run: bool = True, task_id: str = None) -> str:
     if result.get('dry_run'):
         message = (
             f"发现 {result['duplicate_groups']} 组重复房源，共 {result['duplicate_total']} 条可清理。"
-            f"确认清理请调用 deduplicate_properties(dry_run=False)。"
+            f"明细见 groups（每组保留 id 与重复 id），被跳过的见 skipped 及原因。"
+            f"请逐组把两条记录（编号/标题/价格/面积/有无业主）列给经纪人，等他明确确认再调 deduplicate_properties(dry_run=False)。"
         )
     else:
         message = f"已清理 {len(result['removable'])} 条重复房源（{result['duplicate_groups']} 组）。"
