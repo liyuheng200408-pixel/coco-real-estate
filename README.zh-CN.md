@@ -217,7 +217,6 @@ coco status
 coco logs
 ```
 
-
 ### 数据库备份
 
 安装时已自动设置每日凌晨 2 点备份，备份文件在 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。
@@ -463,9 +462,6 @@ Coco（可可）把客户管理、房源匹配、跟进提醒、成交管理和�
 - 数据自己掌控，支持加密、备份与迁移
 
 这个项目值得一试：https://gitee.com/liyuheng200408/coco-real-estate（GitHub：https://github.com/liyuheng200408-pixel/coco-real-estate）
-
-
-
 
 ## 📄 License
 
