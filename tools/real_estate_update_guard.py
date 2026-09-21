@@ -50,8 +50,6 @@ _UPDATE_PATTERNS = (
     re.compile(r"(?<![\w.\-/])coco\s+(?:update|start|stop|restart|uninstall|restore)\b", re.I),
     re.compile(r"(?<![\w.\-/])coco\s+gateway\s+(?:install|start|stop|restart|uninstall)\b", re.I),
     re.compile(r"(?<![\w.\-/])coco\s+(?:model|setup|pairing)\b", re.I),   # 配置类要人工交互，别在会话里跑
-    re.compile(r"(?<![\w.\-/])coco\s+migrate-path\b", re.I),              # 搬迁会停服务重装服务
-    re.compile(r"migrate_install_dir\.sh", re.I),
     re.compile(r"(?<![\w.\-/])coco\s+cli\b", re.I),                       # 逃生口不给会话用（可跑任意官方命令）
     # 直接在我们的安装目录里做 git 变更（会造成"跑着的代码"与磁盘代码错位）
     re.compile(r"git\s+(?:-C\s+\S*(?:hermes-agent|coco-real-estate)\S*\s+)?(?:pull|checkout|reset|clean|stash)\b", re.I),

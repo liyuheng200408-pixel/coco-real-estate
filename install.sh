@@ -18,7 +18,7 @@ GITEE_REPO_URL="https://gitee.com/liyuheng200408/coco-real-estate.git"
 GITEE_ZIP_URL="https://gitee.com/liyuheng200408/coco-real-estate/repository/archive/${COCO_CHANNEL}.zip"
 GITHUB_REPO_URL="https://github.com/liyuheng200408-pixel/coco-real-estate.git"
 GITHUB_ZIP_URL="https://github.com/liyuheng200408-pixel/coco-real-estate/archive/refs/heads/${COCO_CHANNEL}.zip"
-INSTALL_DIR="${COCO_INSTALL_DIR:-$HOME/coco}"   # 2026-09-21 起为 ~/coco（旧 ~/hermes-agent 用 coco migrate-path 迁移）
+INSTALL_DIR="${COCO_INSTALL_DIR:-$HOME/coco}"   # 安装目录（2026-09-21 起为 ~/coco，可用 COCO_INSTALL_DIR 自定义）
 SERVICE_NAME="hermes-agent"   # 旧版自建系统服务的名字，仅用于安装时清理残留；现统一用官方用户服务 hermes-gateway
 
 RED='\033[0;31m'

@@ -213,7 +213,7 @@ CONTENT_CHECKS = [
         "飞书实测清单命令不污染终端",
         "docs/TESTING_FEISHU_FULL.md",
         [r"!(?m)^\s*cd\s+(/|~)"],
-        "同第 12 项：前置检查与查库模板都用自定位写法（查库用 `export $(grep DATABASE_URL ~/coco/.env.db)` 或一次性取值；老实例目录是 ~/hermes-agent）。",
+        "同第 12 项：前置检查与查库模板都用自定位写法（查库用 `export $(grep DATABASE_URL ~/coco/.env.db)` 或一次性取值）。",
     ),
     (
         "B02",
@@ -265,7 +265,6 @@ PATH_CHECKS = [
     ("A23", "验收登记脚本", "scripts/mark_verified.sh", "file", 1, "验收登记脚本丢失（无法记录老板的实测评语，晋升闸门形同虚设）"),
     ("A24", "测试号脚本", "scripts/tag_test_version.sh", "file", 1, "测试号脚本丢失（测试版无法编号，容易分不清测的是哪一版）"),
     ("A25", "卸载脚本", "scripts/uninstall.sh", "file", 1, "卸载脚本丢失（正式版实例没有卸载通道，只能重装系统）"),
-    ("A26", "安装目录迁移脚本", "scripts/migrate_install_dir.sh", "file", 1, "迁移脚本丢失（老实例无法从 ~/hermes-agent 搬到 ~/coco）"),
                     ]
 
 

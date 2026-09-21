@@ -141,3 +141,49 @@ class TestPushAllRetryAndBackfill:
         r = _run(["bash", "scripts/push_all.sh"], cwd=work, env=self._env())
         assert r.returncode != 0
         assert "重试" in (r.stdout + r.stderr), r.stdout + r.stderr
+
+
+class TestPushAllNonCurrentBranch:
+    """推"非当前分支"时的校验（真 bug 记录）：
+
+    在 next 分支上执行 `push_all.sh master` 时，旧版拿本地 HEAD（next）去比远程 master，
+    结果**误报 SHA 不一致**。现在按"被推的分支"的 SHA 校验。
+    """
+
+    def _setup(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "master", str(work)], check=True)
+        for k, v in (("user.email", "t@t"), ("user.name", "t")):
+            subprocess.run(["git", "-C", str(work), "config", k, v], check=True)
+        (work / "scripts").mkdir()
+        shutil.copy(SCRIPTS / "push_all.sh", work / "scripts" / "push_all.sh")
+        (work / "VERSION").write_text("0.0.0-1\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(work), "commit", "-qm", "init"], check=True)
+        for name in ("gitee.git", "github.git"):
+            subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / name)], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "origin", str(tmp_path / "gitee.git")], check=True)
+        subprocess.run(["git", "-C", str(work), "remote", "add", "github", str(tmp_path / "github.git")], check=True)
+        return work
+
+    def test_push_master_while_on_next_branch(self, tmp_path):
+        work = self._setup(tmp_path)
+        # 造一个 ahead 的 next 分支并切过去（本地 HEAD ≠ master）
+        subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "next"], check=True)
+        (work / "next.txt").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(work), "commit", "-qm", "next work"], check=True)
+
+        env = {**os.environ, "PUSH_RETRY_SLEEP": "0"}
+        r = subprocess.run(["bash", "scripts/push_all.sh", "master"], cwd=work,
+                           capture_output=True, text=True, env=env)
+        out = r.stdout + r.stderr
+        assert r.returncode == 0, out
+        assert "两仓库同步完成" in out, out
+        master_sha = subprocess.run(["git", "-C", str(work), "rev-parse", "master"],
+                                    capture_output=True, text=True).stdout.strip()
+        for remote in ("gitee.git", "github.git"):
+            got = subprocess.run(["git", "-C", str(tmp_path / remote), "rev-parse", "master"],
+                                 capture_output=True, text=True).stdout.strip()
+            assert got == master_sha, f"{remote} 的 master 应为本地 master（{master_sha[:7]}），实际 {got[:7]}"

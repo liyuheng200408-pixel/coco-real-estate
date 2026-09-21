@@ -3,7 +3,7 @@
 # Coco（可可）房产智能体 · 一键无损更新脚本
 #
 # 用法（在任何目录都能跑，脚本自己定位仓库根目录）：
-#   bash /home/ubuntu/hermes-agent/scripts/update.sh            # 默认：跟随当前通道
+#   bash <安装目录>/scripts/update.sh            # 默认：跟随当前通道（也可用 coco update）
 #   bash scripts/update.sh --test               # 测试版：切到测试通道并按测试版更新（仅老板测试机）
 #   bash scripts/update.sh --stable             # 稳定版：切回稳定通道并更新
 #   bash scripts/update.sh --skip-backup        # 跳过备份（仅纯代码零风险场景）

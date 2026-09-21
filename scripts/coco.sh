@@ -123,11 +123,6 @@ case "${1:-version}" in
     echo "可重装（会保留数据库与密钥）：curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh" >&2
     exit 1
     ;;
-  migrate-path)
-    # 安装目录搬迁（~/hermes-agent → ~/coco）。会停服务重装服务，必须在服务器终端执行
-    shift
-    exec bash "$REPO_ROOT/scripts/migrate_install_dir.sh" "$@"
-    ;;
   uninstall)
     shift
     exec bash "$REPO_ROOT/scripts/uninstall.sh" "$@"
@@ -190,7 +185,6 @@ Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）
   restore    恢复数据：coco restore --file <备份.dump> / --migration <迁移包.tar.gz>
   update     更新到最新版（内部即完整更新流程：备份 → 拉代码 → 依赖 → 迁移 → 重启 → 体检）
   uninstall  卸载 Coco（三档菜单 + 输 yes 确认；1/2 档会先自动备份，3 档不备份）
-  migrate-path  安装目录搬迁（老实例 ~/hermes-agent → ~/coco，先 --dry-run 看计划）
 
 服务与诊断:
   status     服务状态        （等价于 hermes gateway status）

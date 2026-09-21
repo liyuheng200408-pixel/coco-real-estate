@@ -98,7 +98,6 @@ class TestCocoWriteCommandsBlocked:
     `coco restore` 会覆盖数据库）。只读命令要放行。"""
 
     BLOCKED = ["coco update", "coco start", "coco stop", "coco restart", "coco uninstall",
-               "coco migrate-path --dry-run", "bash scripts/migrate_install_dir.sh --yes",
                "coco cli doctor", "coco cli gateway install",
                "coco restore --file x.dump", "coco restore --migration /root/m.tar.gz",
                "coco gateway install", "coco gateway restart", "coco model", "coco setup",

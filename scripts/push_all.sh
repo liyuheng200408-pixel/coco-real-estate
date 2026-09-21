@@ -46,8 +46,8 @@ if [[ -n "$(git status --porcelain)" ]]; then
     fail "工作区有未提交改动，先 commit 再推送"
 fi
 
-LOCAL_SHA="$(git rev-parse HEAD)"
-info "推送分支: $BRANCH（本地 HEAD ${LOCAL_SHA:0:7}）"
+LOCAL_SHA="$(git rev-parse "refs/heads/$BRANCH")"   # 按"被推的分支"算，不是当前 HEAD
+info "推送分支: $BRANCH（本地 ${LOCAL_SHA:0:7}）"
 echo "----------------------------------------"
 
 # 带重试的单远程推送（瞬时网络故障不再直接失败）

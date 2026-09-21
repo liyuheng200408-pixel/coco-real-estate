@@ -1,7 +1,7 @@
 """安装布局变更的回归测试（老板 2026-09-21 拍板 ①+②）：
 
   ① `hermes` 命令不再对外暴露（统一用 coco）——install.sh 不建软链、update.sh 每次清理；
-  ② 安装目录 ~/hermes-agent → ~/coco，脚本自定位（按自身位置推导），老实例可 `coco migrate-path` 搬迁。
+  ② 安装目录 ~/hermes-agent → ~/coco，脚本自定位（按自身位置推导）。
 
 全部用临时假环境，不动真机器。
 """
@@ -70,65 +70,6 @@ class TestSelfLocating:
         spec.loader.exec_module(mod)
         assert Path(mod._REPO_ROOT) == fake, f"仓库根推导错误：{mod._REPO_ROOT}"
         assert (Path(mod._REPO_ROOT) / ".env.db").exists(), "应在临时目录里找到 .env.db"
-
-
-class TestMigrateScript:
-    def _repo(self, tmp_path, dirty=False):
-        work = tmp_path / "hermes-agent"
-        (work / "scripts").mkdir(parents=True)
-        for name in ("migrate_install_dir.sh", "healthcheck.py"):
-            src = SCRIPTS / name
-            if src.exists():
-                (work / "scripts" / name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-        subprocess.run(["git", "init", "-q", "-b", "master", str(work)], check=True)
-        for k, v in (("user.email", "t@t"), ("user.name", "t")):
-            subprocess.run(["git", "-C", str(work), "config", k, v], check=True)
-        (work / "VERSION").write_text("0.0.0-1\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
-        subprocess.run(["git", "-C", str(work), "commit", "-qm", "init"], check=True)
-        if dirty:
-            (work / "VERSION").write_text("dirty\n", encoding="utf-8")
-        return work
-
-    def test_dry_run_prints_plan_and_changes_nothing(self, tmp_path):
-        work = self._repo(tmp_path)
-        target = tmp_path / "coco"
-        r = subprocess.run(["bash", str(work / "scripts" / "migrate_install_dir.sh"),
-                            "--to", str(target), "--dry-run"], capture_output=True, text=True)
-        out = r.stdout
-        assert r.returncode == 0, out + r.stderr
-        assert "干跑" in out and "移动目录" in out, out
-        assert work.exists(), "干跑不应移动目录"
-        assert not target.exists(), "干跑不应创建目标目录"
-
-    def test_refuses_when_target_exists(self, tmp_path):
-        work = self._repo(tmp_path)
-        target = tmp_path / "coco"
-        target.mkdir()
-        r = subprocess.run(["bash", str(work / "scripts" / "migrate_install_dir.sh"),
-                            "--to", str(target), "--yes"], capture_output=True, text=True)
-        assert r.returncode != 0
-        assert "已存在" in (r.stdout + r.stderr), r.stdout + r.stderr
-        assert work.exists(), "拒绝时不应移动目录"
-
-    def test_refuses_on_dirty_worktree(self, tmp_path):
-        work = self._repo(tmp_path, dirty=True)
-        r = subprocess.run(["bash", str(work / "scripts" / "migrate_install_dir.sh"),
-                            "--to", str(tmp_path / "coco"), "--yes"], capture_output=True, text=True)
-        assert r.returncode != 0
-        assert "未提交" in (r.stdout + r.stderr), r.stdout + r.stderr
-
-    def test_refuses_when_already_migrated(self, tmp_path):
-        work = self._repo(tmp_path)
-        r = subprocess.run(["bash", str(work / "scripts" / "migrate_install_dir.sh"),
-                            "--to", str(work), "--yes"], capture_output=True, text=True)
-        assert "无需迁移" in (r.stdout + r.stderr), r.stdout + r.stderr
-
-    def test_help_lists_options(self, tmp_path):
-        work = self._repo(tmp_path)
-        r = subprocess.run(["bash", str(work / "scripts" / "migrate_install_dir.sh"), "--help"],
-                           capture_output=True, text=True)
-        assert r.returncode == 0 and "--dry-run" in r.stdout, r.stdout
 
 
 class TestDocsUseNewLayout:
@@ -247,7 +188,3 @@ class TestDocsCommandsExist:
             # 只认"命令位置"的 coco（行首/空白/&&/;/|/反引号之后），避免把 `git -C ~/coco pull` 误判
             for cmd in set(re.findall(r"(?:^|[\s;&|`])coco\s+([a-z][a-z\-]{2,})", text, re.M)):
                 assert cmd in known, f"{rel} 写了不存在的命令：coco {cmd}（已知：{sorted(known)}）"
-
-    def test_migrate_path_still_available(self):
-        coco = (SCRIPTS / "coco.sh").read_text(encoding="utf-8")
-        assert "migrate-path)" in coco, "迁移入口应在（工具保留；文档不再写老实例迁移说明）"
