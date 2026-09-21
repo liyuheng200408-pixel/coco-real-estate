@@ -184,3 +184,42 @@ class TestDocsCommandsExist:
             # 只认"命令位置"的 coco（行首/空白/&&/;/|/反引号之后），避免把 `git -C ~/coco pull` 误判
             for cmd in set(re.findall(r"(?:^|[\s;&|`])coco\s+([a-z][a-z\-]{2,})", text, re.M)):
                 assert cmd in known, f"{rel} 写了不存在的命令：coco {cmd}（已知：{sorted(known)}）"
+
+
+class TestPython313DownloadPath:
+    """26.04（自带 3.14）会走"下载 Python 3.13"这条路径 —— 必须国内加速、有超时、失败可读。
+
+    背景：这段以前把输出全丢掉、且没有任何超时，国内机器上看着像"卡死一小时"。
+    """
+
+    def test_domestic_mirror_for_cn(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert "UV_PYTHON_INSTALL_MIRROR" in t, "国内机器下载 Python 应走国内镜像"
+        assert "mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone" in t
+        assert 'COCO_CHOSEN_SOURCE' in t, "应按仓库源判断国内外（国内→镜像）"
+        # 用户自己设过镜像时必须尊重（不要硬覆盖）
+        assert '-z "${UV_PYTHON_INSTALL_MIRROR:-}"' in t
+
+    def test_uv_install_prefers_domestic_pip(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert "pypi.tuna.tsinghua.edu.cn/simple uv" in t, "装 uv 应优先国内 pip 镜像"
+
+    def test_download_has_timeout_and_progress(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert "timeout 900 uv python install 3.13" in t, "下载 Python 必须带超时"
+        assert "--max-time 120" in t, "下载 uv 脚本必须带超时"
+        assert "正在下载并准备 Python 3.13" in t, "应打印进度提示"
+
+    def test_apt_missing_reports_reason(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert "官方源里没有 python3.13" in t, "apt 装不到时要说明原因（不再静默）"
+
+    def test_no_manual_export_required_in_messages(self):
+        """对外提示不应要求用户手动 export 环境变量（标准是"一条命令"）"""
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        for line in t.split("\n"):
+            if "echo" not in line:
+                continue
+            # 只禁止"让用户自己设置"的提示（允许提到变量名/告诉怎么关掉）
+            if "export UV_PYTHON_INSTALL_MIRROR=" in line:
+                raise AssertionError(f"不要在用户提示里让他 export：{line.strip()}")

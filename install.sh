@@ -109,7 +109,9 @@ setup_python() {
     fi
     if ! _py_ok "$PYTHON_CMD" && command -v apt-get &> /dev/null; then
         info "当前 Python $PYTHON_VERSION 不在 3.11~3.13 范围内，尝试安装 python3.13..."
-        sudo apt-get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1 || true
+        if ! sudo apt-get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1; then
+            echo "  官方源里没有 python3.13（Ubuntu 26.04 默认自带 3.14，官方源不含 3.13）—— 改用下面方式准备"
+        fi
         if command -v python3.13 &> /dev/null && _py_ok python3.13; then
             PYTHON_CMD="python3.13"
             PYTHON_VERSION="$(python3.13 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
@@ -118,11 +120,36 @@ setup_python() {
     fi
     if ! _py_ok "$PYTHON_CMD"; then
         info "尝试用 uv 准备 Python 3.13（与官方安装方式一致）..."
+        # 国内机器（仓库源选到 gitee = 国内可达性更好）→ Python 下载默认走国内镜像；
+        # 海外 → 保持官方源。用户已设 UV_PYTHON_INSTALL_MIRROR 时一律尊重用户设置。
+        if [[ -z "${UV_PYTHON_INSTALL_MIRROR:-}" && "$COCO_CHOSEN_SOURCE" == "gitee" ]]; then
+            export UV_PYTHON_INSTALL_MIRROR="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone"
+            echo "  已启用国内镜像下载 Python（南京大学镜像；如需改用官方源：unset UV_PYTHON_INSTALL_MIRROR）"
+        fi
         if ! command -v uv &> /dev/null; then
-            curl -fsSL https://astral.sh/uv/install.sh 2>/dev/null | sh >/dev/null 2>&1 || true
+            # 装 uv：优先走国内 pip 镜像（避免境外 astral.sh 卡住）；失败再退回官方脚本（带超时）
+            pip install -q -i https://pypi.tuna.tsinghua.edu.cn/simple uv >/dev/null 2>&1 || true
+            if ! command -v uv &> /dev/null; then
+                echo "  正在下载 uv（约 20MB，超时 120 秒）..."
+                curl -fsSL --max-time 120 --connect-timeout 20 https://astral.sh/uv/install.sh 2>/dev/null | sh >/dev/null 2>&1 || true
+            fi
             export PATH="$HOME/.local/bin:$PATH"
-            command -v uv &> /dev/null || pip install -q uv >/dev/null 2>&1 || true
-            export PATH="$HOME/.local/bin:$PATH"
+            if ! command -v uv &> /dev/null; then
+                echo "  ⚠️ 未能获取 uv；稍后会提示换系统或手动装 Python（不影响已装部分）"
+            fi
+        fi
+        if command -v uv &> /dev/null; then
+            echo "  正在下载并准备 Python 3.13（约 50MB，最长等 15 分钟）..."
+            if ! timeout 900 uv python install 3.13; then
+                echo "  ⚠️ 下载 Python 3.13 超时或被中断（网络较慢）。可重跑本脚本重试；"
+                echo "     若持续失败，建议换 Ubuntu 24.04 LTS 安装（自带 Python 3.12，不需要下载 Python）。"
+            fi
+            _uvpy="$(uv python find 3.13 2>/dev/null || true)"
+            if [ -n "$_uvpy" ] && _py_ok "$_uvpy"; then
+                PYTHON_CMD="$_uvpy"
+                PYTHON_VERSION="$($_uvpy --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+                info "已通过 uv 准备 Python $PYTHON_VERSION"
+            fi
         fi
         if command -v uv &> /dev/null; then
             uv python install 3.13 >/dev/null 2>&1 || true
@@ -155,6 +182,7 @@ setup_python() {
 # 探测可用的源：并行测两个源，**谁先响应就用谁**（国内 Gitee 快、海外 GitHub 快）
 # 可用 COCO_SOURCE=gitee|github 强制指定（该源不可达时才退回另一个）
 COCO_SOURCE="${COCO_SOURCE:-auto}"
+COCO_CHOSEN_SOURCE=""   # 由 probe_source 填入：gitee=国内可达性好 / github=海外
 PROBE_DIR=""
 
 # 当前毫秒时间戳：优先用 bash 内置 $EPOCHREALTIME（不依赖外部命令，bash 5+ 自带）；
@@ -257,6 +285,7 @@ clone_project() {
     fi
     local src
     src=$(probe_source)
+    COCO_CHOSEN_SOURCE="$src"   # 供后面判断国内外（国内→Python 下载走国内镜像）
     case "$src" in
         gitee)
             git clone --branch "$COCO_CHANNEL" "$GITEE_REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
