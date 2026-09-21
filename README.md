@@ -135,10 +135,10 @@ coco update
 
 ```bash
 coco version     # 输出形如：Coco v0.21.3-67（官方 Hermes 0.21.3 定制版）
-coco help        # 查看全部可用命令（version / check / backup）
+coco help        # 查看全部可用命令（version / check / backup / uninstall / help）
 ```
 
-注意：`coco version` 输出的括号里会注明对应的官方 Hermes 版本；想单独查底座版本可用 `hermes --version`。
+注意：`coco version` 输出的括号里会注明对应的官方 Hermes 版本；想单独查底层框架版本可用 `coco cli --version`。
 
 ### 服务管理
 
