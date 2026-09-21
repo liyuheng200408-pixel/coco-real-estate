@@ -2,6 +2,7 @@
 # =============================================================================
 # Coco 命令入口
 #   用法: coco [命令]        （不给参数 = version）
+#   uninstall = 卸载（三档菜单：保留数据 / 清状态 / 彻底清理，输 yes 确认）
 #     version  查看当前版本（默认）
 #     check    部署体检
 #     backup   手动备份数据库
@@ -36,6 +37,10 @@ case "${1:-version}" in
   backup)
     exec "$REPO_ROOT/venv/bin/python" "$REPO_ROOT/scripts/backup_db.py" backup
     ;;
+  uninstall)
+    shift
+    exec bash "$REPO_ROOT/scripts/uninstall.sh" "$@"
+    ;;
   help|--help|-h)
     cat <<EOF
 Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）
@@ -44,6 +49,8 @@ Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）
   version  查看版本号（默认）
   check    部署体检（服务/依赖/数据库/密钥/备份/日志等）
   backup   手动备份数据库
+  uninstall  卸载 Coco（一条命令 → 三档菜单 → 输 yes 确认）
+             卸载前会自动备份数据库与加密密钥并给出备份包路径
   help     显示本帮助
 
 更新到最新版:
@@ -56,7 +63,7 @@ EOF
     ;;
   *)
     echo "未知命令: $1" >&2
-    echo "用法: coco [version|check|backup|help]" >&2
+    echo "用法: coco [version|check|backup|uninstall|help]" >&2
     exit 1
     ;;
 esac
