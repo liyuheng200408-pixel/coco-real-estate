@@ -243,6 +243,17 @@ info "[8/8] 部署健康自检"
 "$VENV_PY" scripts/healthcheck.py || echo "  警告：健康自检存在 FAIL 项，请查看上方提示"
 
 echo ""
+# 清理 hermes 命令入口（2026-09-21 老板拍板：命令统一用 coco，不再对外暴露 hermes）
+# 幂等：只删指向本安装目录的软链，别家的同名命令不动
+for _hlink in /usr/local/bin/hermes "$HOME/.local/bin/hermes"; do
+  [[ -L "$_hlink" ]] || continue
+  _htarget="$(readlink -f "$_hlink" 2>/dev/null || echo '')"
+  if [[ "$_htarget" == "$REPO_ROOT/"* ]]; then
+    rm -f "$_hlink" 2>/dev/null || sudo rm -f "$_hlink" 2>/dev/null || true
+    echo "  已移除 hermes 命令入口（统一用 coco）"
+  fi
+done
+
 # 确保 coco 命令入口存在（新命令靠这条通道分发给已安装实例；幂等，失败不阻断）
 COCO_BIN="$REPO_ROOT/scripts/coco.sh"
 if [[ -x "$COCO_BIN" ]] && ! command -v coco >/dev/null 2>&1; then

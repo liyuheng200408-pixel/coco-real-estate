@@ -179,24 +179,24 @@ CONTENT_CHECKS = [
         "12",
         "README 命令不污染终端",
         "README.md",
-        [r"!cd ~/hermes-agent"],
-        "对外命令里写 `cd ~/hermes-agent && ...` 会把用户终端切到仓库目录，跑完提示符变成\n"
-        "`user@host:~/hermes-agent$`（用户会以为出问题了）。\n"
-        "处理：改成自定位写法 —— `git -C ~/hermes-agent ...`、`~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/x.py`、\n"
+        [r"!(?m)^\s*cd\s+(/|~)"],
+        "对外命令里写裸 `cd <目录> && ...` 会把用户终端切到那个目录，跑完提示符变成\n"
+        "`user@host:~/coco$`（用户会以为出问题了）。\n"
+        "处理：改自定位写法 —— `coco <命令>`、`git -C <安装目录> ...`，或把 cd 包进括号子 shell `( cd ... && ... )`\n"
         "必须切目录时用括号子 shell `( cd ... && ... )`。",
     ),
     (
         "13",
         "README(中文) 命令不污染终端",
         "README.zh-CN.md",
-        [r"!cd ~/hermes-agent"],
+        [r"!(?m)^\s*cd\s+(/|~)"],
         "同第 12 项：中英两份 README 的命令写法要保持一致，都用自定位写法。",
     ),
     (
         "14",
         "备份迁移手册命令不污染终端",
         "docs/BACKUP_MIGRATION.md",
-        [r"!cd ~/hermes-agent"],
+        [r"!(?m)^\s*cd\s+(/|~)"],
         "同第 12 项：备份/恢复/迁移步骤里的命令都用 venv 绝对路径，不要 cd 到仓库目录。",
     ),
     (
@@ -212,8 +212,8 @@ CONTENT_CHECKS = [
         "15",
         "飞书实测清单命令不污染终端",
         "docs/TESTING_FEISHU_FULL.md",
-        [r"!cd ~/hermes-agent"],
-        "同第 12 项：前置检查与查库模板都用自定位写法（查库用 `export $(grep DATABASE_URL ~/hermes-agent/.env.db)` 或一次性取值）。",
+        [r"!(?m)^\s*cd\s+(/|~)"],
+        "同第 12 项：前置检查与查库模板都用自定位写法（查库用 `export $(grep DATABASE_URL ~/coco/.env.db)` 或一次性取值；老实例目录是 ~/hermes-agent）。",
     ),
     (
         "B02",
@@ -221,6 +221,13 @@ CONTENT_CHECKS = [
         "scripts/coco.sh",
         [r"run_hermes", r"gateway\s+\"\$@\"", r"pairing"],
         "coco 缺少安装配置转发组（coco model/setup/gateway/pairing 会失效）。",
+    ),
+    (
+        "B03",
+        "默认安装目录",
+        "install.sh",
+        [r'INSTALL_DIR="\$\{COCO_INSTALL_DIR:-\$HOME/coco\}"', r"COCO_EXPOSE_HERMES"],
+        "安装脚本默认安装目录不是 ~/coco，或缺 hermes 暴露开关（命令口径会被破坏）。",
     ),
     (
         "B01",
@@ -258,6 +265,7 @@ PATH_CHECKS = [
     ("A23", "验收登记脚本", "scripts/mark_verified.sh", "file", 1, "验收登记脚本丢失（无法记录老板的实测评语，晋升闸门形同虚设）"),
     ("A24", "测试号脚本", "scripts/tag_test_version.sh", "file", 1, "测试号脚本丢失（测试版无法编号，容易分不清测的是哪一版）"),
     ("A25", "卸载脚本", "scripts/uninstall.sh", "file", 1, "卸载脚本丢失（正式版实例没有卸载通道，只能重装系统）"),
+    ("A26", "安装目录迁移脚本", "scripts/migrate_install_dir.sh", "file", 1, "迁移脚本丢失（老实例无法从 ~/hermes-agent 搬到 ~/coco）"),
                     ]
 
 

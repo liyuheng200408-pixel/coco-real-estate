@@ -114,7 +114,7 @@ class TestPlanAndSummary:
     def test_summary_levels(self):
         assert summary(eff(), st())["level"] == "pass"
         warn = summary(eff(threshold=0.5), st())
-        assert warn["level"] == "warn" and "update.sh" in (warn["hint"] or "")
+        assert warn["level"] == "warn" and "coco update" in (warn["hint"] or "")
         assert "官方默认值覆盖" in warn["message"], warn["message"]
         info = summary(eff(threshold=0.6), st())
         assert info["level"] == "info", "经纪人自己的设置不该报 WARN"

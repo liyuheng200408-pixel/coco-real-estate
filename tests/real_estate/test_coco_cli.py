@@ -151,11 +151,12 @@ class TestHelpAndNaming:
                     "status", "logs", "start", "restart", "stop", "model", "setup", "gateway", "pairing"):
             assert cmd in out, f"help 缺少 {cmd}"
 
-    def test_help_mentions_equivalence_with_official(self, tmp_path):
+    def test_help_mentions_official_equivalence(self, tmp_path):
+        """命令统一口径：安装配置类注明等价官方命令；底层命令不再对外暴露（排障用 coco cli）"""
         root = _fake_install(tmp_path)
         out = _run(root, ["help"]).stdout
         assert "等价于" in out and "hermes" in out, out
-        assert "仍然可用" in out, "要说明官方 hermes 命令仍可用"
+        assert "不再对外暴露" in out and "coco cli" in out, out
 
     def test_unknown_command_points_to_help(self, tmp_path):
         root = _fake_install(tmp_path)
@@ -182,4 +183,4 @@ class TestDocsUseCocoPrefix:
         """统一成 coco update 后，仍要保留等价写法（老实例没有 coco 命令时可用）"""
         for rel in ("README.md", "README.zh-CN.md"):
             t = (REPO_ROOT / rel).read_text(encoding="utf-8")
-            assert "等价写法" in t and "git -C ~/hermes-agent pull" in t, rel
+            assert "等价写法" in t and "git -C ~/coco pull" in t, rel

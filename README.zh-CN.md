@@ -124,7 +124,9 @@ coco restart
 coco update
 ```
 
-> 等价写法（老实例一直可用）：`git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh`
+> 安装目录：2026-09-21 起为 `~/coco`。老实例（目录仍是 `~/hermes-agent`）先执行 `git -C ~/hermes-agent pull`，再执行 `bash ~/hermes-agent/scripts/migrate_install_dir.sh --yes` 完成搬迁（会停服务重装服务，先加 `--dry-run` 可只看计划）。
+
+> 等价写法（老实例一直可用）：`git -C ~/coco pull && bash ~/coco/scripts/update.sh`
 
 > 更新只用这条命令。**不要用 `install.sh` 更新**（它会重建安装目录，清掉数据库密钥与图片缓存），**也不要直接跑 `hermes update`**（官方更新会重置你手改过的代码）。
 
@@ -170,7 +172,7 @@ coco logs
 ```
 
 
-> 命令说明：`coco` 是 Coco 的命令入口，覆盖日常运维与安装配置；其中 `coco model` / `coco setup` / `coco gateway` / `coco pairing` 等价于底层框架的 `hermes` 同名命令（`hermes` 命令仍然可以直接使用）。
+> 命令说明：`coco` 是 Coco 的命令入口，覆盖日常运维与安装配置；其中 `coco model` / `coco setup` / `coco gateway` / `coco pairing` 调用底层框架的对应功能；底层命令不对外暴露，排障时可用 `coco cli <子命令>`。
 ### 数据库备份
 
 安装时已自动设置每日凌晨 2 点备份，备份文件在 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。

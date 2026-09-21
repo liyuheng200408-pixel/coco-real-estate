@@ -2,7 +2,7 @@
 """Coco 部署健康自检脚本
 
 用法（在服务器上）:
-    ~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/healthcheck.py
+    coco check
 
 覆盖检查项:
     1. 安装目录与代码版本（是否落后远程）
@@ -24,11 +24,14 @@
 """
 import importlib.util
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
 
-INSTALL_DIR = os.environ.get("HERMES_AGENT_DIR", os.path.expanduser("~/hermes-agent"))
+# 自定位（2026-09-21）：安装目录按本文件位置推导，改目录名不用改代码
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+INSTALL_DIR = os.environ.get("HERMES_AGENT_DIR") or str(_REPO_ROOT)
 # 主服务是官方 hermes gateway install 生成的用户服务 hermes-gateway —— 真正连飞书的就是它
 # （2026-09-16 老板重装实测：重启系统服务 hermes-agent 机器人无响应，重启这个才响应）。
 # 备选是旧版 install.sh 自建的系统服务 hermes-agent，兼容尚未收口的老部署。
@@ -118,7 +121,7 @@ if os.path.isdir(os.path.join(INSTALL_DIR, ".git")):
     rc, behind = sh(f"git -C {INSTALL_DIR} rev-list --count HEAD..origin/master 2>/dev/null")
     if rc and behind.isdigit() and int(behind) > 0:
         warn(f"代码落后远程 {behind} 个提交",
-             "git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh")
+             "coco update")
     elif rc:
         ok("代码已是最新")
 else:
@@ -163,7 +166,7 @@ if not missing:
     ok("依赖齐全（ddgs/Pillow/qrcode/lark-oapi/sqlalchemy/psycopg2 等）")
 else:
     bad(f"缺少依赖: {', '.join(missing)}",
-        "git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh")
+        "coco update")
 
 # ---- 4. web_search 可用性 ----
 print("\n[4] web_search 联网搜索后端")
@@ -386,7 +389,7 @@ try:
     else:  # info：自定义设置被保留，属预期行为
         ok(f"{_sum['message']}（{_sum['hint']}）")
 except Exception as _exc:  # noqa: BLE001
-    warn(f"配置核对未完成（{_exc}）", "修复：bash ~/hermes-agent/scripts/update.sh")
+    warn(f"配置核对未完成（{_exc}）", "修复：coco update")
 
 # ---- 汇总 ----
 print("\n" + "=" * 56)
@@ -396,5 +399,5 @@ if FAIL == 0:
 else:
     print(f" 结论: 存在 {FAIL} 个问题，按上方修复提示处理后再测")
 print("=" * 56)
-print("提示: 更新请用 bash ~/hermes-agent/scripts/update.sh（不要用 install.sh，也不要直接跑 hermes update）")
+print("提示: 更新请用 coco update（不要用 install.sh，也不要直接跑官方 update）")
 sys.exit(1 if FAIL else 0)

@@ -15,7 +15,7 @@ Coco 的数据由三部分组成，**缺一不可**：
 | ② 加密密钥 | COCO_ENC_KEY（Fernet 密钥，自动生成） | 客户手机号/微信号**永久无法解密** |
 | ③ 房源图片 | 房源图片文件 | 图片丢失 |
 
-> ⚠️ 第②条最关键：密钥在 `~/hermes-agent/.env.db` 和 `~/backups/real_estate/enc_key.txt` 各有一份。**密钥一旦丢失，就算数据库还在，客户的手机号微信号也永远解不开。** 请务必把 `enc_key.txt` 备份到电脑/网盘/U盘。
+> ⚠️ 第②条最关键：密钥在 `~/coco/.env.db` 和 `~/backups/real_estate/enc_key.txt` 各有一份。**密钥一旦丢失，就算数据库还在，客户的手机号微信号也永远解不开。** 请务必把 `enc_key.txt` 备份到电脑/网盘/U盘。
 
 ---
 
@@ -132,7 +132,7 @@ coco restore --migration /root/coco_migration.tar.gz --images-file real_estate_i
 ### 密钥丢了怎么办
 
 **这是最危险的情况。** 处理办法：
-1. 找 `~/backups/real_estate/enc_key.txt` 或 `~/hermes-agent/.env.db` 里的 `COCO_ENC_KEY=` 行（如果服务器还没重装）
+1. 找 `~/backups/real_estate/enc_key.txt` 或 `~/coco/.env.db` 里的 `COCO_ENC_KEY=` 行（如果服务器还没重装）
 2. 找到后立即复制保存到安全的地方
 3. 如果两个地方都没有了：数据库里客户手机号/微信号将无法解密（其他字段如姓名、房源数据不受影响）。**没有补救办法，只能吃一堑长一智。**
 
@@ -165,7 +165,7 @@ A：自动保留 30 天，更早的自动删除。重要节点（如迁移前）
 ```
 # 旧服务器打包
 coco backup
-cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt
+( cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt )
 
 # 电脑下载
 scp root@旧IP:/root/coco_migration.tar.gz ~/Desktop/

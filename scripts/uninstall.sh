@@ -233,8 +233,8 @@ else
     warn "没有 $CRONTAB_BIN 命令，跳过定时任务清理"
 fi
 
-# ③-b coco 软链（只删指向本仓库的）
-for link in /usr/local/bin/coco "$TARGET_HOME/.local/bin/coco"; do
+# ③-b coco / hermes 软链（只删指向本仓库的；hermes 在 2026-09-21 后不再对外暴露）
+for link in /usr/local/bin/coco "$TARGET_HOME/.local/bin/coco" /usr/local/bin/hermes "$TARGET_HOME/.local/bin/hermes"; do
     [[ -L "$link" ]] || continue
     TARGET="$(readlink -f "$link" 2>/dev/null || echo '')"
     if [[ "$TARGET" == "$REPO_DIR/"* ]]; then

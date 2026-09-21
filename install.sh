@@ -18,7 +18,7 @@ GITEE_REPO_URL="https://gitee.com/liyuheng200408/coco-real-estate.git"
 GITEE_ZIP_URL="https://gitee.com/liyuheng200408/coco-real-estate/repository/archive/${COCO_CHANNEL}.zip"
 GITHUB_REPO_URL="https://github.com/liyuheng200408-pixel/coco-real-estate.git"
 GITHUB_ZIP_URL="https://github.com/liyuheng200408-pixel/coco-real-estate/archive/refs/heads/${COCO_CHANNEL}.zip"
-INSTALL_DIR="$HOME/hermes-agent"
+INSTALL_DIR="${COCO_INSTALL_DIR:-$HOME/coco}"   # 2026-09-21 起为 ~/coco（旧 ~/hermes-agent 用 coco migrate-path 迁移）
 SERVICE_NAME="hermes-agent"   # 旧版自建系统服务的名字，仅用于安装时清理残留；现统一用官方用户服务 hermes-gateway
 
 RED='\033[0;31m'
@@ -485,34 +485,27 @@ start_service() {
         ok "服务已在后台启动"
     fi
     
-    # 创建 hermes 命令入口（2026-09-16 修：原来缺 sudo 且静默吞错，普通用户装完 hermes 不可用）
-    # 照官方的思路：能写 /usr/local/bin 就放那儿；不行退回 ~/.local/bin 并补 PATH；都失败才告警
+    # hermes 命令（2026-09-21 起不再创建，统一用 coco）：
+    #   · 临时要用官方命令：coco cli <参数>（如 coco cli doctor）
+    #   · 确实要把 hermes 暴露到 PATH：COCO_EXPOSE_HERMES=1 重装
     HERMES_BIN="$INSTALL_DIR/venv/bin/hermes"
-    if [[ -x "$HERMES_BIN" ]]; then
-        LINKED=0
+    if [[ "${COCO_EXPOSE_HERMES:-0}" == "1" && -x "$HERMES_BIN" ]]; then
         if [[ -w /usr/local/bin ]] && ln -sf "$HERMES_BIN" /usr/local/bin/hermes 2>/dev/null; then
-            ok "hermes 命令已就绪：/usr/local/bin/hermes"
-            LINKED=1
+            ok "hermes 命令已创建（COCO_EXPOSE_HERMES=1）：/usr/local/bin/hermes"
         elif command -v sudo >/dev/null 2>&1 && sudo ln -sf "$HERMES_BIN" /usr/local/bin/hermes 2>/dev/null; then
-            ok "hermes 命令已就绪：/usr/local/bin/hermes"
-            LINKED=1
-        fi
-        if [[ $LINKED == 0 ]]; then
-            mkdir -p "$HOME/.local/bin"
-            if ln -sf "$HERMES_BIN" "$HOME/.local/bin/hermes" 2>/dev/null; then
-                ok "hermes 命令已就绪：$HOME/.local/bin/hermes"
-                LINKED=1
-                if ! grep -qs '\.local/bin' "$HOME/.bashrc" 2>/dev/null; then
-                    printf '\n# Coco: hermes 命令所在目录\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"
-                    ok "已写入 PATH 到 ~/.bashrc（source ~/.bashrc 后生效）"
-                fi
-            fi
-        fi
-        if [[ $LINKED == 0 ]]; then
-            warn "hermes 命令未能创建，请手动执行: sudo ln -sf $HERMES_BIN /usr/local/bin/hermes"
+            ok "hermes 命令已创建（COCO_EXPOSE_HERMES=1）：/usr/local/bin/hermes"
+        else
+            warn "未能创建 hermes 命令（不影响使用：日常用 coco 即可）"
         fi
     else
-        warn "未找到 $HERMES_BIN —— hermes 命令不可用（安装可能未完成）"
+        for _link in /usr/local/bin/hermes "$HOME/.local/bin/hermes"; do
+            [[ -L "$_link" ]] || continue
+            _target="$(readlink -f "$_link" 2>/dev/null || echo '')"
+            if [[ "$_target" == "$INSTALL_DIR/"* ]]; then
+                rm -f "$_link" 2>/dev/null || sudo rm -f "$_link" 2>/dev/null || true
+                ok "已移除旧的 hermes 命令入口（$_link）—— 统一用 coco"
+            fi
+        done
     fi
 
     # 创建 coco 命令入口（查版本号 / 体检 / 备份）：与 hermes 同一套策略
@@ -676,7 +669,7 @@ setup_coco_config() {
     if "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/scripts/coco_config_align.py"; then
         ok "Coco 标准运行时配置已对齐（轮次 500 / 压缩阈值 0.8 / 保留最近 40 条 / 时区北京时间）"
     else
-        warn "运行时配置对齐未完成，可稍后执行 scripts/update.sh 重试"
+        warn "运行时配置对齐未完成，可稍后执行 coco update 重试"
     fi
 }
 

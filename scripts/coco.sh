@@ -41,7 +41,7 @@ run_hermes() {
     exec hermes "$@"
   else
     echo "找不到官方 hermes 程序（期望位置：$HERMES_BIN）" >&2
-    echo "请确认 Coco 已安装：ls ~/hermes-agent/venv/bin/hermes" >&2
+    echo "请确认 Coco 已安装：ls $REPO_ROOT/venv/bin/hermes" >&2
     exit 1
   fi
 }
@@ -50,7 +50,7 @@ run_hermes() {
 need_venv() {
   if [[ ! -x "$VENV_PY" ]]; then
     echo "找不到 Coco 的 Python 环境（$VENV_PY）" >&2
-    echo "请确认已安装：ls ~/hermes-agent/venv/bin/python" >&2
+    echo "请确认已安装：ls $VENV_PY" >&2
     exit 1
   fi
 }
@@ -119,9 +119,14 @@ case "${1:-version}" in
     if [[ -f "$REPO_ROOT/scripts/update.sh" ]]; then
       exec bash "$REPO_ROOT/scripts/update.sh" "$@"
     fi
-    echo "找不到更新脚本（$REPO_ROOT/scripts/update.sh）" >&2
-    echo "请改用：git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh" >&2
+    echo "找不到更新脚本（$REPO_ROOT/scripts/update.sh）—— 安装可能不完整" >&2
+    echo "可重装（会保留数据库与密钥）：curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh" >&2
     exit 1
+    ;;
+  migrate-path)
+    # 安装目录搬迁（~/hermes-agent → ~/coco）。会停服务重装服务，必须在服务器终端执行
+    shift
+    exec bash "$REPO_ROOT/scripts/migrate_install_dir.sh" "$@"
     ;;
   uninstall)
     shift
@@ -164,6 +169,11 @@ case "${1:-version}" in
     shift
     run_hermes pairing "$@"
     ;;
+  cli)
+    # 逃生口：临时用官方程序的任意子命令（排障/支持用）
+    shift
+    run_hermes "$@"
+    ;;
 
   # ---------- 帮助 ----------
   help|--help|-h)
@@ -180,6 +190,7 @@ Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）
   restore    恢复数据：coco restore --file <备份.dump> / --migration <迁移包.tar.gz>
   update     更新到最新版（内部即完整更新流程：备份 → 拉代码 → 依赖 → 迁移 → 重启 → 体检）
   uninstall  卸载 Coco（三档菜单 + 输 yes 确认；1/2 档会先自动备份，3 档不备份）
+  migrate-path  安装目录搬迁（老实例 ~/hermes-agent → ~/coco，先 --dry-run 看计划）
 
 服务与诊断:
   status     服务状态        （等价于 hermes gateway status）
@@ -194,13 +205,16 @@ Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）
   gateway    服务安装等：coco gateway install
   pairing    飞书配对批准：coco pairing approve feishu <配对码>
 
+高级（排障用）:
+  cli        直接用底层程序的子命令：coco cli doctor（日常不需要）
+
   help       显示本帮助
 
 说明:
-  · 官方 hermes 命令仍然可用；coco 是日常使用的封装，两者对同一套程序生效。
+  · 日常统一用 coco；底层程序命令不再对外暴露（需要时用 coco cli <子命令>）。
   · 版本号存在 $REPO_ROOT/VERSION；官方 hermes --version 显示的是底层框架版本。
-  · 更新也可以用：git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh
-    （不要用 install.sh 更新：它会重建安装目录、清掉数据库密钥与图片缓存。）
+  · 更新也可以用（老实例/排障）：git -C <安装目录> pull && bash <安装目录>/scripts/update.sh
+    （不要用 install.sh 更新：它会重建安装目录，清掉数据库密钥与图片缓存。）
 EOF
     ;;
   *)

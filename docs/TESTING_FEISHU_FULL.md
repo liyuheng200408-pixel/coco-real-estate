@@ -6,9 +6,9 @@
 
 ```bash
 coco update   # 更新到最新版并重启服务
-git -C ~/hermes-agent log --oneline -1                                # 确认版本
+git -C ~/coco log --oneline -1                                # 确认版本
 coco check  # 预期 FAIL 0
-~/hermes-agent/venv/bin/python ~/hermes-agent/scripts/smoke_test_real_estate.py  # 预期零崩溃
+~/coco/venv/bin/python ~/coco/scripts/smoke_test_real_estate.py  # 预期零崩溃
 ```
 
 ## 飞书实测清单（62 工具，分 5 批）
@@ -96,7 +96,7 @@ coco check  # 预期 FAIL 0
 ## 查库验证模板
 
 ```bash
-export $(grep DATABASE_URL ~/hermes-agent/.env.db) && ~/hermes-agent/venv/bin/python -c "
+export $(grep DATABASE_URL ~/coco/.env.db) && ~/coco/venv/bin/python -c "
 import sqlalchemy, os
 e = sqlalchemy.create_engine(os.environ['DATABASE_URL'])
 with e.connect() as c:

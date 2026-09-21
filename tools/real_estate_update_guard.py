@@ -7,7 +7,7 @@ Coco 在飞书会话里有 terminal 工具（`hermes-feishu` 工具集包含 cor
 
 * `hermes update`（**官方**更新命令）——不会跑 Coco 自己的 `migrations/`（表结构会落后），
   还会 `git stash` + `git reset --hard`（可能覆盖经纪人手改过的代码）。
-* `bash ~/hermes-agent/scripts/update.sh`（我们的）——脚本第 7 步 `systemctl --user restart
+* `coco update`（等价于旧写法 `bash <安装目录>/scripts/update.sh`，我们的）——脚本第 7 步 `systemctl --user restart
   hermes-gateway` 会重启网关服务，而脚本与网关同属一个服务 cgroup → **连同脚本自己一起被杀**：
   更新跑成半截（收尾与体检没跑），同时把当前对话打断。
 
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import re
 from typing import Optional
 
@@ -32,7 +33,7 @@ REFUSAL_MESSAGE = (
     "【更新需要你在服务器终端执行】为了不打断我们当前的对话、并确保数据库迁移完整跑完，"
     "更新命令请你自己在服务器上执行：\n"
     "  coco update\n"
-    "（等价写法：git -C ~/hermes-agent pull && bash ~/hermes-agent/scripts/update.sh）\n"
+    "（等价写法：git -C ~/coco pull && bash ~/coco/scripts/update.sh）\n"
     "（我这边执行会重启网关服务，把我们的对话一起中断；官方 `hermes update` 也不要使用："
     "它不会跑 Coco 的数据库迁移，还可能覆盖你手改过的代码。）"
 )
@@ -49,6 +50,9 @@ _UPDATE_PATTERNS = (
     re.compile(r"(?<![\w.\-/])coco\s+(?:update|start|stop|restart|uninstall|restore)\b", re.I),
     re.compile(r"(?<![\w.\-/])coco\s+gateway\s+(?:install|start|stop|restart|uninstall)\b", re.I),
     re.compile(r"(?<![\w.\-/])coco\s+(?:model|setup|pairing)\b", re.I),   # 配置类要人工交互，别在会话里跑
+    re.compile(r"(?<![\w.\-/])coco\s+migrate-path\b", re.I),              # 搬迁会停服务重装服务
+    re.compile(r"migrate_install_dir\.sh", re.I),
+    re.compile(r"(?<![\w.\-/])coco\s+cli\b", re.I),                       # 逃生口不给会话用（可跑任意官方命令）
     # 直接在我们的安装目录里做 git 变更（会造成"跑着的代码"与磁盘代码错位）
     re.compile(r"git\s+(?:-C\s+\S*(?:hermes-agent|coco-real-estate)\S*\s+)?(?:pull|checkout|reset|clean|stash)\b", re.I),
 )
@@ -97,4 +101,4 @@ def coco_update_block(
 
 def install_dir() -> str:
     """Coco 安装目录（仅用于话术展示与调试）"""
-    return os.environ.get("HERMES_AGENT_DIR") or os.path.expanduser("~/hermes-agent")
+    return os.environ.get("HERMES_AGENT_DIR") or str(Path(__file__).resolve().parents[1])

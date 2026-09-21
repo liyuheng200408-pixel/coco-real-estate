@@ -12,6 +12,9 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# 安装目录按本文件位置推导（2026-09-21 自定位，改目录名不用改代码）
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 # 控制台输出抗编码：Windows 上 stdout 默认跟随控制台代码页（cp1252/GBK），脚本里的中文
 # print 会抛 UnicodeEncodeError，把备份/恢复整个带崩（2026-09-20 真机实测：计划任务注册
 # 成功、一跑备份就崩在 _log 的 print 上）。这里一次性把两个流改成 UTF-8 + 替换不可编码字符，
@@ -34,7 +37,7 @@ def _load_db_config():
 
     # 尝试从 .env.db 读取
     candidates = [
-        Path.home() / "hermes-agent" / ".env.db",
+        _REPO_ROOT / ".env.db",
         Path.cwd() / ".env.db",
     ]
     for env_file in candidates:
@@ -227,7 +230,7 @@ class DatabaseBackup:
         cache_candidates = [
             Path.home() / ".hermes" / "image_cache",          # 房源图片实际位置（海报/上传）
             Path.home() / ".hermes" / "cache" / "images",
-            Path.home() / "hermes-agent" / ".hermes" / "cache" / "images",
+            _REPO_ROOT / ".hermes" / "cache" / "images",
         ]
         image_dir = None
         for cand in cache_candidates:
@@ -259,7 +262,7 @@ class DatabaseBackup:
         cache_candidates = [
             Path.home() / ".hermes" / "image_cache",          # 房源图片实际位置（海报/上传）
             Path.home() / ".hermes" / "cache" / "images",
-            Path.home() / "hermes-agent" / ".hermes" / "cache" / "images",
+            _REPO_ROOT / ".hermes" / "cache" / "images",
         ]
         target_dir = None
         for cand in cache_candidates:
@@ -341,7 +344,7 @@ class DatabaseBackup:
             return False
 
         env_db_candidates = [
-            Path.home() / "hermes-agent" / ".env.db",
+            _REPO_ROOT / ".env.db",
             Path.cwd() / ".env.db",
         ]
         env_db = None

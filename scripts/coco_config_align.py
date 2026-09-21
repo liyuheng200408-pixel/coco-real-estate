@@ -200,7 +200,7 @@ def summary(effective: "dict[str, object] | None" = None, state: "dict | None" =
         return {"level": "pass", "message": "运行时配置已对齐 Coco 标准", "hint": None}
     if reclaimable and not custom:
         return {"level": "warn", "message": f"配置与 Coco 标准不一致：{detail_reclaim}",
-                "hint": "修复：bash ~/hermes-agent/scripts/update.sh（会自动拉回以上各项）"}
+                "hint": "修复：coco update（会自动拉回以上各项）"}
     if custom and not reclaimable:
         return {"level": "info",
                 "message": f"检测到你自己调整过的设置，已按「自定义优先」保留：{detail_custom}",
