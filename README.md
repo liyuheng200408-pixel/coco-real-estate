@@ -22,19 +22,6 @@
 
 6. **合规使用**：请确保你的业务操作符合当地法律法规（如个人信息保护法、房地产中介管理规定等）。本项目不构成任何投资建议或法律建议。因违规使用本软件产生的法律后果，由使用者自行承担。
 
-## 📖 项目简介
-
-Coco（可可）是一个房产顾问 AI 助手，专为房产中介设计。它具备以下特点：
-
-> <img src="https://img.shields.io/github/v/release/liyuheng200408-pixel/coco-real-estate?label=Coco%20AI" alt="Coco AI 当前版本">
->
-> 🏷️ **当前版本：v0.21.3-68** · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/latest)
-
-- **主动服务**：内置定时提醒功能（早报 09:00 / 午间 13:00 / 逾期每 30 分钟），默认关闭；需要时对 Coco 说一句「开启定时任务」即可
-- **懂业务**：内置客户分级、房源匹配、带看、成交全流程管理能力
-- **即装即用**：一键安装脚本完成环境检测、依赖安装、数据库创建、服务注册
-- **开放可控**：MIT 协议，代码完整开源，可自行二次开发
-
 ## ✨ 核心功能
 
 | 模块 | 说明 |
