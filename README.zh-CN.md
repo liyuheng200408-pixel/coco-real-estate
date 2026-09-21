@@ -50,7 +50,7 @@ SSH 重新连接后，按顺序执行：
 - Node.js（浏览器工具需要，脚本按 26 → 24 → 22 取最新可用版本）
 - ripgrep（快速文件搜索）
 - ffmpeg（语音消息的音频格式转换）
-- 海报字体与渲染器（约 140MB，可跳过：COCO_SKIP_FONTS=1）
+- 海报字体与渲染器（约 140MB）
 
 > 你无需手动安装 Python、Node.js、ripgrep、ffmpeg 或 PostgreSQL；安装脚本会检测缺失的依赖并自动安装。只需确认服务器有 sudo 权限、并能正常联网。
 

@@ -109,9 +109,7 @@ setup_python() {
     fi
     if ! _py_ok "$PYTHON_CMD" && command -v apt-get &> /dev/null; then
         info "当前 Python $PYTHON_VERSION 不在 3.11~3.13 范围内，尝试安装 python3.13..."
-        if ! sudo apt-get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1; then
-            echo "  官方源里没有 python3.13（Ubuntu 26.04 默认自带 3.14，官方源不含 3.13）—— 改用下面方式准备"
-        fi
+        sudo apt-get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1 || true
         if command -v python3.13 &> /dev/null && _py_ok python3.13; then
             PYTHON_CMD="python3.13"
             PYTHON_VERSION="$(python3.13 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
@@ -119,18 +117,18 @@ setup_python() {
         fi
     fi
     if ! _py_ok "$PYTHON_CMD"; then
-        info "尝试用 uv 准备 Python 3.13（与官方安装方式一致）..."
+        info "尝试用 uv 准备 Python 3.13..."
         # 国内机器（仓库源选到 gitee = 国内可达性更好）→ Python 下载默认走国内镜像；
         # 海外 → 保持官方源。用户已设 UV_PYTHON_INSTALL_MIRROR 时一律尊重用户设置。
         if [[ -z "${UV_PYTHON_INSTALL_MIRROR:-}" && "$COCO_CHOSEN_SOURCE" == "gitee" ]]; then
             export UV_PYTHON_INSTALL_MIRROR="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone"
-            echo "  已启用国内镜像下载 Python（南京大学镜像；如需改用官方源：unset UV_PYTHON_INSTALL_MIRROR）"
+            echo "  已启用国内镜像下载 Python"
         fi
         if ! command -v uv &> /dev/null; then
             # 装 uv：优先走国内 pip 镜像（避免境外 astral.sh 卡住）；失败再退回官方脚本（带超时）
             pip install -q -i https://pypi.tuna.tsinghua.edu.cn/simple uv >/dev/null 2>&1 || true
             if ! command -v uv &> /dev/null; then
-                echo "  正在下载 uv（约 20MB，超时 120 秒）..."
+                echo "  正在下载 uv..."
                 curl -fsSL --max-time 120 --connect-timeout 20 https://astral.sh/uv/install.sh 2>/dev/null | sh >/dev/null 2>&1 || true
             fi
             export PATH="$HOME/.local/bin:$PATH"
@@ -786,7 +784,7 @@ install_node_line() {
 
 install_node() {
     sudo -v 2>/dev/null || true   # 续一次 sudo 凭据（apt 那步耗时较久，前面预取的已可能过期）
-    info "检查 Node.js（浏览器工具 / TUI 需要，要求 22.22+ / 24.11+ / 26+）"
+    info "检查 Node.js"
     if [[ "${COCO_SKIP_NODE:-0}" == "1" ]]; then
         warn "已跳过（COCO_SKIP_NODE=1），浏览器工具与 TUI 将不可用"
         return 0
@@ -815,7 +813,7 @@ install_node() {
 # ==================== 海报渲染器与字体（2026-09-19 加） ====================
 # 海报要用 librsvg + 中文商用字体才有"专业感"。失败不阻塞安装：海报会回落旧引擎/系统字体。
 install_poster_fonts() {
-    info "安装海报渲染器与字体（约 140MB，可跳过：COCO_SKIP_FONTS=1）"
+    info "安装海报渲染器与字体（约 140MB）"
     if [[ "${COCO_SKIP_FONTS:-0}" == "1" ]]; then
         warn "已跳过（COCO_SKIP_FONTS=1），海报将使用系统自带字体"
         return 0

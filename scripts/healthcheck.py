@@ -399,5 +399,5 @@ if FAIL == 0:
 else:
     print(f" 结论: 存在 {FAIL} 个问题，按上方修复提示处理后再测")
 print("=" * 56)
-print("提示: 更新请用 coco update（不要用 install.sh，也不要直接跑官方 update）")
+print("提示: 更新请用 coco update")
 sys.exit(1 if FAIL else 0)

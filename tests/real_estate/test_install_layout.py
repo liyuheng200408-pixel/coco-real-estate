@@ -210,10 +210,6 @@ class TestPython313DownloadPath:
         assert "--max-time 120" in t, "下载 uv 脚本必须带超时"
         assert "正在下载并准备 Python 3.13" in t, "应打印进度提示"
 
-    def test_apt_missing_reports_reason(self):
-        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
-        assert "官方源里没有 python3.13" in t, "apt 装不到时要说明原因（不再静默）"
-
     def test_no_manual_export_required_in_messages(self):
         """对外提示不应要求用户手动 export 环境变量（标准是"一条命令"）"""
         t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
