@@ -69,16 +69,26 @@ class EncryptedString(TypeDecorator):
 # 太脆，"海口美兰区海甸岛恒大美丽沙 3 号楼 1 单元 1602" 与 "恒大美丽沙3栋1单元1602" 判不出来）。
 # 现在把标题解析成这套房的**身份要素**再逐项比对：小区主体 + 期数 + 楼栋 + 单元 + 房号 + 面积。
 _GEO_TOKENS = ["海口市", "海口", "海南", "美兰区", "龙华区", "秀英区", "琼山区", "桂林洋开发区", "桂林洋"]
-# 保留 # 供「3#1单元1602」这类写法解析；比对小区名/整串时再去掉
-_PUNCT_KEEP_HASH = re.compile(r"[\s,，、.。;；:：\-_]+")
+# 结构解析用的分隔符（统一成空格，**保留数字边界**）：早期版本先删空格，把 "1802 1 室" 粘成 18021
+# → 房号解析成 8021，导致同一套房判成两套（2026-09-21 真实事故：老板重发同一套出租房被重复建档）
+_SEP_RE = re.compile(r"[\s,，、.。;；:：\-_]+")
+# 比对小区名/整串时用（此时 # 也可去掉）
 _PUNCT_ALL = re.compile(r"[\s,，、.。;；:：\-_#＃]+")
-_BUILDING_RE = re.compile(r"(\d{1,3})(?:号)?(?:楼|栋|幢|座)|(\d{1,3})[#＃]")
-_UNIT_RE = re.compile(r"(\d{1,3})单元")
+_BUILDING_RE = re.compile(r"(\d{1,3})\s*(?:号)?\s*(?:楼|栋|幢|座)|(\d{1,3})\s*[#＃]")
+_UNIT_RE = re.compile(r"([一二三四五六七八九十\d]{1,2})\s*单元")
 _PHASE_RE = re.compile(r"第?([一二三四五六七八九十\d]{1,2})期")
-_FLOOR_RE = re.compile(r"\d{1,3}层|\d{1,3}/\d{1,3}层?")
-# 房号：3~4 位数字（可带字母后缀，如 1602A）；后面不能再跟数字/字母，否则会把 1602A 截成 1602
-_ROOM_RE = re.compile(r"(\d{3,4}[A-Za-z]?)(?:室|房)?(?![0-9A-Za-z])")
-_ROOM_TAIL_BLOCK = set("层楼栋幢座")
+_FLOOR_RE = re.compile(r"\d{1,3}\s*层|\d{1,3}\s*/\s*\d{1,3}\s*层?")
+# 首选判据：紧跟在「单元/号楼/栋」后面的 3~4 位数就是房号（最稳，标题尾巴里的数字干扰不到）
+_ROOM_AFTER_MARKER_RE = re.compile(r"(?:单元|号楼|楼|栋|幢|座)\s*(\d{3,4}[A-Za-z]?)(?![\dA-Za-z])")
+# 兜底判据：3~4 位数字（可带字母后缀，如 1602A），前后一位不能是数字/字母
+_ROOM_RE = re.compile(r"(?<!\d)(\d{3,4}[A-Za-z]?)(?:室|房)?(?![\dA-Za-z])")
+# 房号后面跟着这些字 → 是面积/价格/楼层/厅卫数，不是房号
+_ROOM_TAIL_BLOCK = set("平㎡米万元%年天层楼栋幢座厅卫")
+# 房号前面是这些 → 是价格/面积/费用，不是房号
+_ROOM_PREFIX_BLOCK = ("租", "价", "费", "面积", "总价")
+# 中文数字（「4栋一单元」里的「一」）→ 数字，否则「一单元」与「1单元」会被当成不同单元
+_CN_NUM = {"一": "1", "二": "2", "三": "3", "四": "4", "五": "5",
+           "六": "6", "七": "7", "八": "8", "九": "9", "十": "10"}
 # 面积同一口径的容差（㎡）：128 与 128.5 是同一套房的两种说法；差 2 ㎡ 以上视为不同房源
 AREA_TOLERANCE = 1.0
 
@@ -97,34 +107,38 @@ def parse_property_identity(title):
     """把房源标题解析成身份要素：{community, phase, building, unit, room}
 
     解析不出来的一律留空（留空 = 该项不参与比对，绝不臆造）。
+    小区名只取**房号段之前**的部分——房号后面的「1室1厅精装出租」这类描述不算小区名。
     """
-    sep = title or ""
+    t = title or ""
     for tok in _GEO_TOKENS:
-        sep = sep.replace(tok, "")
-    sep = _PUNCT_KEEP_HASH.sub("", sep)
-    sep = _FLOOR_RE.sub("", sep)          # 去掉「16层」这类楼层词，别混进小区名/房号
-    b = _BUILDING_RE.search(sep)
+        t = t.replace(tok, "")
+    t = _SEP_RE.sub(" ", t)                # 分隔符→空格：数字之间保留边界
+    nofloor = _FLOOR_RE.sub(" ", t)        # 去掉「16层」这类楼层词，别混进小区名/房号
+    b = _BUILDING_RE.search(nofloor)
     building = next((g for g in (b.groups() if b else ()) if g), None)
-    u = _UNIT_RE.search(sep)
-    unit = u.group(1) if u else None
-    ph = _PHASE_RE.search(sep)
-    phase = ph.group(1) if ph else None
-    consumed = [(m.start(), m.end()) for m in (b, u) if m]
-    room = None
-    for m in reversed(list(_ROOM_RE.finditer(sep))):
-        if any(s <= m.start() < e for s, e in consumed):
-            continue
-        after = sep[m.end():m.end() + 1]
-        if after and after in _ROOM_TAIL_BLOCK:
-            continue                       # 数字后面是「层/楼/栋」→ 楼层或楼栋号，不是房号
-        room = m.group(1)
-        break
-    rest = sep
-    for m in sorted([m for m in (b, u, ph) if m], key=lambda m: -m.start()):
-        rest = rest[:m.start()] + rest[m.end():]
-    if room:
-        rest = re.sub(re.escape(room) + r"(?:室|房)?", "", rest, count=1)
-    return {"community": _PUNCT_ALL.sub("", rest), "phase": phase,
+    u = _UNIT_RE.search(nofloor)
+    unit = _CN_NUM.get(u.group(1), u.group(1)) if u else None
+    ph = _PHASE_RE.search(nofloor)
+    phase = _CN_NUM.get(ph.group(1), ph.group(1)) if ph else None
+
+    room_match = _ROOM_AFTER_MARKER_RE.search(nofloor)
+    if room_match is None:                 # 标题没写「X单元/X号楼」时才走兜底
+        consumed = [(m.start(), m.end()) for m in (b, u) if m]
+        for m in reversed(list(_ROOM_RE.finditer(nofloor))):
+            if any(s <= m.start() < e for s, e in consumed):
+                continue
+            after = nofloor[m.end():].lstrip()[:1]
+            if after and after in _ROOM_TAIL_BLOCK:
+                continue                    # 后面跟着 平/㎡/万/元/月租/层/楼/厅/卫 → 不是房号
+            if any(k in nofloor[max(0, m.start() - 3):m.start()] for k in _ROOM_PREFIX_BLOCK):
+                continue                    # 前面是 租/价/费/面积 → 是价格或面积，不是房号
+            room_match = m
+            break
+    room = room_match.group(1) if room_match else None
+
+    spans = [m for m in (b, u, room_match) if m]
+    community = nofloor[:min(m.start() for m in spans)] if spans else nofloor
+    return {"community": _PUNCT_ALL.sub("", community), "phase": phase,
             "building": building, "unit": unit, "room": room}
 
 
@@ -1267,24 +1281,41 @@ class RealEstateDB:
         return self.find_property_conflict(title=title, area=area, exclude_id=exclude_id)[1]
 
     def find_property_conflict(self, title, area, exclude_id=None):
-        """一次扫描同时判定「确定重复」与「疑似重复」，返回 (dup, suspected)"""
+        """一次扫描同时判定「确定重复」与「疑似重复」，返回 (dup, suspected)
+
+        确定重复：整串标题归一化后相同，或身份要素相同（小区+期数+楼栋+单元+房号）+ 面积差 ≤1㎡。
+        疑似（只提示、不拦录入，三种情形各带 reason）：
+          ① 同小区同面积，但标题里房号不全；
+          ② 同房号、但库里那条已售/已租（不在售）；
+          ③ 同房号、但面积与本次填写不符。
+        """
         area_value = float(area or 0)
         norm_title = _normalize_title(title)
         ident = parse_property_identity(title)
-        suspected = None
+        cands = {}
         with self.get_session() as s:
-            for p in s.query(Property).filter(Property.status == 'available').all():
+            for p in s.query(Property).all():
                 if exclude_id is not None and p.id == exclude_id:
                     continue
-                if not _area_close(p.area, area_value):
-                    continue
                 other = parse_property_identity(p.title or '')
-                if norm_title and _normalize_title(p.title or '') == norm_title:
-                    return p.to_dict(), None
+                close = _area_close(p.area, area_value)
+                available = (p.status == 'available')
+                if available and close:
+                    if norm_title and _normalize_title(p.title or '') == norm_title:
+                        return p.to_dict(), None
+                    if same_property_identity(ident, other):
+                        return p.to_dict(), None
                 if same_property_identity(ident, other):
-                    return p.to_dict(), None
-                if suspected is None and suspected_same_property_identity(ident, other):
-                    suspected = p.to_dict()
+                    if not available:
+                        cands.setdefault("off_market", {**p.to_dict(), "reason": (
+                            f"库里有一条同房号的记录（编号 {p.id}，状态 {p.status}），本次同房号重新录入")})
+                    elif not close:
+                        cands.setdefault("area_mismatch", {**p.to_dict(), "reason": (
+                            f"库里有一条同房号的房源（编号 {p.id}，面积 {p.area}㎡），本次填写 {area_value}㎡")})
+                elif available and close and suspected_same_property_identity(ident, other):
+                    cands.setdefault("room_unknown", {**p.to_dict(), "reason": (
+                        f"库里有一条同小区、同面积的房源（编号 {p.id}），但标题里房号不全，无法确定是不是同一套")})
+            suspected = cands.get("room_unknown") or cands.get("area_mismatch") or cands.get("off_market")
             return None, suspected
 
     def find_duplicate_properties(self):

@@ -108,7 +108,8 @@ def add_property(
         response["suspected_duplicate"] = {
             "id": suspected["id"], "title": suspected["title"],
             "price": suspected.get("price"), "area": suspected.get("area"),
-            "hint": "库里已有一套同小区、同面积的在售房源，请让经纪人确认是不是同一套",
+            "reason": suspected.get("reason"),
+            "hint": "疑似同一套，请让经纪人确认是不是同一套",
         }
     if inferred:
         response["inferred"] = inferred

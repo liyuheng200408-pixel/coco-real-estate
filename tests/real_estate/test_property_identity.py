@@ -179,3 +179,77 @@ def test_cleanup_still_removes_plain_duplicate(db, monkeypatch):
     out = json.loads(t.deduplicate_properties(dry_run=False))
     assert out["result"]["removable"] == [dup["id"]], out
     assert db.get_stats().get("available_properties", 0) == 1
+
+
+# ---------- 2026-09-21 真实事故：Coco 自己生成的标题把房号解析带偏 ----------
+# （老板重发同一套出租房 → 又建了一条；根因是解析时先删空格，把「1802 1 室」粘成 18021）
+# (说明, 库里已有的标题, 再次录入的标题, 面积)
+REAL_TITLE_VARIANTS = [
+    ("出租标题带「1 室 1 厅精装出租」尾缀", "国贸京华城 4 号楼 1 单元 1802 1 室 1 厅精装出租",
+     "海口龙华区国贸京华城附近 4 号楼 1 单元 1802", 45),
+    ("标题带面积 45平", "京华城 1802 45平 精装", "京华城 4号楼1单元1802", 45),
+    ("标题带面积 145平（三位数）", "保利中央海岸 7号楼2单元2103 145平", "保利中央海岸 7号楼2单元2103", 145),
+    ("标题带租金 月租2200", "京华城 1802 月租2200", "京华城 4号楼1单元1802", 45),
+    ("标题带总价 280万", "保利中央海岸 7号楼2单元2103 280万", "保利中央海岸 7号楼2单元2103", 145),
+    ("单元写中文「4栋一单元」", "京华城 4栋一单元1802", "京华城 4号楼1单元1802", 45),
+]
+
+
+@pytest.mark.parametrize("label,old_title,new_title,area", REAL_TITLE_VARIANTS,
+                         ids=[c[0] for c in REAL_TITLE_VARIANTS])
+def test_title_with_extra_numbers_still_blocks(db, label, old_title, new_title, area):
+    """标题里带面积/租金/总价/室厅尾缀时，房号不能被带偏 → 仍须判重"""
+    make_property(db, title=old_title, area=area)
+    assert db.find_duplicate_property(title=new_title, area=area) is not None, f"{label}：{old_title}"
+
+
+def test_title_with_area_but_different_room_passes(db):
+    """反向：标题带面积数字，但房号不同 → 必须放行（别把 45 平当房号）"""
+    make_property(db, title="京华城 1803 45平 精装", area=45.0)
+    assert db.find_duplicate_property(title="京华城 4号楼1单元1802", area=45.0) is None
+
+
+# ---------- 疑似重复：不拦，但要让经纪人看得见 ----------
+def test_suspected_when_existing_record_is_off_market(db, monkeypatch):
+    """库里那条已售/已租 → 不拦，但返回疑似提示（原因写明状态）"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    make_property(db, title="京华城 4号楼1单元1802", area=45.0, status="rented")
+
+    out = json.loads(t.add_property(title="京华城 4号楼1单元1802", price=2200, area=45.0,
+                                    property_type="rental"))
+    assert out["success"] is True, out
+    assert "已租" in out["suspected_duplicate"]["reason"] or "rented" in out["suspected_duplicate"]["reason"]
+
+
+def test_suspected_when_area_mismatch(db, monkeypatch):
+    """同房号但面积不符（45 vs 48）→ 不拦，但返回疑似提示（原因写明面积）"""
+    import tools.real_estate_property as t
+    monkeypatch.setattr(t, "_get_db", lambda: db)
+    make_property(db, title="京华城 4号楼1单元1802", area=45.0)
+
+    out = json.loads(t.add_property(title="京华城 4号楼1单元1802", price=2200, area=48.0,
+                                    property_type="rental"))
+    assert out["success"] is True, out
+    assert "㎡" in out["suspected_duplicate"]["reason"]
+
+
+# ---------- 真实库样本（老板 22 套里的两对重复）----------
+REAL_LIBRARY = [
+    ("海口秀英区西海岸雅居乐金沙湾 6 号楼 1 单元 1202", 110.0, "new"),
+    ("西海岸雅居乐金沙湾 6 号楼 1 单元 1202 3 室 2 厅 110㎡", 110.0, "new"),
+    ("海口龙华区国贸京华城附近 4 号楼 1 单元 1802", 45.0, "rental"),
+    ("国贸京华城 4 号楼 1 单元 1802 1 室 1 厅精装出租", 45.0, "rental"),
+]
+
+
+def test_real_library_duplicate_groups_are_found(db):
+    """真实库样本：编号 13/22、17/23 这两组重复，扫库必须认出来"""
+    ids = {}
+    for title, area, ptype in REAL_LIBRARY:
+        ids[title] = make_property(db, title=title, area=area, property_type=ptype)["id"]
+
+    groups = {frozenset(g) for g in db.find_duplicate_properties()}
+    assert len(groups) == 2, groups
+    assert frozenset({ids[REAL_LIBRARY[0][0]], ids[REAL_LIBRARY[1][0]]}) in groups
+    assert frozenset({ids[REAL_LIBRARY[2][0]], ids[REAL_LIBRARY[3][0]]}) in groups
