@@ -461,8 +461,6 @@ Coco（可可）把客户管理、房源匹配、跟进提醒、成交管理和�
 - 一行命令安装，半小时内跑起来
 - 数据自己掌控，支持加密、备份与迁移
 
-这个项目值得一试：https://gitee.com/liyuheng200408/coco-real-estate（GitHub：https://github.com/liyuheng200408-pixel/coco-real-estate）
-
 ## 📄 License
 
 MIT License - 基于 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 定制
