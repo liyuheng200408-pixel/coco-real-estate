@@ -1,6 +1,6 @@
 # Coco（可可）房产智能体
 
-> 房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
+> Coco（可可） 是一个开源房产项目。它不是简单的聊天机器人，而是一套专为房产中介打造的"第二大脑"：自动管理客户、智能匹配房源、主动跟进提醒、沉淀经营数据，一行命令即可安装到自己的云服务器。
 
 [![Coco AI](https://img.shields.io/github/v/release/liyuheng200408-pixel/coco-real-estate?label=Coco%20AI)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/latest)
 
