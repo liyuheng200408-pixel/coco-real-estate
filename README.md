@@ -132,11 +132,17 @@ coco update
 
 ### 查看版本
 
-
+**查看版本：**
 ```bash
-coco version     # 输出形如：Coco v0.21.3-67（官方 Hermes 0.21.3 定制版）
-coco help        # 查看全部可用命令（version / check / backup / uninstall / help）
+coco version
 ```
+输出形如：Coco v0.21.3-67（官方 Hermes 0.21.3 定制版）。
+
+**查看全部可用命令：**
+```bash
+coco help
+```
+列出 version / check / backup / uninstall / help。
 
 注意：`coco version` 输出的括号里会注明对应的官方 Hermes 版本；想单独查底层框架版本可用 `coco cli --version`。
 
@@ -186,9 +192,15 @@ coco backup
 coco backups
 ```
 
-**恢复备份：**
+**查看备份文件**（`.dump` 数据库 / `.tar.gz` 图片 / `enc_key.txt` 密钥）：
 ```bash
-coco restore --file real_estate_20260101_020000.dump
+ls -la ~/backups/real_estate/
+```
+
+**打包并下载到你的电脑**（第一条在服务器上执行，第二条在你自己的电脑上执行）：
+```bash
+( cd ~/backups/real_estate && tar czf ~/coco_backup_$(date +%Y%m%d).tar.gz ./*.dump ./*.tar.gz ./enc_key.txt )
+scp <用户名>@<服务器IP>:~/coco_backup_*.tar.gz ~/Desktop/
 ```
 
 ### 服务器迁移
@@ -214,41 +226,33 @@ coco restart
 
 > 顺序说明：自动恢复数据库 → 图片 → 加密密钥（enc_key.txt 合并进 .env.db），任一步失败即中止并提示。密钥必须先于服务启动恢复，否则旧数据无法解密。
 
-### 备份
-
-每日凌晨 2 点自动备份到 `~/backups/real_estate/`，保留 30 天；加密密钥同时备份到 `~/backups/real_estate/enc_key.txt`。
-
-```bash
-coco backup                       # 手动备份数据库
-ls -la ~/backups/real_estate/     # 查看备份文件（.dump 数据库 / .tar.gz 图片 / enc_key.txt 密钥）
-```
-
-把备份打包成单个文件并下载到你的电脑（下面两条，第一条在服务器上执行、第二条在你自己的电脑上执行）：
-
-```bash
-( cd ~/backups/real_estate && tar czf ~/coco_backup_$(date +%Y%m%d).tar.gz ./*.dump ./*.tar.gz ./enc_key.txt )
-scp <用户名>@<服务器IP>:~/coco_backup_*.tar.gz ~/Desktop/
-```
-
-密钥（enc_key.txt）是解密客户手机号、微信的唯一凭证，请单独保存到机器之外（电脑 / U 盘 / 网盘）。
-
 ### 恢复
 
+**从某个数据库备份恢复**（备份文件名用上面的 `ls` 查看）：
 ```bash
-# 从某个数据库备份恢复（备份文件名用上面的 ls 查看）
 coco restore --file real_estate_20260101_020000.dump
+```
 
-# 从整机迁移包恢复（数据库 + 图片 + 加密密钥，顺序为数据库 → 图片 → 密钥）
+**从整机迁移包恢复**（数据库 + 图片 + 加密密钥，顺序为数据库 → 图片 → 密钥）：
+```bash
 coco restore --migration /root/coco_migration.tar.gz
+```
 
-coco restart            # 恢复后重启服务
-coco check                        # 体检核对（数据库 / 密钥 / 备份新鲜度）
+**恢复后重启服务：**
+```bash
+coco restart
+```
+
+**体检核对**（数据库 / 密钥 / 备份新鲜度）：
+```bash
+coco check
 ```
 
 ### 卸载
 
+**选择卸载程度**（1 保留数据 / 2 卸载并清理状态 / 3 彻底清理），输入 yes 确认：
 ```bash
-coco uninstall                    # 选择卸载程度（1 保留数据 / 2 卸载并清理状态 / 3 彻底清理），输入 yes 确认
+coco uninstall
 ```
 
 - 1、2 档会在动手前自动备份数据库与加密密钥，并打印备份包路径与下载命令；3 档（彻底清理，含数据库）不备份，如需备份请先执行 `coco backup`。

@@ -37,7 +37,6 @@ coco backup
 
 ```bash
 coco backups
-coco backups   # 查看最近备份状态
 ```
 
 ---
@@ -48,20 +47,21 @@ coco backups   # 查看最近备份状态
 
 ### 第 1 步：在旧服务器上打包（重装/迁移前）
 
+**先手动备份一次，确保数据最新：**
 ```bash
-
-# 1. 先手动备份一次，确保数据最新
 coco backup
+```
 
-# 2. 打包（数据库备份 + 图片备份 + 加密密钥）
+**打包**（数据库备份 + 图片备份 + 加密密钥）：
+```bash
 ( cd ~/backups/real_estate && tar czf /root/coco_migration.tar.gz *.dump real_estate_images_*.tar.gz enc_key.txt )
 ls -lh /root/coco_migration.tar.gz
 ```
 
 ### 第 2 步：把迁移包下载到本地电脑
 
+**在您自己的电脑上执行**（Windows 用 CMD/PowerShell，把 IP 换成服务器公网 IP）：
 ```bash
-# 在您自己的电脑上执行（Windows 用 CMD/PowerShell，把 IP 换成服务器公网 IP）
 scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 ```
 
@@ -69,30 +69,41 @@ scp root@服务器IP:/root/coco_migration.tar.gz ~/Desktop/
 
 ### 第 3 步：在新服务器上一键安装
 
+按服务器所在地区选一条：
+
+**国内服务器（Gitee 源）：**
 ```bash
-# 按服务器所在地区选一条
-# 国内服务器（Gitee 源）
 curl -fsSL https://gitee.com/liyuheng200408/coco-real-estate/raw/master/install.sh -o install.sh && bash install.sh
-# 海外服务器（GitHub 源）
-# curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
+```
+
+**海外服务器（GitHub 源）：**
+```bash
+curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-estate/master/install.sh -o install.sh && bash install.sh
 ```
 
 安装完成后按提示做两件配置（安装脚本会打印说明）：
 
+**配置模型**（小米 MiMo，填 API Key）：
 ```bash
-coco model    # 配置模型（小米 MiMo，填 API Key）
-coco setup    # 配置飞书（填 App ID 和 App Secret）
+coco model
+```
+
+**配置飞书**（填 App ID 和 App Secret）：
+```bash
+coco setup
 ```
 
 > 飞书开放平台那边：如果服务器 IP 变了，记得更新事件订阅 URL。
 
 ### 第 4 步：上传迁移包并恢复
 
+**在您自己电脑上执行：把迁移包传到新服务器**：
 ```bash
-# 在您自己电脑上执行：把迁移包传到新服务器
 scp ~/Desktop/coco_migration.tar.gz root@新服务器IP:/root/
+```
 
-# SSH 登录新服务器后执行
+**SSH 登录新服务器后执行：**
+```bash
 coco restore --migration /root/coco_migration.tar.gz
 ```
 
@@ -103,10 +114,11 @@ coco restore --migration /root/coco_migration.tar.gz
 
 ### 第 5 步：重启并验证
 
+**重启服务并查看状态**（`coco status` 应显示运行中）：
 ```bash
 coco restart
 sleep 10
-coco status          # 应显示运行中
+coco status
 ```
 
 然后在飞书里给 Coco 发一条消息（如"查一下房源统计"），确认数据回来了。
@@ -117,8 +129,13 @@ coco status          # 应显示运行中
 
 ### 只恢复数据库（比如误删数据）
 
+**先看有哪些备份：**
 ```bash
-coco backups     # 先看有哪些备份
+coco backups
+```
+
+**恢复指定的数据库备份并重启服务：**
+```bash
 coco restore --file real_estate_20260101_020000.dump
 coco restart
 ```
