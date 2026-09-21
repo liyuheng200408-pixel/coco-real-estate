@@ -34,9 +34,10 @@ def add_property(
     force=True 跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用，默认 False）。
     """
     db = _get_db()
-    # 录入前查重（2026-08-29 老板要求：跟客户一致，重复就不录入）：按 小区名称(标题)+房号 与 面积 完全一致判定
+    # 录入前查重（2026-08-29 老板要求：跟客户一致，重复就不录入；2026-09-21 改按身份要素判定）
+    suspected = None
     if not force:
-        dup = db.find_duplicate_property(title=title, area=area)
+        dup, suspected = db.find_property_conflict(title=title, area=area)
         if dup:
             return json.dumps({
                 "success": False, "duplicate": True, "existing_property": dup,
@@ -102,6 +103,13 @@ def add_property(
     except Exception:
         duplicate_warning = None
     response = {"success": True, "property": result}
+    # 疑似重复（2026-09-21 加）：小区同一个 + 面积同口径，但标题里房号不全 → 只提示，不拦录入
+    if suspected:
+        response["suspected_duplicate"] = {
+            "id": suspected["id"], "title": suspected["title"],
+            "price": suspected.get("price"), "area": suspected.get("area"),
+            "hint": "库里已有一套同小区、同面积的在售房源，请让经纪人确认是不是同一套",
+        }
     if inferred:
         response["inferred"] = inferred
         response["note_inferred"] = ("上列字段是系统按房号自动推断的，请如实转述依据并请经纪人核对"
@@ -649,7 +657,7 @@ registry.register(
 
 
 def deduplicate_properties(dry_run: bool = True, task_id: str = None) -> str:
-    """房源去重：按 标题+面积+价格 找出重复房源，保留最早录入的一条
+    """房源去重：按「小区 + 房号 + 面积」找出重复房源（标题写法不同也能认出），保留最早录入的一条
 
     dry_run=True（默认）只统计不删除；dry_run=False 执行删除。
     有关联带看/成交/跟进记录的重复房源自动跳过（保守处理）。
@@ -671,7 +679,7 @@ def deduplicate_properties(dry_run: bool = True, task_id: str = None) -> str:
 registry.register(
     name="deduplicate_properties",
     toolset="real_estate",
-    schema={"name": "deduplicate_properties", "description": "房源去重：按标题+面积+价格找出重复房源，保留最早录入的一条。dry_run=True只统计，dry_run=False执行删除。", "parameters": {
+    schema={"name": "deduplicate_properties", "description": "房源去重：按小区+房号+面积找出重复房源（标题写法不同也能认出），保留最早录入的一条。dry_run=True只统计，dry_run=False执行删除。", "parameters": {
         "type": "object",
         "properties": {
             "dry_run": {"type": "boolean", "description": "True只统计不删除（默认），False执行删除"},

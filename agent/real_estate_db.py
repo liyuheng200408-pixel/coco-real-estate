@@ -64,18 +64,119 @@ class EncryptedString(TypeDecorator):
         return Text()
 
 
-# ==================== 房源标题归一化（防重复录入漏判） ====================
-# 去掉 城市/区/开发区 等地理前缀 + 空白/常见标点，让同一套房两次录入但标题格式不同（如"海口美兰区桂林洋海阔天空, 7号楼2单元301" vs "桂林洋海阔天空 7号楼2单元301"）也能判重
-_GEO_TOKENS = ["海口市", "海口", "美兰区", "龙华区", "秀英区", "琼山区", "桂林洋开发区", "桂林洋"]
+# ==================== 房源标题归一化与身份解析（防重复录入） ====================
+# 2026-09-21 重做判重（真实事故：同一套房换个写法就会重复建档 —— 只比"整串标题是否完全相同"
+# 太脆，"海口美兰区海甸岛恒大美丽沙 3 号楼 1 单元 1602" 与 "恒大美丽沙3栋1单元1602" 判不出来）。
+# 现在把标题解析成这套房的**身份要素**再逐项比对：小区主体 + 期数 + 楼栋 + 单元 + 房号 + 面积。
+_GEO_TOKENS = ["海口市", "海口", "海南", "美兰区", "龙华区", "秀英区", "琼山区", "桂林洋开发区", "桂林洋"]
+# 保留 # 供「3#1单元1602」这类写法解析；比对小区名/整串时再去掉
+_PUNCT_KEEP_HASH = re.compile(r"[\s,，、.。;；:：\-_]+")
+_PUNCT_ALL = re.compile(r"[\s,，、.。;；:：\-_#＃]+")
+_BUILDING_RE = re.compile(r"(\d{1,3})(?:号)?(?:楼|栋|幢|座)|(\d{1,3})[#＃]")
+_UNIT_RE = re.compile(r"(\d{1,3})单元")
+_PHASE_RE = re.compile(r"第?([一二三四五六七八九十\d]{1,2})期")
+_FLOOR_RE = re.compile(r"\d{1,3}层|\d{1,3}/\d{1,3}层?")
+# 房号：3~4 位数字（可带字母后缀，如 1602A）；后面不能再跟数字/字母，否则会把 1602A 截成 1602
+_ROOM_RE = re.compile(r"(\d{3,4}[A-Za-z]?)(?:室|房)?(?![0-9A-Za-z])")
+_ROOM_TAIL_BLOCK = set("层楼栋幢座")
+# 面积同一口径的容差（㎡）：128 与 128.5 是同一套房的两种说法；差 2 ㎡ 以上视为不同房源
+AREA_TOLERANCE = 1.0
 
 
 def _normalize_title(t):
+    """去地理前缀 + 空白/标点（旧的"整串完全相同"判据，继续作为兜底保留）"""
     if not t:
         return ""
     s = t
     for tok in _GEO_TOKENS:
         s = s.replace(tok, "")
-    return re.sub(r"[\s,，、.。;；:：\-_]+", "", s)
+    return _PUNCT_ALL.sub("", s)
+
+
+def parse_property_identity(title):
+    """把房源标题解析成身份要素：{community, phase, building, unit, room}
+
+    解析不出来的一律留空（留空 = 该项不参与比对，绝不臆造）。
+    """
+    sep = title or ""
+    for tok in _GEO_TOKENS:
+        sep = sep.replace(tok, "")
+    sep = _PUNCT_KEEP_HASH.sub("", sep)
+    sep = _FLOOR_RE.sub("", sep)          # 去掉「16层」这类楼层词，别混进小区名/房号
+    b = _BUILDING_RE.search(sep)
+    building = next((g for g in (b.groups() if b else ()) if g), None)
+    u = _UNIT_RE.search(sep)
+    unit = u.group(1) if u else None
+    ph = _PHASE_RE.search(sep)
+    phase = ph.group(1) if ph else None
+    consumed = [(m.start(), m.end()) for m in (b, u) if m]
+    room = None
+    for m in reversed(list(_ROOM_RE.finditer(sep))):
+        if any(s <= m.start() < e for s, e in consumed):
+            continue
+        after = sep[m.end():m.end() + 1]
+        if after and after in _ROOM_TAIL_BLOCK:
+            continue                       # 数字后面是「层/楼/栋」→ 楼层或楼栋号，不是房号
+        room = m.group(1)
+        break
+    rest = sep
+    for m in sorted([m for m in (b, u, ph) if m], key=lambda m: -m.start()):
+        rest = rest[:m.start()] + rest[m.end():]
+    if room:
+        rest = re.sub(re.escape(room) + r"(?:室|房)?", "", rest, count=1)
+    return {"community": _PUNCT_ALL.sub("", rest), "phase": phase,
+            "building": building, "unit": unit, "room": room}
+
+
+def _bigrams(s):
+    return {s[i:i + 2] for i in range(len(s) - 1)} or {s}
+
+
+def community_relation(a, b):
+    """小区主体的关系：same / unclear / different（容忍写法差异：包含关系 + 二字切分相似度）"""
+    if not a or not b:
+        return "unclear"
+    if a == b:
+        return "same"
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    if len(short) >= 3 and short in long_:
+        return "same"
+    jac = len(_bigrams(a) & _bigrams(b)) / max(1, len(_bigrams(a) | _bigrams(b)))
+    if jac >= 0.6:
+        return "same"
+    return "unclear" if jac >= 0.3 else "different"
+
+
+def _area_close(a, b, tol=AREA_TOLERANCE):
+    try:
+        return abs(float(a or 0) - float(b or 0)) <= tol
+    except (TypeError, ValueError):
+        return False
+
+
+def same_property_identity(a, b):
+    """两个身份要素是否指向同一套房：房号两边都有且相同；期数/楼栋/单元明确冲突即不同"""
+    if not (a.get("room") and b.get("room")):
+        return False
+    if a["room"] != b["room"] or a["phase"] != b["phase"]:
+        return False
+    for key in ("building", "unit"):
+        if a.get(key) and b.get(key) and a[key] != b[key]:
+            return False
+    return community_relation(a["community"], b["community"]) != "different"
+
+
+def suspected_same_property_identity(a, b):
+    """疑似同一套（只提示不拦）：小区同一个、期数/楼栋/单元不冲突，但房号不全"""
+    if a.get("room") and b.get("room"):
+        return False                      # 两边房号都有 → 交给 same_property_identity 严格判定
+    if a["phase"] != b["phase"]:
+        return False
+    for key in ("building", "unit"):
+        if a.get(key) and b.get(key) and a[key] != b[key]:
+            return False
+    return community_relation(a["community"], b["community"]) == "same"
+
 
 # ==================== 数据模型 ====================
 
@@ -1153,33 +1254,92 @@ class RealEstateDB:
             return result
 
     def find_duplicate_property(self, title, area, exclude_id=None):
-        """查"小区名称(标题含房号)+面积"完全一致的在售房源，防重复录入。
+        """查在售房源里是否已有这套房（防重复录入）→ 返回已存在房源 dict；没有则 None
 
-        判定标准（老板 2026-08-29 定）：已存在 状态=available 的房源中，
-        标题归一化后（去区名前缀/空白/标点）与 面积 完全一致 → 视为同一套，返回该房源 dict；否则 None。
-        价格不算身份（单价会变动/被改价），只认 小区名称(标题)+房号+面积。
+        判定（2026-09-21 重做）：整串标题归一化后完全相同，或身份要素相同
+        （小区主体同一个 + 期数一致 + 楼栋/单元不冲突 + 房号相同）+ 面积差 ≤1㎡。
+        价格不算身份（会被改价/调价），只认 小区 + 房号 + 面积。
         """
-        key_area = round(float(area or 0), 2)
+        return self.find_property_conflict(title=title, area=area, exclude_id=exclude_id)[0]
+
+    def find_suspected_property(self, title, area, exclude_id=None):
+        """疑似同一套（只提示、不拦）：小区同一个 + 面积同口径，但标题里房号不全"""
+        return self.find_property_conflict(title=title, area=area, exclude_id=exclude_id)[1]
+
+    def find_property_conflict(self, title, area, exclude_id=None):
+        """一次扫描同时判定「确定重复」与「疑似重复」，返回 (dup, suspected)"""
+        area_value = float(area or 0)
         norm_title = _normalize_title(title)
+        ident = parse_property_identity(title)
+        suspected = None
         with self.get_session() as s:
             for p in s.query(Property).filter(Property.status == 'available').all():
-                if _normalize_title(p.title or '') == norm_title and round(float(p.area or 0), 2) == key_area:
-                    if exclude_id is None or p.id != exclude_id:
-                        return p.to_dict()
-        return None
+                if exclude_id is not None and p.id == exclude_id:
+                    continue
+                if not _area_close(p.area, area_value):
+                    continue
+                other = parse_property_identity(p.title or '')
+                if norm_title and _normalize_title(p.title or '') == norm_title:
+                    return p.to_dict(), None
+                if same_property_identity(ident, other):
+                    return p.to_dict(), None
+                if suspected is None and suspected_same_property_identity(ident, other):
+                    suspected = p.to_dict()
+            return None, suspected
 
     def find_duplicate_properties(self):
-        """按 标题+面积+价格 找重复房源组（含Excel批量导入产生的完全重复项）
-        
-        返回 [[keep_id, dup_id, ...], ...]，每组按 id 升序，第一个为保留项。
+        """按身份要素找重复房源组，返回 [[keep_id, dup_id, ...], ...]（每组按 id 升序，第一个为保留项）
+
+        写法不同也能认出（小区/期数/楼栋/单元/房号对齐 + 面积差 ≤1㎡）。
+        分桶策略：有房号的按「房号 + 面积取整」分桶，桶内再与相邻面积桶两两精判；
+        没有房号的按「归一化标题 + 面积」分桶（等同旧规则）——既不漏，也不做 O(n²) 全比。
         """
         with self.get_session() as s:
-            props = s.query(Property).all()
-            groups = {}
-            for p in props:
-                key = (p.title or '', round(p.area or 0, 2), float(p.price or 0))
-                groups.setdefault(key, []).append(p.id)
-            return [sorted(v) for v in groups.values() if len(v) > 1]
+            rows = [(p.id, p.title or '', float(p.area or 0), parse_property_identity(p.title or ''))
+                    for p in s.query(Property).all()]
+        buckets = {}
+        for pid, title, area, ident in rows:
+            if ident["room"]:
+                buckets.setdefault((ident["room"], int(area)), []).append((pid, area, ident))
+            else:
+                buckets.setdefault(("title", _normalize_title(title), round(area, 2)), []).append((pid, area, ident))
+        parent = {}
+
+        def find(x):
+            parent.setdefault(x, x)
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        by_room = {}
+        for key, items in buckets.items():
+            if key[0] == "title":
+                for other in items[1:]:
+                    union(items[0][0], other[0])
+            else:
+                by_room.setdefault(key[0], {})[key[1]] = items
+        for area_map in by_room.values():
+            areas = sorted(area_map)
+            for idx, area_key in enumerate(areas):
+                group = list(area_map[area_key])
+                if idx + 1 < len(areas) and areas[idx + 1] == area_key + 1:
+                    group += area_map[areas[idx + 1]]     # 面积跨整数边界（如 128.6 / 129.4）
+                for i in range(len(group)):
+                    for j in range(i + 1, len(group)):
+                        pid_i, area_i, ident_i = group[i]
+                        pid_j, area_j, ident_j = group[j]
+                        if _area_close(area_i, area_j) and same_property_identity(ident_i, ident_j):
+                            union(pid_i, pid_j)
+        groups = {}
+        for pid in parent:
+            groups.setdefault(find(pid), []).append(pid)
+        return [sorted(v) for v in groups.values() if len(v) > 1]
 
     def remove_duplicate_properties(self, dry_run=True):
         """去重：每组保留最早 id，删除其余（有关联记录则跳过，保守处理）
@@ -1204,9 +1364,18 @@ class RealEstateDB:
                     removed.append(dup_id)
             if not dry_run:
                 s.commit()
+        groups_detail = []
+        with self.get_session() as s:
+            for group in dups:
+                keep = s.query(Property).get(group[0])
+                groups_detail.append({
+                    'keep_id': group[0], 'keep_title': keep.title if keep else None,
+                    'duplicate_ids': group[1:],
+                })
         return {
             'duplicate_groups': len(dups),
             'duplicate_total': sum(len(g) - 1 for g in dups),
+            'groups': groups_detail,
             'removable': removed, 'skipped': skipped,
             'dry_run': dry_run,
         }
