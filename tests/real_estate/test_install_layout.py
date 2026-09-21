@@ -211,9 +211,11 @@ class TestReadmesStayInSync:
 
 
 class TestPython313DownloadPath:
-    """26.04（自带 3.14）会走"下载 Python 3.13"这条路径 —— 必须国内加速、有超时、失败可读。
+    """26.04（自带 3.14）会走"准备 Python 3.13"这条路径 —— 必须国内加速、有超时、失败可读。
 
-    背景：这段以前把输出全丢掉、且没有任何超时，国内机器上看着像"卡死一小时"。
+    背景：这段以前把输出全丢掉、且没有任何超时，国内机器上看着像"卡死一小时"；
+    而且它先用 `pip install` 装 uv —— Ubuntu 23.04 起系统 Python 禁止 pip 装包（PEP 668），
+    这一步在国内的 python3.14 机器上必然失败，于是只剩"去境外下 20MB uv"一条路。
     """
 
     def test_domestic_mirror_for_cn(self):
@@ -224,15 +226,36 @@ class TestPython313DownloadPath:
         # 用户自己设过镜像时必须尊重（不要硬覆盖）
         assert '-z "${UV_PYTHON_INSTALL_MIRROR:-}"' in t
 
-    def test_uv_install_prefers_domestic_pip(self):
+    def test_uv_comes_from_pypi_wheel_not_pip_install(self):
+        """取 uv 不能靠 pip install（PEP 668 会拦），要下 wheel 再解出里面的二进制"""
         t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
-        assert "pypi.tuna.tsinghua.edu.cn/simple uv" in t, "装 uv 应优先国内 pip 镜像"
+        assert "pip download" in t and "--only-binary=:all:" in t, "应用 pip download 取 uv 的 wheel"
+        assert "pip install -q -i" not in t, "pip install 装 uv 在 Ubuntu 23.04+ 会被 PEP 668 拦掉"
+        assert "zipfile" in t and ".data/scripts/uv" in t, "应解出 wheel 里的 uv 可执行文件"
 
-    def test_download_has_timeout_and_progress(self):
+    def test_uv_pypi_sources_cover_both_networks(self):
         t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
-        assert "timeout 900 uv python install 3.13" in t, "下载 Python 必须带超时"
-        assert "--max-time 120" in t, "下载 uv 脚本必须带超时"
+        assert "https://pypi.tuna.tsinghua.edu.cn/simple" in t, "国内机器应能走国内 PyPI 镜像"
+        assert "https://pypi.org/simple" in t, "海外机器应能走官方 PyPI"
+
+    def test_every_download_has_timeout_and_visible_output(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert "timeout 900" in t, "uv 下载 Python 必须带超时"
+        assert "timeout 300" in t, "官方安装脚本必须带超时（它自己下载时没有超时）"
+        assert "--max-time 120" in t, "下载 uv 安装脚本必须带超时"
+        assert "--max-time 900" in t, "直接下载 Python 包必须带超时"
         assert "正在下载并准备 Python 3.13" in t, "应打印进度提示"
+        assert "正在下载 Python 3.13" in t, "应打印进度提示"
+        assert ">/dev/null 2>&1 | sh" not in t, "不能把安装脚本的输出丢掉（否则看着像死机）"
+
+    def test_tarball_fallback_without_uv(self):
+        """uv 这条路走不通时，要能不用 uv 直接下 Python（国内镜像 / GitHub 双源、按架构选包）"""
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert "install_python_tarball" in t, "应有无需 uv 的兜底路径"
+        assert "python-build-standalone" in t
+        assert "install_only" in t and "_stripped" in t, "应优先取体积更小的 stripped 包"
+        assert "expanded_assets" in t and "releases/download" in t, "海外走 GitHub Release"
+        assert "aarch64" in t, "要按 CPU 架构选包"
 
     def test_no_manual_export_required_in_messages(self):
         """对外提示不应要求用户手动 export 环境变量（标准是"一条命令"）"""

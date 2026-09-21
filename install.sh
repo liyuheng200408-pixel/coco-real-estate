@@ -84,6 +84,127 @@ install_deps() {
 }
 
 # ==================== Python 环境 ====================
+# 版本窗口 3.11 <= Python < 3.14（见 pyproject.toml 的 requires-python）
+# 上限原因：3.14 上 pydantic-core 等 Rust 依赖暂无 cp314 轮子；Ubuntu 26.04 默认即 3.14
+_py_ok() { "$1" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 14) else 1)' 2>/dev/null; }
+
+# ---- 取 uv 可执行文件：已装的 → PyPI 镜像下 wheel 解出二进制 → 官方安装脚本 ----
+# 用 pip download 而不是 pip install：下载不装包，不受系统 Python 的 PEP 668 限制
+# （Ubuntu 23.04 起 pip install 到系统 Python 会直接报错退出）；wheel 里就是 uv 的可执行文件
+UV_BIN=""
+
+uv_from_pypi() {
+    local mirror="$1" dl="$TMPDIR_C/uv-wheel" whl xbin
+    rm -rf "$dl"; mkdir -p "$dl"
+    python3 -m pip download --no-deps --only-binary=:all: -q -d "$dl" -i "$mirror" uv 2>"$dl/err.log" || return 1
+    whl="$(ls "$dl"/uv-*.whl 2>/dev/null | head -1)"
+    [[ -n "$whl" && -f "$whl" ]] || return 1
+    python3 -m zipfile -e "$whl" "$dl/x" >/dev/null 2>&1 || return 1
+    xbin="$(ls "$dl"/x/uv-*.data/scripts/uv 2>/dev/null | head -1)"
+    [[ -n "$xbin" && -f "$xbin" ]] || return 1
+    mkdir -p "$HOME/.local/bin" && cp "$xbin" "$HOME/.local/bin/uv" && chmod +x "$HOME/.local/bin/uv" || return 1
+    "$HOME/.local/bin/uv" --version >/dev/null 2>&1 || return 1
+    UV_BIN="$HOME/.local/bin/uv"
+}
+
+prepare_uv() {   # 成功时 UV_BIN 非空
+    local mirrors m err
+    if command -v uv &> /dev/null; then UV_BIN="$(command -v uv)"; return 0; fi
+    if [[ -x "$HOME/.local/bin/uv" ]]; then UV_BIN="$HOME/.local/bin/uv"; return 0; fi
+    # 按仓库源判断国内外：国内机器先试国内 PyPI 镜像，海外机器先试官方 PyPI
+    mirrors="https://pypi.tuna.tsinghua.edu.cn/simple https://pypi.org/simple"
+    if [[ "$COCO_CHOSEN_SOURCE" == "github" ]]; then
+        mirrors="https://pypi.org/simple https://pypi.tuna.tsinghua.edu.cn/simple"
+    fi
+    echo "  正在获取 uv..."
+    for m in $mirrors; do
+        if uv_from_pypi "$m"; then
+            echo "  uv 已就绪"
+            return 0
+        fi
+    done
+    err="$TMPDIR_C/uv-wheel/err.log"
+    [[ -f "$err" ]] && echo "  ⚠️ PyPI 镜像获取 uv 失败：$(grep -m1 . "$err" 2>/dev/null)"
+    echo "  正在从官方安装脚本获取 uv..."
+    if curl -fsSL --connect-timeout 20 --max-time 120 https://astral.sh/uv/install.sh -o "$TMPDIR_C/uv-install.sh" 2>"$TMPDIR_C/uv-curl.log"; then
+        timeout 300 sh "$TMPDIR_C/uv-install.sh" 2>&1 | sed 's/^/  /' || true
+    else
+        echo "  ⚠️ 下载 uv 安装脚本失败：$(head -c 200 "$TMPDIR_C/uv-curl.log" 2>/dev/null)"
+    fi
+    export PATH="$HOME/.local/bin:$PATH"
+    if command -v uv &> /dev/null; then UV_BIN="$(command -v uv)"; return 0; fi
+    [[ -x "$HOME/.local/bin/uv" ]] && { UV_BIN="$HOME/.local/bin/uv"; return 0; }
+    return 1
+}
+
+# ---- 兜底：不用 uv，直接从 python-build-standalone 取 3.13 解包当解释器 ----
+# 国内走南京大学镜像（GitHub Release 镜像），海外走 GitHub 官方 Release
+COCO_PYTHON_DIR="${COCO_PYTHON_DIR:-$HOME/.local/share/coco/python/3.13}"
+PBS_NJU_BASE="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone/LatestRelease"
+PBS_GH_REPO="https://github.com/astral-sh/python-build-standalone"
+
+pbs_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo "x86_64" ;;
+        aarch64|arm64) echo "aarch64" ;;
+        *) echo "" ;;
+    esac
+}
+
+# 从目录页里挑出最新的 3.13 包名（优先体积更小的 stripped 版）
+pbs_tarball_name() {
+    local arch="$1" list_url="$2" tag="$3" page="" name="" pat=""
+    page="$TMPDIR_C/pbs-list-$tag.html"
+    curl -fsSL --connect-timeout 15 --max-time 120 "$list_url" -o "$page" 2>/dev/null || return 1
+    pat="cpython-3\.13\.[0-9]+\+[0-9]+-${arch}-unknown-linux-gnu-install_only"
+    name="$(grep -oE "${pat}_stripped\.tar\.gz" "$page" 2>/dev/null | sort -uV | tail -1)" || true
+    [[ -n "$name" ]] || name="$(grep -oE "${pat}\.tar\.gz" "$page" 2>/dev/null | sort -uV | tail -1)" || true
+    [[ -n "$name" ]] || return 1
+    printf '%s' "$name"
+}
+
+install_python_tarball() {   # 成功时设置 PYTHON_CMD / PYTHON_VERSION
+    local arch src list_url base tag tarball dl dest
+    arch="$(pbs_arch)"
+    if [[ -z "$arch" ]]; then
+        echo "  ⚠️ 未能识别 CPU 架构（$(uname -m)），无法自动准备 Python"
+        return 1
+    fi
+    for src in nju github; do
+        if [[ "$src" == "nju" ]]; then
+            list_url="$PBS_NJU_BASE/"; base="$PBS_NJU_BASE"
+        else
+            tag="$(curl -fsSL --connect-timeout 15 --max-time 60 "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)" || true
+            [[ -n "$tag" ]] || continue
+            list_url="$PBS_GH_REPO/releases/expanded_assets/$tag"
+            base="$PBS_GH_REPO/releases/download/$tag"
+        fi
+        tarball="$(pbs_tarball_name "$arch" "$list_url" "$src")" || continue
+        echo "  正在下载 Python 3.13（约 33MB）..."
+        dl="$TMPDIR_C/pbs-$src.tar.gz"
+        if ! curl -fL --connect-timeout 20 --max-time 900 -o "$dl" "$base/$tarball" 2>"$TMPDIR_C/pbs-curl.log"; then
+            echo "  ⚠️ 下载 Python 失败：$base/$tarball"
+            echo "     $(head -c 200 "$TMPDIR_C/pbs-curl.log" 2>/dev/null)"
+            continue
+        fi
+        dest="$COCO_PYTHON_DIR"
+        rm -rf "$dest"; mkdir -p "$dest"
+        if ! tar xzf "$dl" -C "$dest" 2>/dev/null; then
+            echo "  ⚠️ 解包失败：$dl"
+            rm -rf "$dest"; continue
+        fi
+        if [[ -x "$dest/python/bin/python3" ]] && _py_ok "$dest/python/bin/python3"; then
+            PYTHON_CMD="$dest/python/bin/python3"
+            PYTHON_VERSION="$("$PYTHON_CMD" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+            ok "已准备 Python $PYTHON_VERSION"
+            return 0
+        fi
+        echo "  ⚠️ 解包出的 Python 不可用：$dest/python/bin/python3"
+        rm -rf "$dest"
+    done
+    return 1
+}
+
 setup_python() {
     info "配置 Python 环境..."
     PYTHON_CMD="python3"
@@ -93,9 +214,6 @@ setup_python() {
     PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
     info "Python 版本: $PYTHON_VERSION"
 
-    # Hermes 需要 3.11 <= Python < 3.14（见 pyproject.toml 的 requires-python）
-    # 上限原因：3.14 上 pydantic-core 等 Rust 依赖暂无 cp314 轮子；Ubuntu 26.04 默认即 3.14
-    _py_ok() { "$1" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 14) else 1)' 2>/dev/null; }
     if ! _py_ok "$PYTHON_CMD"; then
         for _cand in python3.13 python3.12 python3.11; do
             if command -v "$_cand" &> /dev/null && _py_ok "$_cand"; then
@@ -123,40 +241,23 @@ setup_python() {
             export UV_PYTHON_INSTALL_MIRROR="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone"
             echo "  已启用国内镜像下载 Python"
         fi
-        if ! command -v uv &> /dev/null; then
-            # 装 uv：优先走国内 pip 镜像（避免境外 astral.sh 卡住）；失败再退回官方脚本（带超时）
-            pip install -q -i https://pypi.tuna.tsinghua.edu.cn/simple uv >/dev/null 2>&1 || true
-            if ! command -v uv &> /dev/null; then
-                echo "  正在下载 uv..."
-                curl -fsSL --max-time 120 --connect-timeout 20 https://astral.sh/uv/install.sh 2>/dev/null | sh >/dev/null 2>&1 || true
-            fi
-            export PATH="$HOME/.local/bin:$PATH"
-            if ! command -v uv &> /dev/null; then
-                echo "  ⚠️ 未能获取 uv；稍后会提示换系统或手动装 Python（不影响已装部分）"
-            fi
-        fi
-        if command -v uv &> /dev/null; then
-            echo "  正在下载并准备 Python 3.13（约 50MB，最长等 15 分钟）..."
-            if ! timeout 900 uv python install 3.13; then
+        if prepare_uv; then
+            echo "  正在下载并准备 Python 3.13（约 33MB，最长等 15 分钟）..."
+            if ! timeout 900 "$UV_BIN" python install 3.13; then
                 echo "  ⚠️ 下载 Python 3.13 超时或被中断（网络较慢）。可重跑本脚本重试；"
                 echo "     若持续失败，建议换 Ubuntu 24.04 LTS 安装（自带 Python 3.12，不需要下载 Python）。"
             fi
-            _uvpy="$(uv python find 3.13 2>/dev/null || true)"
-            if [ -n "$_uvpy" ] && _py_ok "$_uvpy"; then
+            _uvpy="$("$UV_BIN" python find 3.13 2>/dev/null || true)"
+            if [[ -n "$_uvpy" ]] && _py_ok "$_uvpy"; then
                 PYTHON_CMD="$_uvpy"
-                PYTHON_VERSION="$($_uvpy --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+                PYTHON_VERSION="$("$_uvpy" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
                 info "已通过 uv 准备 Python $PYTHON_VERSION"
             fi
         fi
-        if command -v uv &> /dev/null; then
-            uv python install 3.13 >/dev/null 2>&1 || true
-            _uvpy="$(uv python find 3.13 2>/dev/null || true)"
-            if [ -n "$_uvpy" ] && _py_ok "$_uvpy"; then
-                PYTHON_CMD="$_uvpy"
-                PYTHON_VERSION="$($_uvpy --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
-                info "已通过 uv 准备 Python $PYTHON_VERSION"
-            fi
-        fi
+    fi
+    if ! _py_ok "$PYTHON_CMD"; then
+        info "改用直接下载的方式准备 Python 3.13..."
+        install_python_tarball || true
     fi
     if ! _py_ok "$PYTHON_CMD"; then
         error "Python 版本不合适（当前 $PYTHON_VERSION，需要 3.11 ~ 3.13）。建议：① 系统换成 Ubuntu 24.04 LTS 后重跑本脚本；或 ② 自行安装 python3.13（含 python3.13-venv）后重跑。"
