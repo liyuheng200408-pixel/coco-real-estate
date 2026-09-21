@@ -69,7 +69,7 @@ confirm_yes() {   # $1=提示
 case "${1:-version}" in
   # ---------- 日常运维 ----------
   version|--version|-v|"")
-    echo "Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）· 提交 ${COCO_COMMIT}${COCO_CHANNEL_LABEL:+ · ${COCO_CHANNEL_LABEL}}${COCO_TEST_TAG:+ · 测试号 ${COCO_TEST_TAG}}"
+    echo "Coco v${COCO_VER} · 提交 ${COCO_COMMIT}${COCO_CHANNEL_LABEL:+ · ${COCO_CHANNEL_LABEL}}${COCO_TEST_TAG:+ · 测试号 ${COCO_TEST_TAG}}"
     ;;
   check)
     shift
@@ -173,7 +173,7 @@ case "${1:-version}" in
   # ---------- 帮助 ----------
   help|--help|-h)
     cat <<EOF
-Coco v${COCO_VER}（官方 Hermes ${COCO_BASE} 定制版）
+Coco v${COCO_VER}
 
 用法: coco <命令>
 

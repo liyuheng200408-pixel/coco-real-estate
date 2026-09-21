@@ -1,14 +1,14 @@
 # Coco（可可）房产智能体
 
-> 基于 [Hermes Agent](https://hermes-agent.nousresearch.com) 定制的房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
+> 房产顾问智能体，专为房产中介打造。内置客户管理、智能房源匹配、跟进提醒、数据报告等核心能力，一行命令安装，即装即用。
 
 [![Coco AI](https://img.shields.io/github/v/release/liyuheng200408-pixel/coco-real-estate?label=Coco%20AI)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/latest)
 
-> 🏷️ **当前版本：v0.21.3-68**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-68)
+> 🏷️ **当前版本：v0.21.3-68** · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-68)
 
 ## ⚠️ 免责声明
 
-**本项目的定位是个人学习与技术交流**，非商业产品。作者开源本项目仅为分享基于 Hermes Agent 定制行业智能体的思路与实现，不提供任何形式的担保或技术支持。
+**本项目的定位是个人学习与技术交流**，非商业产品。作者开源本项目仅为分享行业智能体的实现思路与代码，不提供任何形式的担保或技术支持。
 
 1. **学习用途定位**：本项目默认面向个人学习、技术研究、功能演示场景。若你希望将其用于生产环境（真实客户、真实业务数据），请务必先自行评估风险、完整测试、并做好以下准备，**因使用本软件产生的一切后果由使用者自行承担**。
 
@@ -70,7 +70,7 @@ curl -fsSL https://raw.githubusercontent.com/liyuheng200408-pixel/coco-real-esta
 
 ### 第二步：安装后的配置
 
-安装脚本执行成功后，你需要完成以下配置才能使用 Hermes。
+安装脚本执行成功后，你需要完成以下配置才能使用 Coco。
 
 **1. 刷新环境变量**：
 
@@ -134,7 +134,7 @@ coco update
 ```bash
 coco version
 ```
-输出形如：Coco v0.21.3-68（官方 Hermes 0.21.3 定制版）。
+输出形如：Coco v0.21.3-68。
 
 **查看全部可用命令：**
 ```bash
@@ -142,7 +142,7 @@ coco help
 ```
 列出 version / check / backup / uninstall / help。
 
-注意：`coco version` 输出的括号里会注明对应的官方 Hermes 版本；想单独查底层框架版本可用 `coco cli --version`。
+注意：想单独查底层框架版本可用 `coco cli --version`。
 
 ### 服务管理
 

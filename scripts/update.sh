@@ -277,7 +277,7 @@ fi
 COCO_VER=$(cat "$REPO_ROOT/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "未知")
 # 版本号形如 0.21.3-1：前半段是官方底座，后半段是 Coco 自己的第 N 次发行
 COCO_BASE="${COCO_VER%%-*}"
-echo -e "版本: \033[1;34mv${COCO_VER}\033[0m  （官方 Hermes ${COCO_BASE} 定制版）"
+echo -e "版本: \033[1;34mv${COCO_VER}\033[0m"
 # 提交号：与安装提示一致，便于任何一台机器对齐"哪一次提交"
 COCO_COMMIT=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "未知")
 echo -e "提交: \033[1;34m${COCO_COMMIT}\033[0m"

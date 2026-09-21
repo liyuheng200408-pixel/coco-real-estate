@@ -78,7 +78,7 @@ def get_coco_version(task_id: str = None) -> str:
     commit = _git_short_commit()
     channel = _channel_label()
     test_tag = _test_tag() if channel == "测试通道" else ""
-    version_line = f"Coco v{ver}（官方 Hermes {base} 定制版）· 提交 {commit} · {channel}"
+    version_line = f"Coco v{ver} · 提交 {commit} · {channel}"
     if test_tag:
         version_line += f" · 测试号 {test_tag}"
     return json.dumps({
