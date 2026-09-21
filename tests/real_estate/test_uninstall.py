@@ -304,7 +304,7 @@ class TestDocsHaveBackupRestoreUninstall:
     def test_readmes_have_three_sections(self):
         for rel in ("README.md", "README.zh-CN.md"):
             t = (REPO_ROOT / rel).read_text(encoding="utf-8")
-            for sec in ("### 备份", "### 恢复", "### 卸载"):
+            for sec in ("### 数据库备份", "### 恢复", "### 卸载"):
                 assert sec in t, f"{rel} 缺少小节：{sec}"
             assert "coco uninstall" in t, f"{rel} 未给出卸载命令"
             assert "coco backup" in t, f"{rel} 未给出手动备份命令"
