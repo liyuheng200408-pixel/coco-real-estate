@@ -178,9 +178,3 @@ class TestDocsUseCocoPrefix:
             t = (REPO_ROOT / rel).read_text(encoding="utf-8")
             for cmd in ("coco update", "coco check", "coco backup", "coco restore", "coco uninstall"):
                 assert cmd in t, f"{rel} 未统一到 {cmd}"
-
-    def test_update_section_keeps_equivalent_long_form(self):
-        """统一成 coco update 后，仍要保留等价写法（老实例没有 coco 命令时可用）"""
-        for rel in ("README.md", "README.zh-CN.md"):
-            t = (REPO_ROOT / rel).read_text(encoding="utf-8")
-            assert "等价写法" in t and "git -C ~/coco pull" in t, rel

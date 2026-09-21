@@ -79,10 +79,6 @@ class TestDocsUseNewLayout:
             assert "~/coco" in t, f"{rel} 未使用新安装目录"
             assert "~/hermes-agent" not in t, f"{rel} 残留旧安装目录（老板要求不写老实例迁移说明）"
 
-    def test_equivalent_update_command_uses_new_dir(self):
-        for rel in ("README.md", "README.zh-CN.md"):
-            t = (REPO_ROOT / rel).read_text(encoding="utf-8")
-            assert "git -C ~/coco pull" in t, f"{rel} 的等价更新写法未换到新目录"
 
 
 

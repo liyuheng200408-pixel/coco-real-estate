@@ -124,8 +124,6 @@ coco restart
 coco update
 ```
 
-> 等价写法（老实例一直可用）：`git -C ~/coco pull && bash ~/coco/scripts/update.sh`
-
 > 更新只用这条命令。**不要用 `install.sh` 更新**（它会重建安装目录，清掉数据库密钥与图片缓存），**也不要直接跑 `hermes update`**（官方更新会重置你手改过的代码）。
 
 > 更新会自动备份，客户数据全程保留，不会删除你的加密密钥。
