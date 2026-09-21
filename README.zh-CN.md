@@ -195,9 +195,13 @@ coco backups
 ls -la ~/backups/real_estate/
 ```
 
-**打包并下载到你的电脑**（第一条在服务器上执行，第二条在你自己的电脑上执行）：
+**在服务器上打包：**
 ```bash
 ( cd ~/backups/real_estate && tar czf ~/coco_backup_$(date +%Y%m%d).tar.gz ./*.dump ./*.tar.gz ./enc_key.txt )
+```
+
+**在你自己的电脑上下载：**
+```bash
 scp <用户名>@<服务器IP>:~/coco_backup_*.tar.gz ~/Desktop/
 ```
 
