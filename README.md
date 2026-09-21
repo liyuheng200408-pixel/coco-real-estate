@@ -4,7 +4,7 @@
 
 [![Coco AI](https://img.shields.io/github/v/release/liyuheng200408-pixel/coco-real-estate?label=Coco%20AI)](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/latest)
 
-> 🏷️ **当前版本：v0.21.3-67**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-67)
+> 🏷️ **当前版本：v0.21.3-68**（官方 Hermes v0.21.3 定制版） · [Gitee](https://gitee.com/liyuheng200408/coco-real-estate/releases) · [GitHub](https://github.com/liyuheng200408-pixel/coco-real-estate/releases/tag/v0.21.3-68)
 
 中文文档见 [README.zh-CN.md](README.zh-CN.md)。
 
@@ -136,7 +136,7 @@ coco update
 ```bash
 coco version
 ```
-输出形如：Coco v0.21.3-67（官方 Hermes 0.21.3 定制版）。
+输出形如：Coco v0.21.3-68（官方 Hermes 0.21.3 定制版）。
 
 **查看全部可用命令：**
 ```bash
