@@ -186,6 +186,30 @@ class TestDocsCommandsExist:
                 assert cmd in known, f"{rel} 写了不存在的命令：coco {cmd}（已知：{sorted(known)}）"
 
 
+class TestReadmesStayInSync:
+    """两份 README 内容必须完全一致（老板 2026-09-22 定的约定）。
+
+    背景：两个平台的仓库首页读的文件不同 —— GitHub 读 `README.md`、Gitee 读
+    `README.zh-CN.md`。两份各自漂移过一次，结果是「同一个项目，两个平台看到的说明不一样」
+    （一边有「完整操作手册见 docs/BACKUP_MIGRATION.md」、另一边有「智能体不回复」排查节）。
+    约定：**改 README 必须同时改两份**；这条断言把约定钉在 CI 上，谁只改一份就会红。
+    """
+
+    def test_two_readmes_are_identical(self):
+        main = (REPO_ROOT / "README.md").read_bytes()
+        zh = (REPO_ROOT / "README.zh-CN.md").read_bytes()
+        if main == zh:
+            return
+        import difflib
+        diff = "".join(difflib.unified_diff(
+            main.decode("utf-8").splitlines(keepends=True),
+            zh.decode("utf-8").splitlines(keepends=True),
+            "README.md", "README.zh-CN.md"))[:2000]
+        raise AssertionError(
+            "两份 README 内容不一致 —— 必须同时改两份"
+            "（GitHub 首页读 README.md、Gitee 首页读 README.zh-CN.md）：\n" + diff)
+
+
 class TestPython313DownloadPath:
     """26.04（自带 3.14）会走"下载 Python 3.13"这条路径 —— 必须国内加速、有超时、失败可读。
 
