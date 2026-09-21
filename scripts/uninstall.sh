@@ -15,11 +15,18 @@
 # 交互（与官方同构）：一条命令 → 三档菜单 → 输 yes 确认
 #   1) 保留数据（推荐）  2) 卸载 + 清状态  3) 彻底清理（含数据库）  4) 取消
 #
+# 备份策略（老板 2026-09-21 定）：
+#   · 1/2 档**自动备份**（数据要留，代码目录里的 .env.db 密钥会被删，必须留还原点），
+#     并把「备份包路径 + 下载到本地电脑的命令」打印出来，由使用者自己下载。
+#   · 3 档**不备份**（都选彻底删除了就是不想要了），只提示：如需备份请先手动执行 coco backup。
+#   · 任何时候都可手动备份：coco backup（或 --backup 强制在 3 档也备份）。
+#
 # 非交互入口：
 #   --mode 1|2|3   直接指定档位（免菜单）
 #   --yes          跳过最后的 yes 确认
 #   --dry-run      只显示会做什么，不改任何东西
-#   --no-backup    跳过卸载前自动备份（确认不要数据时）
+#   --no-backup    跳过 1/2 档的自动备份
+#   --backup       强制在 3 档也先备份（默认 3 档不备份）
 #   --remove-fonts 连字体与渲染依赖一起清（默认保留）
 #
 # 测试/特殊场景覆盖入口：
@@ -57,7 +64,7 @@ BACKUP_DIR="$TARGET_HOME/backups/real_estate"
 
 DRY_RUN=0
 ASSUME_YES=0
-DO_BACKUP=1
+BACKUP_FLAG=""      # ""=按档位默认；"yes"=强制备份；"no"=强制不备份
 REMOVE_FONTS=0
 MODE=""
 
@@ -66,7 +73,8 @@ while [[ $# -gt 0 ]]; do
         --mode) MODE="${2:-}"; shift 2 ;;
         --yes) ASSUME_YES=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
-        --no-backup) DO_BACKUP=0; shift ;;
+        --no-backup) BACKUP_FLAG="no"; shift ;;
+        --backup) BACKUP_FLAG="yes"; shift ;;
         --remove-fonts) REMOVE_FONTS=1; shift ;;
         -h|--help) sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) fail "未知参数: $1（用 --help 看用法）" ;;
@@ -105,9 +113,9 @@ if [[ -z "$MODE" ]]; then
     fi
     echo ""
     echo "卸载程度："
-    echo -e "  ${GREEN}1)${NC} 保留数据（推荐）—— 只卸载程序与服务；数据库、状态目录都保留，以后重装可继续用"
-    echo -e "  ${GREEN}2)${NC} 卸载程序 + 清理状态 —— 额外删除会话/配置/日志/缓存；数据库保留"
-    echo -e "  ${RED}3)${NC} 彻底清理 —— 再删除数据库（房源/客户数据一并删除，不可恢复）"
+    echo -e "  ${GREEN}1)${NC} 保留数据（推荐）—— 只卸载程序与服务；数据库、状态目录都保留【会自动备份】"
+    echo -e "  ${GREEN}2)${NC} 卸载程序 + 清理状态 —— 额外删除会话/配置/日志/缓存；数据库保留【会自动备份】"
+    echo -e "  ${RED}3)${NC} 彻底清理 —— 再删除数据库（房源/客户数据一并删除，不可恢复）【不备份】"
     echo -e "  ${BLUE}4)${NC} 取消 —— 什么都不做"
     echo ""
     printf "请选择 [1/2/3/4]: "
@@ -120,8 +128,20 @@ if [[ -z "$MODE" ]]; then
     esac
 fi
 
+# 备份策略：1/2 档默认备份（数据要留）；3 档默认不备份（都选彻底删除了就是不想要了）
+if [[ "$BACKUP_FLAG" == "yes" ]]; then DO_BACKUP=1
+elif [[ "$BACKUP_FLAG" == "no" ]]; then DO_BACKUP=0
+elif [[ "$MODE" == "3" ]]; then DO_BACKUP=0
+else DO_BACKUP=1
+fi
+
 echo ""
 info "本次将执行：$(mode_label "$MODE")"
+if [[ "$DO_BACKUP" == "1" ]]; then
+    echo "       动手前会先自动备份（数据库 + 加密密钥 + 图片），备份包路径与下载命令结束时打印"
+else
+    echo "       不备份（如需先备份，执行 coco backup，或本命令加 --backup）"
+fi
 [[ "$MODE" == "3" ]] && echo -e "       ${RED}注意：数据库会一起删除，不可恢复${NC}"
 
 # ---- 最后的 yes 确认（与官方同款：输 yes 才执行）----
@@ -138,7 +158,12 @@ fi
 # ---- ① 自动备份（动手前先留还原点）----
 info "[1/6] 卸载前备份"
 if [[ "$DO_BACKUP" != "1" ]]; then
-    warn "已跳过备份（--no-backup）：本次卸载后没有还原点"
+    if [[ "$MODE" == "3" ]]; then
+        warn "按所选档位不备份（彻底清理 = 数据一起删除）"
+        echo "    如你其实想留一份备份：先执行  coco backup  ，或给本命令加 --backup 重跑"
+    else
+        warn "已跳过备份（--no-backup）：本次卸载后没有还原点"
+    fi
 elif [[ "$DRY_RUN" == "1" ]]; then
     echo "    [干跑] 会先备份：数据库导出 + 加密密钥 + 房源图片 → $TARGET_HOME/coco_uninstall_backup_<时间>.tar.gz"
 else
@@ -157,8 +182,16 @@ else
     ( cd "$BACKUP_DIR" && tar czf "$BUNDLE" ./*.dump ./*.tar.gz ./enc_key.txt 2>/dev/null ) \
         || warn "备份包打包不完整（可能缺图片包或密钥），请检查 $BACKUP_DIR"
     ok "已生成备份包：$BUNDLE"
-    echo "    ⚠️  请把它拷到本机之外（电脑/网盘）：删库或重装系统后，本机上的它也会一起没。"
-    echo "    恢复用：python3 scripts/backup_db.py restore_migration --migration-tar <备份包>"
+    echo "    ⚠️  请把它下载到你的电脑：删库或重装系统后，服务器上这份也会一起没。"
+    # 下载命令（由使用者自己在电脑上执行）：给出实际用户名与服务器地址
+    DL_USER="$(whoami 2>/dev/null || echo '<服务器用户名>')"
+    DL_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    [[ -z "$DL_HOST" ]] && DL_HOST="<服务器IP>"
+    echo ""
+    echo "    下载到本地电脑（在你自己的电脑终端执行）："
+    echo "      scp ${DL_USER}@${DL_HOST}:${BUNDLE} ~/Desktop/"
+    echo "    或用 WinSCP / FileZilla 连 ${DL_HOST}，进到 $(dirname "$BUNDLE") 下载"
+    echo "    恢复用（在新机器上）：python3 scripts/backup_db.py restore_migration --migration-tar <备份包>"
 fi
 
 # ---- ② 停服务 ----
@@ -291,4 +324,8 @@ else
     for b in hermes coco; do command -v "$b" >/dev/null 2>&1 && warn "命令仍在 PATH 里：$b（可手动删除软链）"; done
 fi
 echo ""
-ok "卸载流程结束。备份包（若有）在 $TARGET_HOME/，记得拷到机器外。"
+if [[ "$DO_BACKUP" == "1" && "$DRY_RUN" != "1" ]]; then
+    ok "卸载流程结束。备份包在 $TARGET_HOME/，请用上面的 scp 命令下载到电脑后再删服务器。"
+else
+    ok "卸载流程结束。" 
+fi

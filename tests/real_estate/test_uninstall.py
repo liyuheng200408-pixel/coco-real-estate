@@ -213,3 +213,85 @@ class TestCocoCli:
                            capture_output=True, text=True, cwd=REPO_ROOT)
         assert r.returncode == 0, r.stderr
         assert "Coco 卸载" in r.stdout
+
+
+class TestBackupPolicy:
+    """备份策略（老板 2026-09-21 定）：
+
+    · 1/2 档（数据要留）→ **自动备份**，并把备份包路径 + 下载到本地电脑的命令打印出来；
+    · 3 档（彻底清理，啥都不要）→ **不备份**，只提示"如需备份先执行 coco backup"；
+    · --no-backup 跳过（1/2 档）；--backup 强制在 3 档也备份。
+    """
+
+    def _fake_backup(self, tmp_path):
+        """假备份命令：跑成功并在 tmp 下留个标记文件"""
+        marker = tmp_path / "backup-ran.marker"
+        fn = tmp_path / "fake_backup.sh"
+        fn.write_text("#!/usr/bin/env bash\ntouch " + str(marker) + "\n", encoding="utf-8")
+        fn.chmod(fn.stat().st_mode | stat.S_IEXEC)
+        return fn, marker
+
+    def test_mode_3_does_not_backup(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        crontab_bin, _ = _fake_crontab(tmp_path)
+        home = tmp_path / "home"; home.mkdir()
+        backup_cmd, marker = self._fake_backup(tmp_path)
+        env = _env(tmp_path, repo, crontab_bin, home, extra={"COCO_UNINSTALL_BACKUP_CMD": str(backup_cmd)})
+        r = _run(["--mode", "3", "--yes"], env)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert not marker.exists(), "选彻底清理时不应备份"
+        assert "按所选档位不备份" in r.stdout, r.stdout
+        assert "coco backup" in r.stdout, "应提示可手动备份"
+
+    def test_mode_3_backup_flag_forces_backup(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        crontab_bin, _ = _fake_crontab(tmp_path)
+        home = tmp_path / "home"; home.mkdir()
+        backup_cmd, marker = self._fake_backup(tmp_path)
+        env = _env(tmp_path, repo, crontab_bin, home, extra={"COCO_UNINSTALL_BACKUP_CMD": str(backup_cmd)})
+        r = _run(["--mode", "3", "--backup", "--yes"], env)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert marker.exists(), "--backup 应在 3 档也先备份"
+
+    def test_mode_1_backs_up_and_prints_download_command(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        crontab_bin, _ = _fake_crontab(tmp_path)
+        home = tmp_path / "home"; home.mkdir()
+        backup_cmd, marker = self._fake_backup(tmp_path)
+        env = _env(tmp_path, repo, crontab_bin, home, extra={"COCO_UNINSTALL_BACKUP_CMD": str(backup_cmd)})
+        r = _run(["--mode", "1", "--yes"], env)
+        out = r.stdout
+        assert r.returncode == 0, out + r.stderr
+        assert marker.exists(), "1 档应自动备份"
+        assert "coco_uninstall_backup_" in out, out
+        assert "下载到本地电脑" in out and "scp " in out, out
+        assert "请用上面的 scp 命令下载到电脑" in out, out
+
+    def test_mode_2_backs_up(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        crontab_bin, _ = _fake_crontab(tmp_path)
+        home = tmp_path / "home"; home.mkdir()
+        backup_cmd, marker = self._fake_backup(tmp_path)
+        env = _env(tmp_path, repo, crontab_bin, home, extra={"COCO_UNINSTALL_BACKUP_CMD": str(backup_cmd)})
+        r = _run(["--mode", "2", "--yes"], env)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert marker.exists(), "2 档应自动备份"
+
+    def test_no_backup_flag_skips_in_mode_1(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        crontab_bin, _ = _fake_crontab(tmp_path)
+        home = tmp_path / "home"; home.mkdir()
+        backup_cmd, marker = self._fake_backup(tmp_path)
+        env = _env(tmp_path, repo, crontab_bin, home, extra={"COCO_UNINSTALL_BACKUP_CMD": str(backup_cmd)})
+        r = _run(["--mode", "1", "--no-backup", "--yes"], env)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert not marker.exists(), "--no-backup 应跳过备份"
+        assert "已跳过备份" in r.stdout
+
+    def test_menu_text_states_backup_policy(self, tmp_path):
+        repo = _fake_repo(tmp_path)
+        crontab_bin, _ = _fake_crontab(tmp_path)
+        home = tmp_path / "home"; home.mkdir()
+        r = _run(["--dry-run"], _env(tmp_path, repo, crontab_bin, home), stdin_text="4\n")
+        out = r.stdout
+        assert "会自动备份" in out and "【不备份】" in out, out
