@@ -248,6 +248,30 @@ for link in /usr/local/bin/coco "$TARGET_HOME/.local/bin/coco" /usr/local/bin/he
     fi
 done
 
+# ③-b2 shell 配置里的 Coco PATH 兜底行（path_guard.sh 写入；官方卸载只认 hermes 标记，这里自己清）
+COCO_PATH_MARK='# Coco：确保 ~/.local/bin 在 PATH（coco 命令入口在此）'
+for _rc in "$TARGET_HOME/.bashrc" "$TARGET_HOME/.bash_profile" "$TARGET_HOME/.profile" \
+           "$TARGET_HOME/.zshrc" "$TARGET_HOME/.zprofile" "$TARGET_HOME/.config/fish/config.fish"; do
+    [[ -f "$_rc" ]] || continue
+    grep -qF "$COCO_PATH_MARK" "$_rc" 2>/dev/null || continue
+    if [[ "$DRY_RUN" == "1" ]]; then
+        echo "    [干跑] 会清除 PATH 兜底行 $_rc"
+        continue
+    fi
+    _before=$(wc -l < "$_rc")
+    awk -v mark="$COCO_PATH_MARK" '
+        $0 == mark { skip = 1; next }
+        skip && $0 ~ /\.local\/bin/ { skip = 0; next }
+        { skip = 0; print }
+    ' "$_rc" > "$_rc.coco-tmp" && _after=$(wc -l < "$_rc.coco-tmp")
+    if [[ -z "${_after:-}" || "$_after" -lt "$((_before - 4))" ]]; then
+        warn "shell 配置行数变化异常，未改动：$_rc"
+        rm -f "$_rc.coco-tmp"
+        continue
+    fi
+    mv "$_rc.coco-tmp" "$_rc" && ok "已清除 PATH 兜底行：$_rc"
+done
+
 # ③-c 字体与渲染依赖（默认保留）
 if [[ "$REMOVE_FONTS" == "1" ]]; then
     if [[ "$DRY_RUN" == "1" ]]; then

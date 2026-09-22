@@ -300,6 +300,7 @@ PATH_CHECKS = [
     ("A23", "验收登记脚本", "scripts/mark_verified.sh", "file", 1, "验收登记脚本丢失（无法记录老板的实测评语，晋升闸门形同虚设）"),
     ("A24", "测试号脚本", "scripts/tag_test_version.sh", "file", 1, "测试号脚本丢失（测试版无法编号，容易分不清测的是哪一版）"),
     ("A25", "卸载脚本", "scripts/uninstall.sh", "file", 1, "卸载脚本丢失（正式版实例没有卸载通道，只能重装系统）"),
+    ("A26", "PATH 兜底脚本", "scripts/path_guard.sh", "file", 1, "PATH 兜底脚本丢失（coco 入口装到 ~/.local/bin 时用户会敲不到命令）"),
                     ]
 
 

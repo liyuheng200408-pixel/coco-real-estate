@@ -713,6 +713,10 @@ start_service() {
             if ln -sf "$COCO_BIN" "$HOME/.local/bin/coco" 2>/dev/null; then
                 ok "coco 命令已就绪：$HOME/.local/bin/coco（查版本号: coco version）"
                 LINKED=1
+                # ~/.local/bin 常常不在 PATH：照官方那套补一行，否则用户敲 coco 会找不到命令
+                if [[ -f "$INSTALL_DIR/scripts/path_guard.sh" ]]; then
+                    bash "$INSTALL_DIR/scripts/path_guard.sh" ensure || true
+                fi
             fi
         fi
         if [[ $LINKED == 0 ]]; then
