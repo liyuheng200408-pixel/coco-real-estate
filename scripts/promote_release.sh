@@ -36,6 +36,7 @@ FROM_BRANCH="next"      # 测试通道
 TO_BRANCH="master"      # 稳定通道
 TAG=""
 DRY_RUN=0
+ONLY_COMMITS=()
 REMOTES=("origin" "github")
 LABELS=("Gitee" "GitHub")
 
@@ -45,9 +46,20 @@ while [[ $# -gt 0 ]]; do
         --tag) TAG="${2:-}"; shift 2 ;;
         --from) FROM_BRANCH="${2:-}"; shift 2 ;;
         --to) TO_BRANCH="${2:-}"; shift 2 ;;
+        --only)   # 只推指定提交（见文件头：next 上滞留备用方案，全量快进会带上它们）
+            shift
+            while [[ $# -gt 0 && "$1" != --* ]]; do ONLY_COMMITS+=("$1"); shift; done
+            ;;
         *) fail "未知参数: $1" ;;
     esac
 done
+
+# 参数级校验：标签非法时不该走到任何流程（含两道守卫）
+if [[ -n "$TAG" ]]; then
+    case "$TAG" in
+        *-test*) fail "正式标签不能带 -test（那是测试号）—— 正式版请用 v<版本>" ;;
+    esac
+fi
 
 # 只看已跟踪文件的改动（未跟踪的锁文件/.env.db/密钥不算 —— 与更新脚本口径一致）
 if [[ -n "$(git status --porcelain | grep -vE '^\?\?' || true)" ]]; then
@@ -74,6 +86,78 @@ for r in "${REMOTES[@]}"; do
     fi
 done
 
+# ---- --only：只把指定提交推到正式版（2026-09-23 加）----
+# 背景：next 上长期滞留 backup-* 标签钉住的“禁止推正式版”备用方案，全量快进会把它们一起带上，
+# 所以常规晋升走本模式：只 cherry-pick 点名的那几个提交。
+if [[ ${#ONLY_COMMITS[@]} -gt 0 ]]; then
+    ORIG_BRANCH="$(git branch --show-current)"
+    ORIG_TO_SHA="$(git rev-parse "$TO_BRANCH")"
+    info "只推指定提交模式：${ONLY_COMMITS[*]}"
+    for c in "${ONLY_COMMITS[@]}"; do
+        sha="$(git rev-parse --verify "${c}^{commit}" 2>/dev/null || echo '')"
+        [[ -n "$sha" ]] || fail "找不到提交：$c"
+        git merge-base --is-ancestor "$sha" "$FROM_BRANCH" \
+            || fail "$c 不在 $FROM_BRANCH 上 —— 只允许把测试通道上的提交推正式版"
+        bad="$(git tag --points-at "$sha" | grep '^backup-' || true)"
+        [[ -z "$bad" ]] || fail "$c 被“禁止推正式版”的标签钉住（$bad）—— 备用方案绝不推正式版"
+    done
+    echo "  将 cherry-pick 到 $TO_BRANCH："
+    for c in "${ONLY_COMMITS[@]}"; do git --no-pager log --oneline -1 "$c" | sed 's/^/    /'; done
+
+    info "切到 $TO_BRANCH"
+    git checkout -q "$TO_BRANCH" || fail "切到 $TO_BRANCH 失败"
+    CP_OUT="$(git cherry-pick -x "${ONLY_COMMITS[@]}" 2>&1)" || {
+        if printf '%s' "$CP_OUT" | grep -qi 'empty'; then
+            git cherry-pick --abort >/dev/null 2>&1 || true
+            git checkout -q "$ORIG_BRANCH" >/dev/null 2>&1 || true
+            fail "要晋升的提交在 $TO_BRANCH 上已是同样内容（空提交）—— 无需晋升，请确认要推的提交"
+        fi
+        git cherry-pick --abort >/dev/null 2>&1 || true
+        git checkout -q "$ORIG_BRANCH" >/dev/null 2>&1 || true
+        fail "cherry-pick 冲突：已中止并回到 $ORIG_BRANCH；请手工处理后重跑"
+    }
+    NEW_TO_SHA="$(git rev-parse HEAD)"
+    # 确认值用「内容摘要」而不是提交 SHA：cherry-pick 的 SHA 每次重跑都不同（含时间戳），
+    # 内容相同则摘要相同 —— 重跑能对上，换了内容就对不上，逼人重新核对。
+    DIFF_SUM="$(git --no-pager diff "$ORIG_TO_SHA..$NEW_TO_SHA" | git hash-object --stdin | cut -c1-7)"
+    echo "----------------------------------------"
+    echo "本次内容差异（相对旧 $TO_BRANCH ${ORIG_TO_SHA:0:7}）："
+    git --no-pager diff --stat "$ORIG_TO_SHA..$NEW_TO_SHA"
+    echo "----------------------------------------"
+    if [[ "${PROMOTE_CONFIRM:-}" != "$DIFF_SUM" ]]; then
+        git reset -q --hard "$ORIG_TO_SHA"          # 未确认就把 cherry-pick 结果回滚，不留半成品
+        git checkout -q "$ORIG_BRANCH" >/dev/null 2>&1 || true
+        fail "请核对上面的内容清单，确认无误后重跑（上面的 cherry-pick 已回滚）：
+  PROMOTE_CONFIRM=$DIFF_SUM bash scripts/promote_release.sh --only ${ONLY_COMMITS[*]}${TAG:+ --tag $TAG}"
+    fi
+    if [[ -n "$TAG" ]]; then
+        info "打标签 $TAG"
+        git tag -a "$TAG" -m "Coco $TAG" "$NEW_TO_SHA" 2>/dev/null || warn "标签 $TAG 已存在，沿用现有标签"
+        for r in "${REMOTES[@]}"; do git push "$r" "$TAG" || fail "标签推送到 $r 失败"; done
+    fi
+    for r in "${REMOTES[@]}"; do
+        info "推送 $r：$TO_BRANCH"
+        git push "$r" "${NEW_TO_SHA}:refs/heads/$TO_BRANCH" || fail "$r 推送 $TO_BRANCH 失败"
+    done
+    info "回到 $FROM_BRANCH 并合并 $TO_BRANCH（保持以后能快进）"
+    git checkout -q "$FROM_BRANCH" || fail "切回 $FROM_BRANCH 失败"
+    git merge -q -m "Merge branch '$TO_BRANCH' into $FROM_BRANCH" "$TO_BRANCH" \
+        || warn "自动合并失败：请手工 git merge $TO_BRANCH（冲突保留 next 版）后再推 $FROM_BRANCH"
+    for r in "${REMOTES[@]}"; do git push "$r" "$FROM_BRANCH" || warn "推送 $FROM_BRANCH 到 $r 失败"; done
+    mismatch=0
+    for idx in "${!REMOTES[@]}"; do
+        r="${REMOTES[$idx]}"; label="${LABELS[$idx]}"
+        got="$(git ls-remote "$r" "refs/heads/$TO_BRANCH" | cut -f1)"
+        [[ "$got" == "$NEW_TO_SHA" ]] || { warn "$label 的 $TO_BRANCH 停在 ${got:0:7}，期望 ${NEW_TO_SHA:0:7}"; mismatch=1; }
+    done
+    [[ "$mismatch" == "1" ]] && fail "有远程未同步成功 —— 重跑前先看 git log（cherry-pick 可能已应用）"
+    git merge-base --is-ancestor "$TO_BRANCH" "$FROM_BRANCH" \
+        || warn "$TO_BRANCH 不是 $FROM_BRANCH 的祖先 —— 以后快进晋升会失败，请检查"
+    ok "只推指定提交完成：$TO_BRANCH = ${NEW_TO_SHA:0:7}"
+    echo "  还需人工完成：① 建 Release（Gitee/GitHub）② 更新博客版本行"
+    exit 0
+fi
+
 FROM_SHA="$(git ls-remote origin "refs/heads/$FROM_BRANCH" | cut -f1)"
 TO_SHA="$(git ls-remote origin "refs/heads/$TO_BRANCH" | cut -f1)"
 
@@ -81,6 +165,20 @@ if [[ "$FROM_SHA" == "$TO_SHA" ]]; then
     ok "$TO_BRANCH 与 $FROM_BRANCH 已经是同一个提交（${TO_SHA:0:7}），无需晋升"
     exit 0
 fi
+
+# 硬守卫①（2026-09-23 老板要求）：晋升清单里若含被 backup-* 钉住的提交（禁推正式版的备用方案），拒绝
+GUARD_HIT=""
+while read -r _sha; do
+    [[ -n "$_sha" ]] || continue
+    _tags="$(git tag --points-at "$_sha" | grep '^backup-' || true)"
+    [[ -n "$_tags" ]] && GUARD_HIT="${_tags} (${_sha:0:7})"
+done < <(git rev-list "$TO_SHA..$FROM_SHA")
+if [[ -n "$GUARD_HIT" ]]; then
+    fail "本次晋升会带上被标记为“禁止推正式版”的备用方案提交：$GUARD_HIT
+  规则：备用方案绝不进正式版（见 references/release-checklist.md §3）。
+  做法：改用只推指定提交：bash scripts/promote_release.sh --only <要晋升的提交…>"
+fi
+info "备用方案守卫：通过（清单里没有被 backup-* 钉住的提交）"
 
 # 硬闸门（2026-09-21 老板要求"没经过我测试的功能绝对不能混进正式版本"）：
 # 本次晋升的提交上必须有老板的验收登记（verified/* 标签），否则拒绝晋升。
@@ -95,6 +193,7 @@ if [[ -z "$APPROVED_TAG" ]]; then
   然后在测试通道**不再新增提交**的前提下再次执行本脚本。"
 fi
 info "验收登记：${BLUE}${APPROVED_TAG}${NC} —— $(git tag -l --format='%(contents:subject)' "$APPROVED_TAG")"
+
 
 # 关键校验：必须能快进（master 是 next 的祖先），否则拒绝
 if ! git merge-base --is-ancestor "$TO_SHA" "$FROM_SHA"; then
@@ -115,6 +214,20 @@ if [[ "$DRY_RUN" == "1" ]]; then
     exit 0
 fi
 
+# 硬守卫②（2026-09-23 老板要求）：把“将带上的提交清单 + 内容差异”打出来，
+# 要求人工核对后显式确认，防止盲推（内容差 ≠ 提交清单，两者都要看）。
+echo "----------------------------------------"
+echo "本次会带上以下提交（$(git rev-list --count "$TO_SHA..$FROM_SHA") 个）："
+git --no-pager log --oneline "$TO_SHA..$FROM_SHA"
+echo ""
+echo "内容差异（相对 $TO_BRANCH）："
+git --no-pager diff --stat "$TO_SHA..$FROM_SHA"
+echo "----------------------------------------"
+if [[ "${PROMOTE_CONFIRM:-}" != "$(git rev-parse --short=7 "$FROM_SHA")" ]]; then
+    fail "请先核对上面两份清单（提交清单 / 内容差异），确认无误后重跑：
+  PROMOTE_CONFIRM=$(git rev-parse --short=7 "$FROM_SHA") bash scripts/promote_release.sh${TAG:+ --tag $TAG}"
+fi
+
 # 用 refspec 推（next:master）：不依赖本地当前在哪个分支，也不动工作区
 for idx in "${!REMOTES[@]}"; do
     r="${REMOTES[$idx]}"; label="${LABELS[$idx]}"
@@ -130,9 +243,6 @@ else
 fi
 
 if [[ -n "$TAG" ]]; then
-    case "$TAG" in
-        *-test*) fail "正式标签不能带 -test（那是测试号）—— 正式版请用 v<版本>，例如 v${VER}" ;;
-    esac
     info "打标签 $TAG 并推送"
     git tag -a "$TAG" -m "Coco $TAG" "$FROM_SHA" 2>/dev/null \
         || warn "标签 $TAG 已存在，沿用现有标签"

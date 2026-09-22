@@ -25,8 +25,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / "scripts"
 
 
-def _run(cmd, cwd=None):
-    return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd or REPO_ROOT)
+def _run(cmd, cwd=None, env=None):
+    return subprocess.run(cmd, capture_output=True, text=True, cwd=cwd or REPO_ROOT, env=env)
+
+
+def _promote(work, *args, confirm=True):
+    """跑 promote_release.sh：默认补上闸② 要的人工确认值（按 next 当前提交算）。
+
+    2026-09-23 起晋升会先打印“将带上的提交清单 + 内容差异”并要求 PROMOTE_CONFIRM，
+    所以测试要么显式给确认值，要么就是在验证“不给确认会被拦”。
+    """
+    env = dict(os.environ)
+    if confirm:
+        sha = subprocess.run(["git", "-C", str(work), "rev-parse", "--short=7", "next"],
+                             capture_output=True, text=True).stdout.strip()
+        env["PROMOTE_CONFIRM"] = sha
+    return _run(["bash", "scripts/promote_release.sh", *args], cwd=work, env=env)
 
 
 def _git(repo, *args):
@@ -188,7 +202,7 @@ class TestPromoteRelease:
 
     def test_promotes_next_to_master_on_both_remotes(self, tmp_path):
         work, next_tip = self._setup(tmp_path)
-        r = _run(["bash", "scripts/promote_release.sh"], cwd=work)
+        r = _promote(work)
         assert r.returncode == 0, r.stdout + r.stderr
         assert self._remote_master(tmp_path, "gitee.git") == next_tip
         assert self._remote_master(tmp_path, "github.git") == next_tip
@@ -205,7 +219,7 @@ class TestPromoteRelease:
 
     def test_tag_option_creates_and_pushes_tag(self, tmp_path):
         work, next_tip = self._setup(tmp_path)
-        r = _run(["bash", "scripts/promote_release.sh", "--tag", "v0.0.0-99"], cwd=work)
+        r = _promote(work, "--tag", "v0.0.0-99")
         assert r.returncode == 0, r.stdout + r.stderr
         tags = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "tag"], capture_output=True, text=True).stdout
         assert "v0.0.0-99" in tags
@@ -356,7 +370,7 @@ class TestPromoteSyncsTestChannelFirst:
         subprocess.run(["git", "-C", str(work), "tag", "-a", "verified/v0.0.0-1-" + tip[:7],
                         "-m", "老板验收通过：测试用例", tip], check=True)
 
-        r = _run(["bash", "scripts/promote_release.sh"], cwd=work)
+        r = _promote(work)
         out = r.stdout + r.stderr
         assert r.returncode == 0, out
         assert "推齐" in out, out
@@ -411,7 +425,7 @@ class TestApprovalGate:
 
     def test_promote_allowed_after_verification(self, tmp_path):
         work = self._setup(tmp_path)
-        r = _run(["bash", "scripts/promote_release.sh"], cwd=work)
+        r = _promote(work)
         out = r.stdout + r.stderr
         assert r.returncode == 0, out
         assert "验收登记" in out and "晋升完成" in out, out
@@ -546,3 +560,89 @@ class TestTestChannelMatchesStableFlow:
         for rel in ("README.md", "README.zh-CN.md", "scripts/coco.sh"):
             t = (REPO_ROOT / rel).read_text(encoding="utf-8")
             assert "--skip-backup" not in t, f"{rel} 里出现了 --skip-backup（不应作为推荐命令）"
+
+
+class TestPromoteGuards:
+    """2026-09-23 老板要求的三道改动（防把滞留/未核对内容推上正式版）：
+
+    ① 闸①：晋升清单里含被 backup-* 标签钉住的提交（禁推正式版的备用方案）→ 拒绝并提示改走 --only；
+    ② 闸②：推送前打印“提交清单 + 内容差异”，要求 PROMOTE_CONFIRM 才继续；
+    ③ --only：只把点名的提交 cherry-pick 到正式版（next 上滞留内容不会被带上）。
+    """
+
+    def _setup_with_backup(self, tmp_path):
+        work, _next_tip = TestPromoteRelease()._setup(tmp_path)
+        (work / "backup.txt").write_text("backup", encoding="utf-8")
+        _commit_all(work, "备用方案（禁推正式版）")
+        tip = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"],
+                             capture_output=True, text=True).stdout.strip()
+        subprocess.run(["git", "-C", str(work), "tag", "-a", "backup-test-v1",
+                        "-m", "【备用方案·禁止推正式版】测试用", tip], check=True)
+        subprocess.run(["git", "-C", str(work), "tag", "-a", "verified/v0.0.0-1-" + tip[:7],
+                        "-m", "老板验收通过：测试", tip], check=True)
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "next"], check=True)
+        return work, tip
+
+    def test_guard1_backup_tagged_commit_blocks_fast_forward(self, tmp_path):
+        work, tip = self._setup_with_backup(tmp_path)
+        before = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                                capture_output=True, text=True).stdout.strip()
+        r = _promote(work)
+        out = r.stdout + r.stderr
+        assert r.returncode != 0, out
+        assert "备用方案" in out and "backup-test-v1" in out, out
+        assert "--only" in out, "应提示改走只推指定提交"
+        assert subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                              capture_output=True, text=True).stdout.strip() == before, "被拒时不得改动正式版"
+
+    def test_guard2_requires_confirm_and_lists_what_will_be_promoted(self, tmp_path):
+        work, next_tip = TestPromoteRelease()._setup(tmp_path)
+        before = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                                capture_output=True, text=True).stdout.strip()
+        r = _promote(work, confirm=False)
+        out = r.stdout + r.stderr
+        assert r.returncode != 0, out
+        assert "提交清单" in out and "内容差异" in out, out
+        assert "PROMOTE_CONFIRM=" in out, out
+        assert next_tip[:7] in out, "清单里应列出会带上的提交"
+        assert subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                              capture_output=True, text=True).stdout.strip() == before, "未确认时不得推送"
+
+    def test_only_mode_promotes_selected_commit_and_leaves_rest(self, tmp_path):
+        work, next_tip = TestPromoteRelease()._setup(tmp_path)
+        # next 上再压一个“不打算晋升”的提交
+        (work / "later.txt").write_text("later", encoding="utf-8")
+        _commit_all(work, "不打算晋升的提交")
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "next"], check=True)
+
+        sha = next_tip[:7]
+        r1 = _promote(work, "--only", sha, confirm=False)
+        out1 = r1.stdout + r1.stderr
+        assert r1.returncode != 0, out1
+        m = re.search(r"PROMOTE_CONFIRM=([0-9a-f]+)", out1)
+        assert m, out1
+        env = dict(os.environ)
+        env["PROMOTE_CONFIRM"] = m.group(1)
+        r2 = _run(["bash", "scripts/promote_release.sh", "--only", sha], cwd=work, env=env)
+        out2 = r2.stdout + r2.stderr
+        assert r2.returncode == 0, out2
+        # cherry-pick 会生成新提交，所以比“内容”（树）而不是比 SHA
+        tree_master = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master^{tree}"],
+                                     capture_output=True, text=True).stdout.strip()
+        tree_named = subprocess.run(["git", "-C", str(work), "rev-parse", f"{next_tip}^{{tree}}"],
+                                    capture_output=True, text=True).stdout.strip()
+        assert tree_master == tree_named, "正式版内容应恰好等于被点名那个提交的内容"
+        # 后面那个“不打算晋升”的提交带来的文件不该出现在正式版里
+        later = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "cat-file", "-e", "master:later.txt"],
+                               capture_output=True, text=True)
+        assert later.returncode != 0, "未点名的提交被一起带上正式版了"
+        assert "只推指定提交完成" in out2, out2
+
+    def test_only_mode_refuses_backup_tagged_commit(self, tmp_path):
+        work, tip = self._setup_with_backup(tmp_path)
+        r = _promote(work, "--only", tip[:7])
+        out = r.stdout + r.stderr
+        assert r.returncode != 0, out
+        assert "禁止推正式版" in out or "备用方案" in out, out
