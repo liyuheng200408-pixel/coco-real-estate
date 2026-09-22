@@ -60,12 +60,36 @@ check_system() {
 }
 
 # ==================== 依赖安装 ====================
+# 全新装机的机器上，unattended-upgrades/apt-daily 往往正占着 apt 锁 —— 直接失败会中断整个安装（真实事故）。
+# 两道保险：① 先等锁释放（最多 5 分钟，带提示）；② 给 apt 传 DPkg::Lock::Timeout，让 apt 自己也会等。
+APT_LOCK_TIMEOUT=600
+
+wait_for_apt_lock() {
+    local locks=(/var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock /var/lib/apt/lists/lock)
+    local i
+    command -v fuser &> /dev/null || return 0
+    for i in $(seq 1 60); do
+        sudo fuser "${locks[@]}" >/dev/null 2>&1 || return 0
+        if [[ $i == 1 ]]; then
+            info "系统正在后台自动更新（apt 锁被占用），等它结束…（最多 5 分钟）"
+        fi
+        sleep 5
+    done
+    return 1
+}
+
+apt_get() {   # 统一入口：带锁等待的 apt-get
+    sudo apt-get -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT}" "$@"
+}
+
 install_deps() {
     info "安装系统依赖..."
     case $PKG_MANAGER in
         apt)
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq python3 python3-pip python3-venv git curl build-essential libpq-dev postgresql postgresql-contrib fonts-wqy-zenhei ripgrep ffmpeg
+            wait_for_apt_lock || warn "等待 apt 锁超时，继续尝试（apt 自己还会再等 10 分钟）"
+            apt_get update -qq
+            apt_get install -y -qq python3 python3-pip python3-venv git curl build-essential libpq-dev postgresql postgresql-contrib fonts-wqy-zenhei ripgrep ffmpeg \
+                || error "系统依赖安装失败（原因见上面的 apt 输出）。可先等几分钟让系统自动更新跑完，再重跑本脚本。"
             ;;
         yum|dnf)
             sudo $PKG_MANAGER install -y python3 python3-pip git curl gcc gcc-c++ postgresql-server postgresql-devel
@@ -226,7 +250,7 @@ setup_python() {
     fi
     if ! _py_ok "$PYTHON_CMD" && command -v apt-get &> /dev/null; then
         info "当前 Python $PYTHON_VERSION 不在 3.11~3.14 范围内，尝试安装 python3.13..."
-        sudo apt-get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1 || true
+        apt_get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1 || true
         if command -v python3.13 &> /dev/null && _py_ok python3.13; then
             PYTHON_CMD="python3.13"
             PYTHON_VERSION="$(python3.13 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"

@@ -274,6 +274,16 @@ class TestPython313DownloadPath:
     （26.04 自带的 3.14 现在已在版本窗口内，不再走这条路；更老的系统与将来的 3.15 仍然要靠它。）
     """
 
+    def test_apt_get_waits_for_dpkg_lock(self):
+        """全新装机的机器上 unattended-upgrades 常占着 apt 锁（真实事故：Ubuntu 26.04 新装机跑
+        安装脚本，第一步 apt 就报 Could not get lock /var/lib/dpkg/lock-frontend 并中断）。"""
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert "wait_for_apt_lock" in t, "apt 之前应先等锁释放"
+        assert "DPkg::Lock::Timeout" in t, "apt 自己也应带锁等待参数（双保险）"
+        assert "apt_get update" in t and "apt_get install" in t, "apt 调用统一走带锁等待的入口"
+        assert "自动更新" in t, "等待时要说清是系统自动更新占着锁（便于用户排查）"
+        assert "apt_get install -y -qq python3 python3-pip" in t, "系统依赖仍要一次装齐"
+
     def test_domestic_mirror_for_cn(self):
         t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
         assert "UV_PYTHON_INSTALL_MIRROR" in t, "国内机器下载 Python 应走国内镜像"
