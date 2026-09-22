@@ -41,8 +41,13 @@ coco_test_label() {             # $1=仓库根
     fi
 }
 
-coco_channel_current() {        # 当前分支（游离 HEAD 时为空）
-    git branch --show-current 2>/dev/null || echo ""
+coco_channel_current() {        # $1=仓库根（可选）；给了就用 -C 定位，避免被"当前目录恰好也是某个 git 仓库"带偏
+    local root="${1:-}"
+    if [[ -n "$root" ]]; then
+        git -C "$root" branch --show-current 2>/dev/null || echo ""
+    else
+        git branch --show-current 2>/dev/null || echo ""
+    fi
 }
 
 # 期望分支的优先级：环境变量 COCO_CHANNEL > 仓库内 .coco-channel 文件 > 当前分支
@@ -52,7 +57,7 @@ coco_channel_want() {           # $1=仓库根
         want="$(tr -d '[:space:]' < "$root/.coco-channel")"
     fi
     if [[ -z "$want" ]]; then
-        want="$(coco_channel_current)"
+        want="$(coco_channel_current "$root")"
     fi
     echo "$want"
 }
@@ -88,7 +93,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     cmd="${1:-show}"
     case "$cmd" in
         show)
-            cur="$(coco_channel_current)"
+            cur="$(coco_channel_current "$ROOT")"
             printf "%s（%s）\n" "$(coco_channel_label "$cur")" "${cur:-游离}"
             ;;
         want)
@@ -103,7 +108,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             coco_channel_label "${2:-}"
             ;;
         test-tag)
-            coco_test_label "$ROOT"
+            # 只在测试通道显示测试号：稳定版/自定义分支上，即使仓库里有测试标签也不显示
+            # （2026-09-22 修：老板在稳定版上看到 "稳定通道 · 测试号 v...-test5"，两个口径打架）
+            if [[ "$(coco_channel_current "$ROOT")" == "$TEST_BRANCH" ]]; then
+                coco_test_label "$ROOT"
+            fi
             ;;
         *)
             echo "用法: bash scripts/coco_channel.sh [show|want|switch <分支>|label <分支>|test-tag]" >&2

@@ -4362,7 +4362,7 @@ def interactive_setup() -> None:
         save_env_value("FEISHU_ALLOWED_USERS", "")
         if access_idx == 0:
             print_success("DM pairing enabled.")
-            print_info("Unknown users can request access; approve with `hermes pairing approve`.")
+            print_info("Unknown users can request access; approve with `coco pairing approve`.")
         else:
             print_warning("Open DM access enabled for Feishu / Lark.")
 

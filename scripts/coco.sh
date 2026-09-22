@@ -154,7 +154,13 @@ case "${1:-version}" in
 
   # ---------- 安装配置（转发官方命令） ----------
   model|setup)
-    run_hermes "$1"
+    # 必须把后面的参数一起转发：coco setup model / coco setup tools 否则会丢参数
+    CMD="$1"; shift
+    run_hermes "$CMD" "$@"
+    ;;
+  config|doctor|tools)
+    CMD="$1"; shift
+    run_hermes "$CMD" "$@"
     ;;
   gateway)
     shift
@@ -196,6 +202,9 @@ Coco v${COCO_VER}
 安装配置（等价于官方 hermes 同名命令）:
   model      选择模型 / 填 API Key     （hermes model）
   setup      配置向导（飞书等）        （hermes setup）
+  config     查看或修改配置            （hermes config）
+  doctor     环境自检                  （hermes doctor）
+  tools      配置工具与技能            （hermes tools）
   gateway    服务安装等：coco gateway install
   pairing    飞书配对批准：coco pairing approve feishu <配对码>
 

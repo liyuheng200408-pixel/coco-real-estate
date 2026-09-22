@@ -246,6 +246,31 @@ CONTENT_CHECKS = [
         "处理：把 requires-python 改回 \">=3.11,<3.15\"，并确认 install.sh 的 _py_ok 判据一致\n"
         "（单测 tests/real_estate/test_install_layout.py::TestPythonVersionWindow 会守这条）。",
     ),
+    (
+        "17",
+        "用户可见命令文案（设置向导收尾屏）",
+        "hermes_cli/setup_summary.py",
+        [r'\("coco setup",', r'\("coco config",', r'\("coco status",', r'!\(\s*"hermes '],
+        "设置向导收尾屏会把官方 hermes 命令印给用户（照着敲的是官方命令，甚至可能出现 Coco 禁止的 hermes update）。"
+        "处理：把 _EDIT_WIZARD_ROWS / _EDIT_CONFIG_ROWS / _READY_ROWS 与文件里的提示句改回 coco 口径"
+        "（该文件属官方层，上游同步会覆盖）。",
+    ),
+    (
+        "18",
+        "首次配对提示命令",
+        "gateway/run_inbound.py",
+        [r"`coco \{profile_arg\}pairing approve ", r"!`hermes \{profile_arg\}pairing approve "],
+        "新用户首次私聊机器人时，配对提示会让所有者执行官方 hermes 命令（应为 coco pairing approve）。"
+        "处理：把提示里的 `hermes ` 改回 `coco `。",
+    ),
+    (
+        "19",
+        "更新时的配置迁移提示",
+        "hermes_cli/update_cmd_config.py",
+        [r"'coco config migrate'", r"!hermes config migrate"],
+        "更新过程中的配置迁移提示指回官方 hermes config migrate（用户会照抄）。"
+        "处理：把提示里的 hermes config migrate 改回 coco config migrate。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示

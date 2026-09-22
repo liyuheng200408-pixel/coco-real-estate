@@ -98,7 +98,7 @@ class GatewayInboundMixin:
                 f"Hi~ I don't recognize you yet!\n\n"
                 f"Here's your pairing code: `{code}`\n\n"
                 f"Ask the bot owner to run:\n"
-                f"`hermes {profile_arg}pairing approve "
+                f"`coco {profile_arg}pairing approve "
                 f"{platform_name} {code}`"
             )
         else:
