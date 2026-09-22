@@ -640,6 +640,20 @@ class TestPromoteGuards:
         assert later.returncode != 0, "未点名的提交被一起带上正式版了"
         assert "只推指定提交完成" in out2, out2
 
+    def test_only_dry_run_changes_nothing(self, tmp_path):
+        work, next_tip = TestPromoteRelease()._setup(tmp_path)
+        before = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                                capture_output=True, text=True).stdout.strip()
+        r = _run(["bash", "scripts/promote_release.sh", "--only", next_tip[:7], "--dry-run"], cwd=work)
+        out = r.stdout + r.stderr
+        assert r.returncode == 0 and "dry-run" in out, out
+        after = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
+                               capture_output=True, text=True).stdout.strip()
+        assert after == before, "dry-run 不得改动正式版"
+        branch = subprocess.run(["git", "-C", str(work), "branch", "--show-current"],
+                                capture_output=True, text=True).stdout.strip()
+        assert branch == "next", f"dry-run 不该切分支（现在在 {branch}）"
+
     def test_only_mode_refuses_backup_tagged_commit(self, tmp_path):
         work, tip = self._setup_with_backup(tmp_path)
         r = _promote(work, "--only", tip[:7])
