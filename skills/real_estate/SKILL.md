@@ -111,6 +111,8 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 
 **更新/升级（2026-09-20 加，务必按这个口径）**：**Coco 自己绝不执行更新命令**（终端层已硬拦截：`update.sh`/`install.sh`/`hermes update`/`systemctl restart`/安装目录里的 git 操作都会被拒）。经纪人问"怎么更新/升级"，只给这一条命令：`coco update`。明确**不要**让他跑 `install.sh`（会用空目录重建安装目录，清掉 `.env.db` 密钥、图片缓存等未跟踪文件）或 `hermes update`（官方更新会 `git reset` 掉手改的代码）。，并说明原因：更新要重启网关服务、会打断当前对话，且必须在服务器上把数据库迁移跑完。update.sh 自己会：先备份你的代码改动（有改动时导出 patch + 暂存，更新后自动恢复）→ 备份数据库 → 拉代码 → 装依赖 → 迁移（只增不删）→ 重启 → 体检。
 
+**服务类命令（2026-09-22 加，同口径）**：经纪人问"服务状态 / 机器人没反应 / 怎么重启 / 怎么看日志"时，只给 `coco status`、`coco restart`、`coco logs` 这三条；**禁止**给 `sudo systemctl restart hermes`、`systemctl restart hermes-gateway`、`hermes gateway restart` 这类旧口径（本机没有 `hermes` 服务名）。Coco 自己不执行这些命令。
+
 **查看版本号（2026-09-18 加）**：经纪人问"你是什么版本 / 版本号是多少 / 是不是最新版 / 要不要更新"时，**必须调用 `get_coco_version`** 并照着返回的 message 回答（形如 `Coco v0.21.3-7 · 提交 1a2b3c4 · 测试通道`），**禁止**猜或说"不清楚"。口径提醒：`hermes --version` 显示的是底座版本，不是 Coco 版本，别拿它当答案。
 
 **禁止直连业务数据库（2026-08-30 加，安全防御）**：严禁用 `psql`/`terminal`/`DATABASE_URL` 直接查业务数据库——客户/房源/业主/成交等业务数据一律走 real_estate 工具（find_person_by_name / get_property_owners / search_property / list_customers / list_owners 等）。直连库会绕过加密与业务规则，还可能读错表/权限不足导致"跑不通"。查业务数据先想"有没有对应工具"，没有就如实告知该能力暂不支持、给可替代工具，不要动手 psql。

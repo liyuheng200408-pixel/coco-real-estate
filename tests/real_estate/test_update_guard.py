@@ -35,6 +35,10 @@ BLOCKED_CASES = [
     "systemctl --user restart hermes-gateway",
     "systemctl --user restart hermes-gateway.service",
     "sudo systemctl stop hermes-gateway",
+    # 2026-09-22 补：不带 gateway 的旧服务名写法（经纪人真从 Coco 那儿收到过这条）
+    "sudo systemctl restart hermes",
+    "systemctl restart hermes-agent",
+    "sudo systemctl restart hermes-gateway.service",
     "git -C ~/hermes-agent pull",
     "git -C /home/ubuntu/hermes-agent reset --hard",
     "cd /home/ubuntu/hermes-agent && git pull",
@@ -48,6 +52,10 @@ ALLOWED_CASES = [
     "psql \"$(sed -n 's/^DATABASE_URL=//p' ~/hermes-agent/.env.db)\" -c 'SELECT 1'",
     "systemctl --user status hermes-gateway",
     "journalctl --user -u hermes-gateway -n 50 --no-pager",
+    # 只读的 Coco 服务命令要放行（Coco 可以自己看状态/日志，但不能重启）
+    "coco status",
+    "coco logs -n 50",
+    "coco check",
     "git -C ~/blog status",
     "git -C ~/my-other-project pull",
     "python3 -c 'print(1)'",
@@ -121,3 +129,6 @@ class TestCocoWriteCommandsBlocked:
         from tools.real_estate_update_guard import REFUSAL_MESSAGE
 
         assert "coco update" in REFUSAL_MESSAGE, REFUSAL_MESSAGE
+        # 服务类命令口径（2026-09-22）：给出正确命令，并明确不要给旧口径
+        assert "coco restart" in REFUSAL_MESSAGE, REFUSAL_MESSAGE
+        assert "systemctl restart hermes" in REFUSAL_MESSAGE, REFUSAL_MESSAGE
