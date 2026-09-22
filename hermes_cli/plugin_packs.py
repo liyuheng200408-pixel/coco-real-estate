@@ -256,7 +256,7 @@ def render_pack_review(console, pack: PluginPack, resolved: List[ResolvedPackPlu
     if pack.skills:
         console.print(
             "[yellow]Pack lists skills (NOT auto-installed yet):[/yellow] " + ", ".join(pack.skills))
-        console.print("[dim]Install them manually, e.g. `hermes skills install <id>`.[/dim]")
+        console.print("[dim]Install them manually, e.g. `coco skills install <id>`.[/dim]")
     console.print(
         "\n[dim]Installing a pack runs third-party code × "
         f"{len(resolved)} plugins. Each plugin's declared capabilities still "
@@ -487,7 +487,7 @@ def cmd_pack_show(source: str) -> None:
         console.print(
             f"\n[yellow]{len(unresolved)} entr{'y' if len(unresolved) == 1 else 'ies'} "
             "could not be resolved — install would skip them and exit non-zero.[/yellow]")
-    console.print("\n[dim]Dry run only. Install with `hermes plugins pack install ...`.[/dim]")
+    console.print("\n[dim]Dry run only. Install with `coco plugins pack install ...`.[/dim]")
 
 
 def cmd_pack_install(source: str, *, force: bool = False) -> None:
@@ -513,7 +513,7 @@ def cmd_pack_install(source: str, *, force: bool = False) -> None:
         console.print(f"  [red]✗[/red] {r.display}: {r.error}")
     if ok:
         console.print("[dim]Restart the gateway for the plugins to take effect:[/dim]")
-        console.print("[dim]  hermes gateway restart[/dim]")
+        console.print("[dim]  coco gateway restart[/dim]")
     if failed:
         sys.exit(1)
 

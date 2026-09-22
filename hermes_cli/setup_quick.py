@@ -66,7 +66,7 @@ def _run_portal_one_shot(config: dict) -> None:
     def _on_error(exc: Exception) -> None:
         print()
         print_error(f"  Nous Portal setup encountered an error: {exc}")
-        print_info("  You can retry later with `hermes portal`.")
+        print_info("  You can retry later with `coco portal`.")
 
     if not _run_nous_flow(config, context="`hermes portal`", cancel_exc=(KeyboardInterrupt, EOFError, SystemExit),
                           cancel_lines=(None, "  Setup cancelled.", "  You can retry later with `hermes portal`."),
@@ -96,7 +96,7 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
 
     def _on_error(exc: Exception) -> None:
         print_warning(f"Nous Portal setup encountered an error: {exc}")
-        print_info("You can try again later with: hermes model")
+        print_info("You can try again later with: coco model")
 
     _run_nous_flow(config, context="quick setup", cancel_exc=(KeyboardInterrupt, EOFError),
                    cancel_lines=(None, "Nous Portal setup cancelled."), print_error=_on_error)
@@ -125,7 +125,7 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
     print_success("Setup complete! You're ready to go.")
     _info(None, "  Configure all settings:    hermes setup")
     if gateway_choice != 0:
-        print_info("  Connect Telegram/Discord:  hermes setup gateway")
+        print_info("  Connect Telegram/Discord:  coco setup gateway")
     _print_macos_fda_tip()
     print()
     _print_setup_summary(config, hermes_home)
@@ -305,7 +305,7 @@ def _blank_slate_walkthrough(config: dict, hermes_home):
             logger.debug("blank-slate tools_command error: %s", exc)
             print_warning(f"Tool selector encountered an error: {exc}")
     else:
-        print_info("Keeping the minimal toolset. Add tools later with `hermes tools`.")
+        print_info("Keeping the minimal toolset. Add tools later with `coco tools`.")
 
     # Built-in plugins and MCP servers (off unless chosen)
     for header, question, yes_msg, no_msg in (

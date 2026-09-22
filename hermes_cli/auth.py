@@ -2225,7 +2225,7 @@ def _reset_config_provider() -> Path:
 
 def login_command(args) -> None:
     """Deprecated: use 'hermes model' or 'hermes setup' instead."""
-    print("The 'hermes login' command has been removed.\nUse 'hermes auth' to manage credentials,\n"
+    print("The 'hermes login' command has been removed.\nUse 'coco auth' to manage credentials,\n"
           "'hermes model' to select a provider, or 'hermes setup' for full setup.")
     raise SystemExit(0)
 
@@ -2277,7 +2277,7 @@ def logout_command(args) -> None:
     elif os.getenv("OPENROUTER_API_KEY"):
         print("Hermes will use OpenRouter for inference.")
     else:
-        print("Run `hermes model` or configure an API key to use Hermes.")
+        print("Run `coco model` or configure an API key to use Hermes.")
 
 
 # ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----

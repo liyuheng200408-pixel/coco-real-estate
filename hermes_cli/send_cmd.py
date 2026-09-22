@@ -64,7 +64,7 @@ def _emit_result(result_json: str, *, json_mode: bool, quiet: bool) -> int:
         print(json.dumps(payload, indent=2))
     elif not quiet:
         if payload.get("error"):
-            print(f"hermes send: {payload['error']}", file=sys.stderr)
+            print(f"coco send: {payload['error']}", file=sys.stderr)
         elif payload.get("success"):
             print(payload.get("note") or "sent")
         else:
@@ -110,7 +110,7 @@ def _list_targets(platform_filter: Optional[str], *, json_mode: bool) -> int:
         return _SUCCESS_EXIT
     if not platforms:
         print("No messaging platforms configured or no channels discovered yet.")
-        print("Set one up with `hermes gateway setup`, or run the gateway once so")
+        print("Set one up with `coco gateway setup`, or run the gateway once so")
         print("channel discovery can populate ~/.hermes/channel_directory.json.")
         return _SUCCESS_EXIT
 

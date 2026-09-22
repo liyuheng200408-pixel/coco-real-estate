@@ -726,7 +726,7 @@ def rollback_migration(default_home: Optional[Path] = None) -> bool:
                     print(f"  ✗ default: could not restore rollback manifest ({manifest_exc})")
             ok = False
             print(f"  ✗ default: could not restart its standalone gateway ({exc})")
-            print("    The default gateway is still multiplexing; stop it by hand (hermes gateway stop) and re-run.")
+            print("    The default gateway is still multiplexing; stop it by hand (coco gateway stop) and re-run.")
     if ok:
         print("✓ Rolled back to per-profile gateways.")
     else:
