@@ -124,54 +124,72 @@ _py_ok() { "$1" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < 
 # ---- 装 uv：官方两段式（先下安装脚本、再执行），二进制直接落到 $HERMES_HOME/bin ----
 # 不用 `curl | sh`（管道会吞掉 curl 的失败）；UV_UNMANAGED_INSTALL 同时关掉升级器下载与 shell rc 改写，
 # 安装脚本的输出留在日志文件里，失败时打出来 —— 不会出现"没反应"的黑盒。
-install_uv_official() {
+UV_INSTALL_ERR=""   # 最近一次取 uv 失败的原文（只在最终失败时才打出来）
+
+install_uv_official() {   # 成功时设置 UV_CMD；失败时把原因留在 UV_INSTALL_ERR
     local script="$TMPDIR_C/uv-installer.sh" log="$TMPDIR_C/uv-install.log"
     mkdir -p "$UV_BIN_DIR"
     if ! curl -fsSL --connect-timeout 20 --max-time 120 https://astral.sh/uv/install.sh -o "$script" 2>"$log"; then
-        echo "  ⚠️ 下载 uv 安装脚本失败：$(head -c 200 "$log" 2>/dev/null)"
+        UV_INSTALL_ERR="下载官方安装脚本失败：$(head -c 200 "$log" 2>/dev/null)"
         return 1
     fi
     if ! timeout 300 env UV_UNMANAGED_INSTALL="$UV_BIN_DIR" sh "$script" >>"$log" 2>&1; then
-        echo "  ⚠️ 安装 uv 失败：$(tail -n 3 "$log" 2>/dev/null | tr '\n' ' ')"
+        UV_INSTALL_ERR="官方安装脚本执行失败：$(tail -n 2 "$log" 2>/dev/null | tr '
+' ' ')"
         return 1
     fi
-    [[ -x "$UV_BIN_DIR/uv" ]] || { echo "  ⚠️ uv 安装脚本跑完了，但没找到 $UV_BIN_DIR/uv"; return 1; }
+    if [[ ! -x "$UV_BIN_DIR/uv" ]]; then
+        UV_INSTALL_ERR="官方安装脚本跑完了，但没找到 $UV_BIN_DIR/uv"
+        return 1
+    fi
     UV_CMD="$UV_BIN_DIR/uv"
 }
 
 # ---- 兜底取 uv：从 PyPI 镜像下 wheel 再解出里面的二进制（PEP 668 只拦 install、不拦 download）----
-uv_from_pypi() {
+uv_from_pypi() {   # 兜底取 uv：从 PyPI 镜像下 wheel 解出里面的二进制（输入：镜像地址）
     local mirror="$1" dl="$TMPDIR_C/uv-wheel" whl xbin
     rm -rf "$dl"; mkdir -p "$dl"
-    python3 -m pip download --no-deps --only-binary=:all: -q -d "$dl" -i "$mirror" uv 2>"$dl/err.log" || return 1
+    if ! python3 -m pip download --no-deps --only-binary=:all: -q -d "$dl" -i "$mirror" uv 2>"$dl/err.log"; then
+        UV_INSTALL_ERR="PyPI 镜像 $mirror 取 uv 失败：$(grep -m1 . "$dl/err.log" 2>/dev/null)"
+        return 1
+    fi
     whl="$(ls "$dl"/uv-*.whl 2>/dev/null | head -1)"
-    [[ -n "$whl" && -f "$whl" ]] || return 1
-    python3 -m zipfile -e "$whl" "$dl/x" >/dev/null 2>&1 || return 1
+    [[ -n "$whl" && -f "$whl" ]] || { UV_INSTALL_ERR="PyPI 镜像 $mirror 没有下到 uv 的 wheel"; return 1; }
+    python3 -m zipfile -e "$whl" "$dl/x" >/dev/null 2>&1 || { UV_INSTALL_ERR="解 wheel 失败：$whl"; return 1; }
     xbin="$(ls "$dl"/x/uv-*.data/scripts/uv 2>/dev/null | head -1)"
-    [[ -n "$xbin" && -f "$xbin" ]] || return 1
-    mkdir -p "$UV_BIN_DIR" && cp "$xbin" "$UV_BIN_DIR/uv" && chmod +x "$UV_BIN_DIR/uv" || return 1
-    "$UV_BIN_DIR/uv" --version >/dev/null 2>&1 || return 1
+    [[ -n "$xbin" && -f "$xbin" ]] || { UV_INSTALL_ERR="wheel 里没找到 uv 可执行文件"; return 1; }
+    mkdir -p "$UV_BIN_DIR" && cp "$xbin" "$UV_BIN_DIR/uv" && chmod +x "$UV_BIN_DIR/uv" || { UV_INSTALL_ERR="安装 uv 到 $UV_BIN_DIR 失败"; return 1; }
+    "$UV_BIN_DIR/uv" --version >/dev/null 2>&1 || { UV_INSTALL_ERR="解出的 uv 不能运行"; return 1; }
     UV_CMD="$UV_BIN_DIR/uv"
 }
 
-prepare_uv() {   # 成功时 UV_CMD 非空
+prepare_uv() {   # 成功时 UV_CMD 非空；按仓库源分主次，两侧都留兜底
     local mirrors m
     [[ -x "$UV_BIN_DIR/uv" ]] && { UV_CMD="$UV_BIN_DIR/uv"; return 0; }
     command -v uv &> /dev/null && { UV_CMD="$(command -v uv)"; return 0; }
-    echo "  正在获取 uv..."
-    install_uv_official && return 0
+    # 国内机器（Gitee 源）先走 PyPI 镜像：实测最快最稳；海外机器先走官方安装脚本
     mirrors="https://pypi.tuna.tsinghua.edu.cn/simple https://pypi.org/simple"
-    [[ "$COCO_CHOSEN_SOURCE" == "github" ]] && mirrors="https://pypi.org/simple https://pypi.tuna.tsinghua.edu.cn/simple"
+    echo "  正在获取 uv..."
+    if [[ "$COCO_CHOSEN_SOURCE" == "github" ]]; then
+        install_uv_official && return 0
+        echo "  这一路没成功${UV_INSTALL_ERR:+（$UV_INSTALL_ERR）}，换 PyPI 镜像重试..."
+    fi
     for m in $mirrors; do
         uv_from_pypi "$m" && return 0
     done
+    if [[ "$COCO_CHOSEN_SOURCE" != "github" ]]; then
+        echo "  这一路没成功${UV_INSTALL_ERR:+（$UV_INSTALL_ERR）}，换官方安装脚本重试..."
+        install_uv_official && return 0
+    fi
+    echo "  ⚠️ 未能获取 uv：${UV_INSTALL_ERR:-未知原因}"
     return 1
 }
 
 # ---- 兜底：完全不用 uv，直接下 python-build-standalone 的 3.13 解包当解释器 ----
 # 国内走南京大学镜像（GitHub Release 镜像），海外走 GitHub 官方 Release
 COCO_PYTHON_DIR="${COCO_PYTHON_DIR:-$HOME/.local/share/coco/python/3.13}"
-PBS_NJU_BASE="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone/LatestRelease"
+PBS_NJU_MIRROR="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone"   # uv 下 Python 本体用
+PBS_NJU_BASE="$PBS_NJU_MIRROR/LatestRelease"
 PBS_GH_REPO="https://github.com/astral-sh/python-build-standalone"
 
 pbs_arch() {
@@ -253,14 +271,19 @@ prepare_python_interpreter() {   # 成功时 PYTHON_CMD 指向可用解释器
         fi
         if [[ -z "$PYTHON_CMD" ]]; then
             info "用 uv 下载 Python $PYTHON_REQUEST（约 30MB，最长等 15 分钟）..."
-            timeout 900 "$UV_CMD" python install "$PYTHON_REQUEST" || true
-            PYTHON_CMD="$("$UV_CMD" python find "$PYTHON_REQUEST" 2>/dev/null || true)"
-            if [[ -z "$PYTHON_CMD" ]]; then
-                echo "  ⚠️ 官方源没下到，换国内镜像重试..."
-                UV_PYTHON_INSTALL_MIRROR="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone" \
+            # 国内机器先走国内镜像（实测几秒下完），海外机器先走官方源；哪条失败就换另一条
+            local _src_order _src
+            if [[ "$COCO_CHOSEN_SOURCE" == "gitee" ]]; then _src_order=(mirror official); else _src_order=(official mirror); fi
+            for _src in "${_src_order[@]}"; do
+                if [[ "$_src" == "mirror" ]]; then
+                    UV_PYTHON_INSTALL_MIRROR="$PBS_NJU_MIRROR" timeout 900 "$UV_CMD" python install "$PYTHON_REQUEST" || true
+                else
                     timeout 900 "$UV_CMD" python install "$PYTHON_REQUEST" || true
+                fi
                 PYTHON_CMD="$("$UV_CMD" python find "$PYTHON_REQUEST" 2>/dev/null || true)"
-            fi
+                [[ -n "$PYTHON_CMD" ]] && break
+                echo "  这一路没下到，换另一路重试..."
+            done
         fi
     fi
 

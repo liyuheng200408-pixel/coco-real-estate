@@ -258,8 +258,20 @@ class TestPythonProvisioning:
         assert "UV_PYTHON_INSTALL_MIRROR" in t, "国内机器下载 Python 应走国内镜像"
         assert "mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone" in t
         assert 'COCO_CHOSEN_SOURCE' in t, "应按仓库源判断国内外（国内→镜像）"
-        # 官方源优先、镜像只在失败后重试一次；用户自己设过镜像时 uv 会直接用，不会被覆盖
-        assert "官方源没下到，换国内镜像重试" in t, "镜像应是官方源失败后的重试，而不是首选"
+        # 国内机器（Gitee 源）先走国内镜像，失败再换官方源；海外反之
+        assert 'if [[ "$COCO_CHOSEN_SOURCE" == "gitee" ]]; then _src_order=(mirror official); else _src_order=(official mirror); fi' in t, \
+            "下载源要按仓库源分主次（国内先镜像、海外先官方）"
+        assert "这一路没下到，换另一路重试" in t, "一路失败要换另一路，不能直接放弃"
+
+    def test_uv_acquisition_order_by_source(self):
+        """取 uv 也按仓库源分主次：国内先 PyPI 镜像、海外先官方安装脚本；两条都失败才报错并带原文。"""
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert 'if [[ "$COCO_CHOSEN_SOURCE" == "github" ]]; then' in t, "海外机器先走官方安装脚本"
+        assert "install_uv_official && return 0" in t
+        assert "for m in $mirrors" in t, "国内机器先走 PyPI 镜像"
+        assert "⚠️ 未能获取 uv" in t, "两条路都失败时才报错"
+        assert "UV_INSTALL_ERR" in t, "报错要带上失败原文（不静默）"
+        assert "换 PyPI 镜像重试" in t and "换官方安装脚本重试" in t, "中途换路要有中性提示"
 
     def test_uv_fallback_from_pypi_wheel_not_pip_install(self):
         """兜底取 uv 不能靠 pip install（PEP 668 会拦），要下 wheel 再解出里面的二进制"""
