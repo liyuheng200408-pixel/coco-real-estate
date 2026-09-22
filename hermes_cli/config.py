@@ -1426,7 +1426,7 @@ def _offer_list(heading: str, items: List[str], question: str) -> bool:
         print(f"    • {item}")
     print()
     if not _ask_yes_no(question):
-        print("  Set later with: hermes config set <key> <value>")
+        print("  Set later with: coco config set <key> <value>")
         return False
     print()
     return True
@@ -2929,9 +2929,9 @@ def show_config():
 
     print()
     print(color("─" * 60, Colors.DIM))
-    print(color("  hermes config edit     # Edit config file", Colors.DIM))
-    print(color("  hermes config set <key> <value>", Colors.DIM))
-    print(color("  hermes setup           # Run setup wizard", Colors.DIM))
+    print(color("  coco config edit     # Edit config file", Colors.DIM))
+    print(color("  coco config set <key> <value>", Colors.DIM))
+    print(color("  coco setup           # Run setup wizard", Colors.DIM))
     print()
 
 
@@ -3682,7 +3682,7 @@ def _cmd_config_check(args):
     if missing_config:
         print()
         print(color(f"  {len(missing_config)} new config option(s) available", Colors.YELLOW))
-        print("    Run 'hermes config migrate' to add them")
+        print("    Run 'coco config migrate' to add them")
 
     print()
 

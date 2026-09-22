@@ -1292,7 +1292,7 @@ def _print_systemd_start_limit_wait(system: bool = False) -> None:
     sudo, scope_flag, user_flag = _systemd_cli_bits(system)
     print(f"⏳ {scope_label} service is temporarily rate-limited by systemd.")
     print("  systemd is refusing another immediate start after repeated exits.")
-    print(f"  Wait for the start-limit window to expire, then run: {sudo}hermes gateway restart{scope_flag}")
+    print(f"  Wait for the start-limit window to expire, then run: {sudo}coco gateway restart{scope_flag}")
     print(f"  Or clear the failed state manually: systemctl {user_flag}reset-failed {svc}")
     print(f"  Check logs: journalctl {user_flag}-u {svc} -l --since '5 min ago'")
 
@@ -1474,11 +1474,11 @@ def _print_gateway_process_mismatch(snapshot: GatewayRuntimeSnapshot) -> None:
         print("⚠ Gateway is running as a detached fallback process — launchd cannot supervise it")
         print(pids_line)
         print("  Auto-start at login and auto-restart on crash are NOT available.")
-        print("  Stop it with: hermes gateway stop")
+        print("  Stop it with: coco gateway stop")
     else:
         print("⚠ Gateway process is running for this profile, but the service is not active")
         print(pids_line)
-        print("  This is usually a manual foreground/tmux/nohup run, so `hermes gateway`")
+        print("  This is usually a manual foreground/tmux/nohup run, so `coco gateway`")
         print("  can refuse to start another copy until this process stops.")
 
 
@@ -2353,7 +2353,7 @@ def print_legacy_unit_warning() -> None:
     print_info("  These run alongside the current hermes-gateway service and")
     print_info("  cause SIGTERM flap loops — both try to use the same bot token.")
     print_info("  Remove them with:")
-    print_info("    hermes gateway migrate-legacy")
+    print_info("    coco gateway migrate-legacy")
 
 
 def remove_legacy_hermes_units(interactive: bool = True, dry_run: bool = False) -> tuple[int, list[Path]]:
@@ -2375,7 +2375,7 @@ def remove_legacy_hermes_units(interactive: bool = True, dry_run: bool = False) 
         return 0, [p for _, p, _ in legacy]
 
     if interactive and not prompt_yes_no("Remove these legacy units?", True):
-        print("Skipped. Run again with: hermes gateway migrate-legacy")
+        print("Skipped. Run again with: coco gateway migrate-legacy")
         return 0, [p for _, p, _ in legacy]
 
     removed = 0
@@ -2406,7 +2406,7 @@ def remove_legacy_hermes_units(interactive: bool = True, dry_run: bool = False) 
         if os.geteuid() != 0:  # windows-footgun: ok — Linux systemd removal path, guarded by `if system == "Linux"` / systemd-only branch
             print()
             print_warning("System-scope legacy units require root to remove.")
-            print_info("  Re-run with: sudo hermes gateway migrate-legacy")
+            print_info("  Re-run with: sudo coco gateway migrate-legacy")
             remaining.extend(path for _, path in system_units)
         else:
             _remove_units(system_units, system=True)
@@ -2429,8 +2429,8 @@ def print_systemd_scope_conflict_warning() -> None:
     print_info("  This is confusing and can make start/stop/status behavior ambiguous.")
     print_info("  Default gateway commands target the user service unless you pass --system.")
     print_info("  Keep one of these:")
-    print_info("    hermes gateway uninstall")
-    print_info("    sudo hermes gateway uninstall --system")
+    print_info("    coco gateway uninstall")
+    print_info("    sudo coco gateway uninstall --system")
 
 
 def _require_root_for_system_service(action: str) -> None:
@@ -2530,7 +2530,7 @@ def ensure_gateway_service(context: str = "setup") -> bool:
     if is_container():
         # Containers use restart policies, not service managers.
         print_info("Start the gateway to bring your bots online:")
-        print_info("   hermes gateway run          # Run as container main process")
+        print_info("   coco gateway run          # Run as container main process")
         print_info("")
         print_info("For automatic restarts, use a Docker restart policy:")
         print_info("   docker run --restart unless-stopped ...")
@@ -2539,7 +2539,7 @@ def ensure_gateway_service(context: str = "setup") -> bool:
     supports_systemd = supports_systemd_services()
     if not (supports_systemd or is_macos() or is_windows()):
         print_info("  No supported service manager found on this host.")
-        print_info("  Run the gateway in the foreground with: hermes gateway")
+        print_info("  Run the gateway in the foreground with: coco gateway")
         return False
 
     try:
@@ -2576,10 +2576,10 @@ def ensure_gateway_service(context: str = "setup") -> bool:
     except SystemExit:
         # Some install/start paths sys.exit() on hard failures (temp-HOME guard); never abort setup/import.
         print_warning("  Gateway service install did not complete.")
-        print_info("  You can retry manually: hermes gateway install")
+        print_info("  You can retry manually: coco gateway install")
     except Exception as e:
         print_warning(f"  Gateway service install failed: {e}")
-        print_info("  You can retry manually: hermes gateway install")
+        print_info("  You can retry manually: coco gateway install")
     return False
 
 
@@ -3153,9 +3153,9 @@ def _print_system_scope_remediation(action: str) -> None:
     print_info(f"    1. {action.capitalize()} it this time:")
     print_info(f"         sudo systemctl {action} {get_service_name()}")
     print_info("    2. Switch to a per-user service (recommended for personal use):")
-    print_info("         sudo hermes gateway uninstall --system")
-    print_info("         hermes gateway install")
-    print_info("         hermes gateway start")
+    print_info("         sudo coco gateway uninstall --system")
+    print_info("         coco gateway install")
+    print_info("         coco gateway start")
 
 
 def _get_restart_drain_timeout() -> float:
@@ -3262,8 +3262,8 @@ def systemd_install(
     print(f"✓ {scope_label.capitalize()} service {'installed and enabled' if enable_on_startup else 'installed'}!")
     print()
     print("Next steps:")
-    print(f"  {sudo}hermes gateway start{scope_flag}              # Start the service")
-    print(f"  {sudo}hermes gateway status{scope_flag}             # Check status")
+    print(f"  {sudo}coco gateway start{scope_flag}              # Start the service")
+    print(f"  {sudo}coco gateway status{scope_flag}             # Check status")
     print(f"  journalctl {user_flag}-u {get_service_name()} -f  # View logs")
     print()
 
@@ -3328,7 +3328,7 @@ def systemd_uninstall(system: bool = False):
 def _print_service_not_installed(system: bool) -> None:
     sudo, scope_flag, _ = _systemd_cli_bits(system)
     print("✗ Gateway service is not installed")
-    print(f"  Run: {sudo}hermes gateway install{scope_flag}")
+    print(f"  Run: {sudo}coco gateway install{scope_flag}")
 
 
 def _require_service_installed(action: str, system: bool = False) -> None:
@@ -3490,7 +3490,7 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
 
     if not systemd_unit_is_current(system=system):
         print("⚠ Installed gateway service definition is outdated")
-        print(f"  Run: {sudo}hermes gateway restart{scope_flag}  # auto-refreshes the unit")
+        print(f"  Run: {sudo}coco gateway restart{scope_flag}  # auto-refreshes the unit")
         print()
 
     status_cmd = ["status", svc, "--no-pager"] + (["-l"] if full else [])
@@ -3500,7 +3500,7 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
         print(f"✓ {scope_label} gateway service is running")
     else:
         print(f"✗ {scope_label} gateway service is stopped")
-        print(f"  Run: {sudo}hermes gateway start{scope_flag}")
+        print(f"  Run: {sudo}coco gateway start{scope_flag}")
 
     configured_user = _read_systemd_user_from_unit(unit_path) if system else None
     if configured_user:
@@ -3515,11 +3515,11 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
         print("  ⏳ Restart pending: systemd is waiting to relaunch the gateway")
     elif _systemd_unit_is_start_limited(unit_props):
         print("  ⏳ Restart pending: systemd is temporarily rate-limiting starts")
-        print(f"  Run after the start-limit window expires: {sudo}hermes gateway restart{scope_flag}")
+        print(f"  Run after the start-limit window expires: {sudo}coco gateway restart{scope_flag}")
         print(f"  Or clear it manually: systemctl {user_flag}reset-failed {svc}")
     elif active_state == "failed" and unit_props.get("ExecMainStatus", "") == str(GATEWAY_SERVICE_RESTART_EXIT_CODE):
         print("  ⚠ Planned restart is stuck in systemd failed state (exit 75)")
-        print(f"  Run: systemctl {user_flag}reset-failed {svc} && {sudo}hermes gateway start{scope_flag}")
+        print(f"  Run: systemctl {user_flag}reset-failed {svc} && {sudo}coco gateway start{scope_flag}")
     elif active_state == "failed" and result_code:
         print(f"  ⚠ Systemd unit result: {result_code}")
 
@@ -3793,10 +3793,10 @@ def _launchd_fallback_to_detached(reason: str, *, exit_on_failure: bool = True) 
         print("✓ Started gateway as a background process instead")
         print("  It will NOT auto-start at login or auto-restart on crash.")
         print(f"  Logs: {_dhh()}/logs/gateway.log")
-        print("  Stop it with: hermes gateway stop")
+        print("  Stop it with: coco gateway stop")
         return True
     print_error("Failed to start the gateway as a background process.")
-    print(f"  Try manually: nohup hermes gateway run --replace > {_dhh()}/logs/gateway.log 2>&1 &")
+    print(f"  Try manually: nohup coco gateway run --replace > {_dhh()}/logs/gateway.log 2>&1 &")
     if exit_on_failure:
         sys.exit(1)
     return False
@@ -4087,7 +4087,7 @@ def launchd_install(force: bool = False):
     _clear_launchd_unsupported_marker()
     print()
     print("Next steps:")
-    print("  hermes gateway status             # Check status")
+    print("  coco gateway status             # Check status")
     from hermes_constants import display_hermes_home as _dhh
     print(f"  tail -f {_dhh()}/logs/gateway.log  # View logs")
 
@@ -4344,12 +4344,12 @@ def launchd_status(deep: bool = False):
         print("✓ Service definition matches the current Hermes install")
     else:
         print("⚠ Service definition is stale relative to the current Hermes install")
-        print("  Run: hermes gateway start")
+        print("  Run: coco gateway start")
 
     if not service_listed:
         print("✗ Gateway service is not loaded")
         print("  Service definition exists locally but launchd has not loaded it.")
-        print("  Run: hermes gateway start")
+        print("  Run: coco gateway start")
         if fallback_pid:
             print(f"  Note: a detached gateway process is running (PID {fallback_pid})")
     elif launchd_pid is not None:
@@ -4362,10 +4362,10 @@ def launchd_status(deep: bool = False):
         print("  launchd cannot manage the gateway on this macOS version.")
         if fallback_pid:
             print(f"✓ Detached fallback process is running (PID {fallback_pid})")
-            print("  Cron jobs will fire. Stop with: hermes gateway stop")
+            print("  Cron jobs will fire. Stop with: coco gateway stop")
         else:
             print("✗ No fallback process is running")
-            print("  Run: hermes gateway start")
+            print("  Run: coco gateway start")
         print("  ⚠ Auto-start at login and auto-restart on crash are NOT available.")
     else:
         print("✓ Gateway service is registered with launchd")
@@ -4482,7 +4482,7 @@ def _named_profile_refused_under_multiplexer(force: bool = False) -> bool:
     )
     print("  Manage the multiplexer instead (from the default profile):")
     print()
-    print("    hermes gateway restart")
+    print("    coco gateway restart")
     print()
     print("  Pass --force to start a separate profile gateway anyway (not")
     print("  recommended while the multiplexer is running).")
@@ -4533,7 +4533,7 @@ def _guard_supervised_gateway_conflict(force: bool = False) -> None:
         "  instead:"
     )
     print()
-    print("    hermes gateway restart")
+    print("    coco gateway restart")
     print()
     print(
         "  Pass --force to start a foreground gateway anyway (not recommended\n"
@@ -4571,9 +4571,9 @@ def _guard_existing_gateway_process_conflict(replace: bool = False) -> None:
         return
 
     print_error(f"Another gateway instance is already running (PID {pid}).")
-    print("  Use 'hermes gateway restart' to replace it,")
-    print("  or 'hermes gateway stop' first.")
-    print("  Or use 'hermes gateway run --replace' to auto-replace.")
+    print("  Use 'coco gateway restart' to replace it,")
+    print("  or 'coco gateway stop' first.")
+    print("  Or use 'coco gateway run --replace' to auto-replace.")
     sys.exit(1)
 
 
@@ -5082,11 +5082,11 @@ def _prompt_unauthorized_access(*, is_email: bool) -> None:
         if is_email:
             _set_platform_unauthorized_dm_behavior("email", "pair")
         print_success("  DM pairing mode — users will receive a code to request access.")
-        print_info("  Approve with: hermes pairing approve <platform> <code>")
+        print_info("  Approve with: coco pairing approve <platform> <code>")
     elif is_email:
         print_success("  Unknown email senders will be ignored.")
     else:
-        print_info("  Skipped — configure later with 'hermes gateway setup'")
+        print_info("  Skipped — configure later with 'coco gateway setup'")
 
 
 def _telegram_auto_setup(token_var: str) -> tuple[bool, object]:
@@ -5299,7 +5299,7 @@ def _setup_weixin():
 
     if not check_weixin_requirements():
         print_error("  Missing dependencies: Weixin needs aiohttp and cryptography.")
-        print_info("  Install them, then rerun `hermes gateway setup`.")
+        print_info("  Install them, then rerun `coco gateway setup`.")
         return
 
     print()
@@ -5436,7 +5436,7 @@ def _setup_qqbot():
                 print_success(f"  Allow list set to {user_openid}")
         save_env_value("QQ_ALLOWED_USERS", allowed)
         print_success("  DM pairing enabled.")
-        print_info("  Unknown users can request access; approve with `hermes pairing approve`.")
+        print_info("  Unknown users can request access; approve with `coco pairing approve`.")
     elif access_idx == 1:
         _save_env_values(QQ_ALLOW_ALL_USERS="true", QQ_ALLOWED_USERS="")
         print_warning("  Open DM access enabled for QQ Bot.")
@@ -5647,7 +5647,7 @@ def _setup_service_action(
             _service_call(backend, action, None if action == "restart" else system)
         elif action == "restart" and windows:
             stop_profile_gateway()
-            print_info("Start manually: hermes gateway")
+            print_info("Start manually: coco gateway")
     except UserSystemdUnavailableError as e:
         print_error(f"  {failed_label} — user systemd not reachable:")
         _print_indented(str(e))
@@ -5733,10 +5733,10 @@ def _wizard_install_service(backend: str) -> None:
     )
     if not (start_now or start_on_login):
         print_info("  Skipped start and auto-start setup.")
-        print_info("  You can install later: hermes gateway install")
+        print_info("  You can install later: coco gateway install")
         if supports_systemd_services():
-            print_info("  Or as a boot-time service: sudo hermes gateway install --system")
-        print_info("  Or run in foreground:  hermes gateway run")
+            print_info("  Or as a boot-time service: sudo coco gateway install --system")
+        print_info("  Or run in foreground:  coco gateway run")
         return
     try:
         installed_scope, did_install = None, True
@@ -5753,7 +5753,7 @@ def _wizard_install_service(backend: str) -> None:
             _setup_service_action("start", failed_label="Start failed", system=installed_scope == "system")
     except subprocess.CalledProcessError as e:
         print_error(f"  Install failed: {e}")
-        print_info("  You can try manually: hermes gateway install")
+        print_info("  You can try manually: coco gateway install")
 
 
 def _wizard_post_setup() -> None:
@@ -5805,7 +5805,7 @@ def gateway_setup():
         _wizard_post_setup()
     else:
         print()
-        print_info("No platforms configured. Run 'hermes gateway setup' when ready.")
+        print_info("No platforms configured. Run 'coco gateway setup' when ready.")
 
     print()
 
@@ -6199,8 +6199,8 @@ def _cmd_stop(args):
         )
         print("  Stop or restart the multiplexer from the default profile instead:")
         print()
-        print("    hermes gateway stop      # takes every served profile offline")
-        print("    hermes gateway restart")
+        print("    coco gateway stop      # takes every served profile offline")
+        print("    coco gateway restart")
         sys.exit(GATEWAY_FATAL_CONFIG_EXIT_CODE)
     # Under s6 a bare pkill is seen as a crash and restarted; go through the supervisor.
     if stop_all and _dispatch_all_via_service_manager_if_s6("stop"):
@@ -6342,7 +6342,7 @@ def _cmd_status(args):
     if not snapshot.running and named_profile_served_by_running_multiplexer():
         # Satellite profile: the default multiplexer is the live inbound process for it.
         print("✓ Gateway is running via the default-profile multiplexer")
-        print("  Manage it from the default profile: hermes gateway status")
+        print("  Manage it from the default profile: coco gateway status")
         _print_served_ingress_urls(get_active_profile_name())
     elif (kind := _installed_service_kind_for(lambda: _windows_service_installed)) is not None:
         if kind == "systemd":
@@ -6367,7 +6367,7 @@ def _cmd_status(args):
             _print_runtime_health()
             print()
             print("To start:")
-            print("  hermes gateway run      # Run in foreground")
+            print("  coco gateway run      # Run in foreground")
             _print_lines(*_STATUS_STOPPED_HINTS[_status_host_kind()])
 
     _print_other_profiles_gateway_status()

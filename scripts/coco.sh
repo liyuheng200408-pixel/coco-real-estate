@@ -193,18 +193,18 @@ Coco v${COCO_VER}
   uninstall  卸载 Coco（三档菜单 + 输 yes 确认；1/2 档会先自动备份，3 档不备份）
 
 服务与诊断:
-  status     服务状态        （等价于 hermes gateway status）
+  status     查看服务状态
   logs       查看日志，默认最近 50 行（coco logs 200）
-  start      启动服务        （等价于 hermes gateway start）
-  restart    重启服务        （等价于 hermes gateway restart）
-  stop       停止服务        （等价于 hermes gateway stop）
+  start      启动服务
+  restart    重启服务（改完配置后要执行：服务只在启动时读配置）
+  stop       停止服务
 
-安装配置（等价于官方 hermes 同名命令）:
-  model      选择模型 / 填 API Key     （hermes model）
-  setup      配置向导（飞书等）        （hermes setup）
-  config     查看或修改配置            （hermes config）
-  doctor     环境自检                  （hermes doctor）
-  tools      配置工具与技能            （hermes tools）
+安装配置:
+  model      选择模型 / 填 API Key
+  setup      配置向导（飞书等）
+  config     查看或修改配置：config edit / config set <键> <值>
+  doctor     环境自检
+  tools      配置工具与技能
   gateway    服务安装等：coco gateway install
   pairing    飞书配对批准：coco pairing approve feishu <配对码>
 

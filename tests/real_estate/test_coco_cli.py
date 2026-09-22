@@ -151,11 +151,14 @@ class TestHelpAndNaming:
                     "status", "logs", "start", "restart", "stop", "model", "setup", "gateway", "pairing"):
             assert cmd in out, f"help 缺少 {cmd}"
 
-    def test_help_mentions_official_equivalence(self, tmp_path):
-        """命令统一口径：安装配置类注明等价官方命令；底层命令不再对外暴露（排障用 coco cli）"""
+    def test_help_speaks_coco_only(self, tmp_path):
+        """命令统一口径（2026-09-22 老板定）：帮助里只给 coco 命令，不再写"等价于 hermes xxx"注记；
+        底层命令仍需说明"不再对外暴露"（排障用 coco cli）。"""
         root = _fake_install(tmp_path)
         out = _run(root, ["help"]).stdout
-        assert "等价于" in out and "hermes" in out, out
+        assert "等价于" not in out, out
+        for cmd in ("status", "logs", "restart", "model", "setup", "config", "doctor", "tools", "pairing"):
+            assert cmd in out, f"帮助里应列出 coco {cmd}：{out}"
         assert "不再对外暴露" in out and "coco cli" in out, out
 
     def test_unknown_command_points_to_help(self, tmp_path):

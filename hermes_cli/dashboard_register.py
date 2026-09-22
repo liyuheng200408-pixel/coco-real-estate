@@ -166,7 +166,7 @@ def cmd_dashboard_register(args) -> None:
     from hermes_cli.config import is_managed, save_env_value
     # Managed installs get the client id stamped in by the orchestrator (save_env_value refuses).
     if is_managed():
-        print("✗ `hermes dashboard register` is not available in a managed/hosted install.\n"
+        print("✗ `coco dashboard register` is not available in a managed/hosted install.\n"
               "  The dashboard OAuth client is provisioned by the hosting platform.")
         sys.exit(1)
 
