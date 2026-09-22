@@ -2562,9 +2562,10 @@ def init_real_estate_db(database_url: str = None) -> RealEstateDB:
         if not database_url:
             raise RuntimeError(
                 "未配置 DATABASE_URL 环境变量，拒绝初始化数据库。"
-                "请检查 hermes-gateway.service 是否加载 .env.db（systemctl --user edit "
-                "hermes-gateway.service 添加 EnvironmentFile=/root/hermes-agent/.env.db），"
-                "或手动 export DATABASE_URL=postgresql://... 后重试。"
+                "请先运行 `coco check` 做体检（会检查 .env.db 与网关服务的数据库环境）；"
+                "若是网关服务没加载 .env.db，运维可在服务器上补 EnvironmentFile（systemctl --user edit "
+                "hermes-gateway.service 添加 EnvironmentFile=/root/hermes-agent/.env.db），改完 `coco restart` 生效；"
+                "也可以手动 export DATABASE_URL=postgresql://... 后重试。"
                 "这是 2026-08-12 幽灵库事故的防复发机制：禁止静默回退 sqlite。"
             )
     _db_instance = RealEstateDB(database_url)

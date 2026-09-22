@@ -35,7 +35,9 @@ REFUSAL_MESSAGE = (
     "  coco update\n"
     "（等价写法：git -C ~/coco pull && bash ~/coco/scripts/update.sh）\n"
     "（我这边执行会重启网关服务，把我们的对话一起中断；官方 `hermes update` 也不要使用："
-    "它不会跑 Coco 的数据库迁移，还可能覆盖你手改过的代码。）"
+    "它不会跑 Coco 的数据库迁移，还可能覆盖你手改过的代码。）\n"
+    "【服务类命令】只给这几条：coco status（看服务状态）/ coco restart（重启服务）/ coco logs（看日志）。"
+    "不要给 sudo systemctl restart hermes、systemctl restart hermes-gateway、hermes gateway restart 这类旧口径——本机没有那个服务名。"
 )
 
 # 命中即拦截的更新类命令；均为「更新/重装/重启本机 Coco」语义，避免误伤普通命令
@@ -45,7 +47,8 @@ _UPDATE_PATTERNS = (
     re.compile(r"""(?:^|[\s;&|(`])(?:sudo\s+)?bash\s+\S*install\.sh\b""", re.I),   # 安装脚本（会重建目录）
     re.compile(r"""(?:^|[\s;&|(`])(?:sudo\s+)?(?:bash|sh|source|\.)\s+\S*scripts/update\.sh\b""", re.I),
     re.compile(r"""(?:^|[\s;&|(`])(?:sudo\s+)?\S*scripts/update\.sh\b""", re.I),   # 直接执行 update.sh
-    re.compile(r"systemctl\s+(?:-\S+\s+)*(?:restart|stop|start)\b[^\n]*\bhermes[.\-]?gateway", re.I),
+    # 2026-09-22：原来只认 hermes-gateway，漏了旧口径 `sudo systemctl restart hermes`（经纪人真收到过这条）
+    re.compile(r"systemctl\s+(?:-\S+\s+)*(?:restart|stop|start)\b[^\n]*\bhermes[.\-]?\w*", re.I),
     # coco 侧的写操作（2026-09-21 加）：coco 有了这些命令后，不拦就能绕过上面所有规则
     re.compile(r"(?<![\w.\-/])coco\s+(?:update|start|stop|restart|uninstall|restore)\b", re.I),
     re.compile(r"(?<![\w.\-/])coco\s+gateway\s+(?:install|start|stop|restart|uninstall)\b", re.I),
