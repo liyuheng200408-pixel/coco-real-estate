@@ -232,3 +232,9 @@ native/fts5_cjk/*.so
 # Coco 运行时文件（更新锁、通道标记）
 .coco-update.lock
 .coco-channel
+
+# 测试运行时在仓库根生成的空 SQLite 残留（2026-09-22：跑 tests/real_estate 会生成，
+# 曾被 git add -A 误提交进仓库）
+real_estate.db
+real_estate.db-wal
+real_estate.db-shm
