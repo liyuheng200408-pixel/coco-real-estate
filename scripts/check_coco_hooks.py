@@ -247,6 +247,40 @@ CONTENT_CHECKS = [
         "（单测 tests/real_estate/test_install_layout.py::TestPythonVersionWindow 会守这条）。",
     ),
     (
+        "B05",
+        "对外命令口径（提示词）",
+        "agent/real_estate_prompt.py",
+        [
+            r"【对外命令口径】",
+            r"一律给 `coco <子命令>`",
+            r"coco model",
+            r"coco check",
+            r"coco backup",
+            r"coco restore --file",
+            r"coco pairing approve feishu",
+            r"coco config set",
+            r"!hermes (model|setup|backup|restore|pairing|tools|doctor|uninstall)\b",
+        ],
+        "提示词是模型回答“要敲什么命令”的主依据：必须保留【对外命令口径】段\n"
+        "（通用规则 + 命令面 + 常见问法映射），且不得出现裸底座命令\n"
+        "（hermes model/setup/backup/restore/pairing/tools/doctor/uninstall）——\n"
+        "本机已不暴露 hermes 入口，模型照抄就会给经纪人发敲不到的命令。\n"
+        "（允许出现在禁止清单里的：hermes update / hermes gateway restart / hermes --version。）",
+    ),
+    (
+        "B06",
+        "对外命令口径（技能文件）",
+        "skills/real_estate/SKILL.md",
+        [
+            r"对外命令口径（2026-09-23 加）",
+            r"coco pairing approve feishu",
+            r"coco restore --file",
+            r"!hermes (model|setup|backup|restore|pairing|tools|doctor|uninstall)\b",
+        ],
+        "技能文件是模型回答“要敲什么命令”的另一处依据：必须保留对外命令口径段，\n"
+        "并保持 coco 口径（同 B05）。",
+    ),
+    (
         "17",
         "用户可见命令文案（设置向导收尾屏）",
         "hermes_cli/setup_summary.py",
