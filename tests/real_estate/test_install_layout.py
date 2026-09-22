@@ -210,26 +210,59 @@ class TestReadmesStayInSync:
             "（GitHub 首页读 README.md、Gitee 首页读 README.zh-CN.md）：\n" + diff)
 
 
-class TestPython313DownloadPath:
-    """系统 Python 超出窗口时（更老的发行版、或将来的 3.15）会走"准备 Python 3.13"这条路径 ——
-    必须国内加速、有超时、失败可读。
+class TestPythonProvisioning:
+    """Python 环境走官方那套：自带 uv（$HERMES_HOME/bin/uv）→ 由 uv 准备解释器与虚拟环境。
 
-    背景：这段以前把输出全丢掉、且没有任何超时，国内机器上看着像"卡死一小时"；
-    而且它先用 `pip install` 装 uv —— Ubuntu 23.04 起系统 Python 禁止 pip 装包（PEP 668），
-    这一步必然失败，于是只剩"去境外下 20MB uv"一条路。
-    （26.04 自带的 3.14 现在已在版本窗口内，不再走这条路；更老的系统与将来的 3.15 仍然要靠它。）
+    背景（真实事故）：老写法先 `pip install uv`，而 Ubuntu 23.04 起系统 Python 禁止 pip 装包
+    （PEP 668）→ 必然失败且被静默；退路 `curl astral.sh/uv/install.sh | sh` 又把安装脚本的输出
+    全丢进 /dev/null，而那份脚本内部下载 uv 二进制时**没有任何超时** → 国内机器上表现为
+    "卡在 正在下载 uv..." 再无下文。现在按官方做法：两段式安装、UV_UNMANAGED_INSTALL 直接落
+    二进制、日志留档、每一步都有超时。
     """
 
-    def test_domestic_mirror_for_cn(self):
+    def test_managed_uv_installed_officially(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert 'UV_BIN_DIR="$COCO_HERMES_HOME/bin"' in t, "uv 应与官方一样装在 $HERMES_HOME/bin"
+        assert "UV_UNMANAGED_INSTALL=" in t, "应按官方用 UV_UNMANAGED_INSTALL 直接放二进制"
+        assert "curl -fsSL --connect-timeout 20 --max-time 120 https://astral.sh/uv/install.sh -o" in t, \
+            "官方两段式：先下安装脚本到文件（不要 curl | sh）"
+        assert ">/dev/null 2>&1 | sh" not in t, "不能把安装脚本的输出丢掉（否则看着像死机）"
+        assert "timeout 300" in t, "执行官方安装脚本必须带超时"
+
+    def test_uv_prepares_python_like_official(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert 'PYTHON_REQUEST="3.11"' in t, "与官方一致，向 uv 要 3.11（当前即 3.11.16）"
+        assert 'PYTHON_SYSTEM_RANGE=">=3.11,<3.14"' in t, "复用系统解释器的范围与官方一致"
+        assert '"$UV_CMD" python find --system' in t, "先复用系统里 3.11~3.13 的解释器，不必下载"
+        assert '"$UV_CMD" python install' in t, "系统里没有合适的解释器时交给 uv 下载"
+        assert "UV_PYTHON_INSTALL_DIR" in t, "root 安装时把 uv 的 Python 放全局可读目录"
+
+    def test_venv_created_with_uv_and_has_pip(self):
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert '"$UV_CMD" venv' in t and "--python" in t and "--seed" in t, \
+            "用 uv 建 venv（--seed 保证 venv 里有 pip，update.sh 依赖它）"
+        assert 'UV_PYTHON="$INSTALL_DIR/venv/bin/python"' in t, "后续 uv 命令要钉在刚建的 venv 上"
+
+    def test_apt_get_waits_for_dpkg_lock(self):
+        """全新装机的机器上 unattended-upgrades 常占着 apt 锁（真实事故：Ubuntu 26.04 新装机跑
+        安装脚本，第一步 apt 就报 Could not get lock /var/lib/dpkg/lock-frontend 并中断）。"""
+        t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        assert "wait_for_apt_lock" in t, "apt 之前应先等锁释放"
+        assert "DPkg::Lock::Timeout" in t, "apt 自己也应带锁等待参数（双保险）"
+        assert "apt_get update" in t and "apt_get install" in t, "apt 调用统一走带锁等待的入口"
+        assert "自动更新" in t, "等待时要说清是系统自动更新占着锁（便于用户排查）"
+        assert "apt_get install -y -qq python3 python3-pip" in t, "系统依赖仍要一次装齐"
+
+    def test_domestic_mirror_used_as_fallback(self):
         t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
         assert "UV_PYTHON_INSTALL_MIRROR" in t, "国内机器下载 Python 应走国内镜像"
         assert "mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone" in t
         assert 'COCO_CHOSEN_SOURCE' in t, "应按仓库源判断国内外（国内→镜像）"
-        # 用户自己设过镜像时必须尊重（不要硬覆盖）
-        assert '-z "${UV_PYTHON_INSTALL_MIRROR:-}"' in t
+        # 官方源优先、镜像只在失败后重试一次；用户自己设过镜像时 uv 会直接用，不会被覆盖
+        assert "官方源没下到，换国内镜像重试" in t, "镜像应是官方源失败后的重试，而不是首选"
 
-    def test_uv_comes_from_pypi_wheel_not_pip_install(self):
-        """取 uv 不能靠 pip install（PEP 668 会拦），要下 wheel 再解出里面的二进制"""
+    def test_uv_fallback_from_pypi_wheel_not_pip_install(self):
+        """兜底取 uv 不能靠 pip install（PEP 668 会拦），要下 wheel 再解出里面的二进制"""
         t = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
         assert "pip download" in t and "--only-binary=:all:" in t, "应用 pip download 取 uv 的 wheel"
         assert "pip install -q -i" not in t, "pip install 装 uv 在 Ubuntu 23.04+ 会被 PEP 668 拦掉"
@@ -246,7 +279,7 @@ class TestPython313DownloadPath:
         assert "timeout 300" in t, "官方安装脚本必须带超时（它自己下载时没有超时）"
         assert "--max-time 120" in t, "下载 uv 安装脚本必须带超时"
         assert "--max-time 900" in t, "直接下载 Python 包必须带超时"
-        assert "正在下载并准备 Python 3.13" in t, "应打印进度提示"
+        assert "用 uv 下载 Python" in t, "应打印 uv 下载 Python 的进度提示"
         assert "正在下载 Python 3.13" in t, "应打印进度提示"
         assert ">/dev/null 2>&1 | sh" not in t, "不能把安装脚本的输出丢掉（否则看着像死机）"
 
