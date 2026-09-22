@@ -391,6 +391,59 @@ try:
 except Exception as _exc:  # noqa: BLE001
     warn(f"配置核对未完成（{_exc}）", "修复：coco update")
 
+# ---- 15. 命令面自检（对外宣传的 coco 命令要真的能用）----
+print("\n[15] 命令面自检（coco 命令可用性）")
+try:
+    import re as _re15
+    import subprocess as _sp15
+
+    from pathlib import Path as _Path15
+    _coco_sh = _Path15(INSTALL_DIR) / "scripts" / "coco.sh"
+    _hermes_bin = _Path15(INSTALL_DIR) / "venv" / "bin" / "hermes"
+
+    # ① 我们对外宣传/打印的 coco 子命令，必须在 coco.sh 里有实现
+    _advertised = ("version", "status", "restart", "start", "stop", "logs", "check",
+                   "backup", "backups", "restore", "update", "uninstall",
+                   "model", "setup", "config", "doctor", "tools", "pairing")
+    if not _coco_sh.exists():
+        bad("找不到 coco 命令入口", str(_coco_sh), "修复：coco update")
+    else:
+        _text15 = _coco_sh.read_text(encoding="utf-8", errors="ignore")
+        _labels15 = set()
+        for _group in _re15.findall(r"^\s{2}([^)\n]+)\)", _text15, _re15.M):
+            for _tok in _group.split("|"):
+                _tok = _tok.strip().strip('"')
+                if _re15.fullmatch(r"[a-z][a-z\-]*", _tok):
+                    _labels15.add(_tok)
+        _missing15 = [c for c in _advertised if c not in _labels15]
+        if _missing15:
+            bad(f"coco 命令缺实现：{', '.join(_missing15)}（{_coco_sh}）",
+                "修复：补齐 coco.sh 的子命令（或别再对外宣传这些命令）")
+        else:
+            ok(f"coco 命令面完整（{len(_advertised)} 条对外命令都有实现）")
+
+    # ② 转发目标必须真的存在于官方 CLI（上游升级后子命令可能改名/移除）
+    if not _hermes_bin.exists():
+        warn(f"未找到官方程序：{_hermes_bin}", "修复：确认安装完整（coco update）")
+    else:
+        _forward = ("setup", "config", "doctor", "model", "tools", "pairing", "gateway")
+        _broken15 = []
+        for _cmd in _forward:
+            try:
+                _r15 = _sp15.run([str(_hermes_bin), _cmd, "--help"],
+                                 capture_output=True, timeout=60)
+                if _r15.returncode != 0:
+                    _broken15.append(_cmd)
+            except Exception:
+                _broken15.append(_cmd)
+        if _broken15:
+            bad(f"coco 转发目标不可用：{', '.join(_broken15)}（官方 CLI 里没有该子命令）",
+                "修复：确认上游是否改过子命令名，同步调整 coco.sh 的转发")
+        else:
+            ok(f"coco 转发目标可用（{len(_forward)} 个官方子命令都在）")
+except Exception as _exc15:  # noqa: BLE001
+    warn(f"命令面自检未完成（{_exc15}）", "修复：coco update")
+
 # ---- 汇总 ----
 print("\n" + "=" * 56)
 print(f" 汇总: PASS {PASS}  /  FAIL {FAIL}  /  WARN {WARN}")

@@ -68,6 +68,9 @@ Coco 自有文件、挂钩点文件、我们的业务目录（`agent/real_estate
 | 09 | `pyproject.toml` | 依赖里必须保留 `ddgs`（web_search 后端） |
 | 10 | `.github/workflows/install-e2e.yml` | **不能带 `schedule:` 定时触发**——该 E2E 测的是 Hermes 本体的安装升级，与 Coco 的 install.sh 分发方式不符，定时跑必失败并持续吃 Actions 配额 |
 | 11 | `.github/workflows/deploy-site.yml` | **不能带 `release:` / `push:` 触发**——官方靠 `VERCEL_DEPLOY_HOOK` 部署文档站，本仓库没有该钩子，每次发版必红；只留 `workflow_dispatch` |
+| 17 | `hermes_cli/setup_summary.py` | 收尾屏三张表 + 提示句必须是 `coco` 命令（官方版是 `hermes`） |
+| 18 | `gateway/run_inbound.py` | 配对码提示必须是 `coco pairing approve`（官方版是 `hermes pairing approve`） |
+| 19 | `hermes_cli/update_cmd_config.py` | 配置迁移提示必须是 `coco config migrate` |
 | 12 | `pyproject.toml` | `requires-python` 必须是 `>=3.11,<3.15`（Coco 已放行 3.14：依赖全有 cp314 轮子、单测全绿）；官方版是 `<3.14`，被同步冲回就会出现「install.sh 放行、pip 拒绝」的错配 |
 
 ### 第 4 步｜自检 + 处理部署体系

@@ -184,6 +184,60 @@ class TestDocsCommandsExist:
             # 只认"命令位置"的 coco（行首/空白/&&/;/|/反引号之后），避免把 `git -C ~/coco pull` 误判
             for cmd in set(re.findall(r"(?:^|[\s;&|`])coco\s+([a-z][a-z\-]{2,})", text, re.M)):
                 assert cmd in known, f"{rel} 写了不存在的命令：coco {cmd}（已知：{sorted(known)}）"
+        # 安装脚本结尾打印给用户的命令，同样必须真实存在（2026-09-22 加）
+        install = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        for cmd in set(re.findall(r"(?:^|[\s;&|`])(?:echo\s+[\"']*)?coco\s+([a-z][a-z\-]{2,})", install, re.M)):
+            assert cmd in known, f"install.sh 打印了不存在的命令：coco {cmd}（已知：{sorted(known)}）"
+
+    def test_printed_commands_are_coco_not_hermes(self):
+        """用户照着敲的命令文案必须是 coco 口径（2026-09-22 老板要求）。
+
+        改这些文案的地方分两类：Coco 自有文件（install.sh / coco.sh）与官方层文件
+        （setup_summary.py / gateway/run_inbound.py / update_cmd_config.py）——
+        后者会被上游同步覆盖，所以有挂钩点自检守着（check_coco_hooks.py 17/18/19）。
+        """
+        install = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        for step in ("coco model", "coco setup", "coco restart", "coco pairing approve feishu"):
+            assert step in install, f"安装收尾提示应给 coco 命令：{step}"
+
+        summary = (REPO_ROOT / "hermes_cli" / "setup_summary.py").read_text(encoding="utf-8")
+        for row in ('("coco setup",', '("coco config",', '("coco status",'):
+            assert row in summary, f"设置向导收尾屏应印 coco 命令：{row}"
+        assert not re.search(r'\(\s*"hermes ', summary), "收尾屏不该再出现官方 hermes 命令"
+
+        inbound = (REPO_ROOT / "gateway" / "run_inbound.py").read_text(encoding="utf-8")
+        assert "`coco {profile_arg}pairing approve " in inbound, "配对提示应给 coco 命令"
+        assert "`hermes {profile_arg}pairing approve " not in inbound, "配对提示不该是 hermes 命令"
+
+    def test_test_tag_only_on_test_channel(self, tmp_path):
+        """测试号只在测试通道显示（2026-09-22 老板在稳定版上看到过 "稳定通道 · 测试号 v…-test5"）。"""
+        import shutil
+        import subprocess
+
+        repo = tmp_path / "repo"
+        (repo / "scripts").mkdir(parents=True)
+        shutil.copy(SCRIPTS / "coco_channel.sh", repo / "scripts" / "coco_channel.sh")
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+
+        def git(*args):
+            return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env)
+
+        git("init", "-q", "-b", "master")
+        (repo / "f.txt").write_text("x", encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-qm", "c1")
+        git("tag", "v0.21.3-68-test5")
+        (repo / "f.txt").write_text("y", encoding="utf-8")
+        git("commit", "-aqm", "c2")
+
+        def test_tag():
+            return subprocess.run(["bash", str(repo / "scripts" / "coco_channel.sh"), "test-tag"],
+                                  capture_output=True, text=True, env=env).stdout.strip()
+
+        assert test_tag() == "", "稳定通道（master）不该显示测试号"
+        git("checkout", "-q", "-b", "next")
+        assert "test5" in test_tag(), "测试通道应显示测试号"
 
 
 class TestReadmesStayInSync:
