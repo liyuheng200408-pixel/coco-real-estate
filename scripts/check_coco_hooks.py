@@ -285,6 +285,16 @@ CONTENT_CHECKS = [
         "并保持 coco 口径（同 B05）。",
     ),
     (
+        "B07",
+        "晋升工具的两道守卫",
+        "scripts/promote_release.sh",
+        [r"备用方案守卫", r"PROMOTE_CONFIRM", r"--only", r"backup-"],
+        "promote_release.sh 是“开发版→正式版”的唯一入口，2026-09-23 老板要求两道闸：\n"
+        "① 晋升清单里若含 backup-* 标签钉住的提交（禁推正式版的备用方案）→ 直接拒绝，并提示改走 --only；\n"
+        "② 推送前打印“将带上的提交清单 + 内容差异”，要求 PROMOTE_CONFIRM=<值> 才继续（防盲推）。\n"
+        "这道闸没了 = 有人一条命令就能把滞留内容全推上正式版。",
+    ),
+    (
         "17",
         "用户可见命令文案（设置向导收尾屏）",
         "hermes_cli/setup_summary.py",
