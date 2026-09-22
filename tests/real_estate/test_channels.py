@@ -640,6 +640,31 @@ class TestPromoteGuards:
         assert later.returncode != 0, "未点名的提交被一起带上正式版了"
         assert "只推指定提交完成" in out2, out2
 
+    def test_only_requires_verified_tag(self, tmp_path):
+        """--only 也不能绕过验收闸门：没有 verified/* 覆盖时拒绝"""
+        work, next_tip = TestPromoteRelease()._setup(tmp_path)
+        # 把验收标签摘掉（模拟“老板还没验收”）
+        subprocess.run(["git", "-C", str(work), "tag", "-d", f"verified/v0.0.0-1-{next_tip[:7]}"],
+                       check=True, capture_output=True)
+        r = _promote(work, "--only", next_tip[:7])
+        out = r.stdout + r.stderr
+        assert r.returncode != 0, out
+        assert "验收" in out, out
+
+    def test_only_rejects_commit_not_covered_by_verification(self, tmp_path):
+        """验收标签只覆盖到 A，点名 A 之后的提交 B → 必须拒绝（不能“验收 A 发布 B”）"""
+        work, next_tip = TestPromoteRelease()._setup(tmp_path)
+        (work / "later.txt").write_text("later", encoding="utf-8")
+        _commit_all(work, "验收之后又推的新提交")
+        later = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"],
+                               capture_output=True, text=True).stdout.strip()
+        for r in ("origin", "github"):
+            subprocess.run(["git", "-C", str(work), "push", "-q", r, "next"], check=True)
+        res = _promote(work, "--only", later[:7])
+        out = res.stdout + res.stderr
+        assert res.returncode != 0, out
+        assert "验收" in out, out
+
     def test_only_dry_run_changes_nothing(self, tmp_path):
         work, next_tip = TestPromoteRelease()._setup(tmp_path)
         before = subprocess.run(["git", "-C", str(tmp_path / "gitee.git"), "rev-parse", "master"],
