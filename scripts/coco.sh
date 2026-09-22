@@ -205,6 +205,7 @@ Coco v${COCO_VER}
   model      选择模型 / 填 API Key
   setup      配置向导（飞书等）
   config     查看或修改配置：config edit / config set <键> <值>
+             （config set model.context_length <数值>：模型上下文窗口大小；填错不会报错，但会影响何时开始压缩对话）
   doctor     环境自检
   tools      配置工具与技能
   gateway    服务安装等：coco gateway install
