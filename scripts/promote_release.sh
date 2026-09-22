@@ -103,6 +103,10 @@ if [[ ${#ONLY_COMMITS[@]} -gt 0 ]]; then
     done
     echo "  将 cherry-pick 到 $TO_BRANCH："
     for c in "${ONLY_COMMITS[@]}"; do git --no-pager log --oneline -1 "$c" | sed 's/^/    /'; done
+    if [[ "$DRY_RUN" == "1" ]]; then
+        warn "dry-run：以上是 --only 会 cherry-pick 的提交，未做任何改动"
+        exit 0
+    fi
 
     info "切到 $TO_BRANCH"
     git checkout -q "$TO_BRANCH" || fail "切到 $TO_BRANCH 失败"
