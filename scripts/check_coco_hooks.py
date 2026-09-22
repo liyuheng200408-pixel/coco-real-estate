@@ -259,6 +259,8 @@ CONTENT_CHECKS = [
             r"coco restore --file",
             r"coco pairing approve feishu",
             r"coco config set",
+            r"只读诊断类可以你自己跑",
+            r"改状态类绝不自己执行",
             r"!hermes (model|setup|backup|restore|pairing|tools|doctor|uninstall)\b",
         ],
         "提示词是模型回答“要敲什么命令”的主依据：必须保留【对外命令口径】段\n"
@@ -275,6 +277,8 @@ CONTENT_CHECKS = [
             r"对外命令口径（2026-09-23 加）",
             r"coco pairing approve feishu",
             r"coco restore --file",
+            r"只读诊断类可以 Coco 自己跑",
+            r"改状态类绝不自己执行",
             r"!hermes (model|setup|backup|restore|pairing|tools|doctor|uninstall)\b",
         ],
         "技能文件是模型回答“要敲什么命令”的另一处依据：必须保留对外命令口径段，\n"

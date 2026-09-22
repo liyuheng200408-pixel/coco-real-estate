@@ -53,6 +53,8 @@ class TestPromptCommandSurface:
         assert "【对外命令口径】" in t, "提示词缺少【对外命令口径】段"
         assert "一律给 `coco <子命令>`" in t, "提示词缺少“只给 coco 口径”的通用规则"
         assert "不许编命令" in t, "提示词缺少“没有对应命令时不许编”的兜底规则"
+        assert "只读诊断类可以你自己跑" in t, "提示词缺少“只读诊断类可以自己跑”的口径"
+        assert "改状态类绝不自己执行" in t, "提示词缺少“改状态类禁止自跑”的口径"
 
     def test_required_mappings_present(self):
         t = PROMPT.read_text(encoding="utf-8")
