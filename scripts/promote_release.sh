@@ -101,6 +101,27 @@ if [[ ${#ONLY_COMMITS[@]} -gt 0 ]]; then
         bad="$(git tag --points-at "$sha" | grep '^backup-' || true)"
         [[ -z "$bad" ]] || fail "$c 被“禁止推正式版”的标签钉住（$bad）—— 备用方案绝不推正式版"
     done
+
+    # 验收覆盖检查（2026-09-23 老板要求）：只推指定提交也不能绕过验收闸门 ——
+    # 要求存在一个 verified/* 标签（钉在某个测试通道提交上），且被点名的提交都在它之下。
+    APPROVED_V=""
+    while read -r _v; do
+        [[ -n "$_v" ]] || continue
+        _all=1
+        for c in "${ONLY_COMMITS[@]}"; do
+            _sha="$(git rev-parse --verify "${c}^{commit}")"
+            if ! git merge-base --is-ancestor "$_sha" "$_v"; then _all=0; break; fi
+        done
+        if [[ "$_all" == "1" ]]; then APPROVED_V="$_v"; break; fi
+    done < <(git tag -l 'verified/*' --format='%(objectname)' | sort -u)
+    if [[ -z "$APPROVED_V" ]]; then
+        fail "被点名的提交没有被老板的验收登记覆盖 —— 只推指定提交也不能绕过验收闸门。
+  要求：存在一个 verified/* 标签，且被点名的提交都在它之下（这批内容确实经过老板实测）。
+  做法：老板说“可以”之后，先在测试通道上登记：
+        bash scripts/mark_verified.sh --note \"老板实测通过：<测了什么>\"
+  然后再跑本模式。"
+    fi
+    info "验收登记：$(git tag --points-at "$APPROVED_V" | grep '^verified/' | head -1)（已覆盖本次点名的提交）"
     echo "  将 cherry-pick 到 $TO_BRANCH："
     for c in "${ONLY_COMMITS[@]}"; do git --no-pager log --oneline -1 "$c" | sed 's/^/    /'; done
     if [[ "$DRY_RUN" == "1" ]]; then

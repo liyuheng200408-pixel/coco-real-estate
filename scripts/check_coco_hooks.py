@@ -288,7 +288,7 @@ CONTENT_CHECKS = [
         "B07",
         "晋升工具的两道守卫",
         "scripts/promote_release.sh",
-        [r"备用方案守卫", r"PROMOTE_CONFIRM", r"--only", r"backup-"],
+        [r"备用方案守卫", r"PROMOTE_CONFIRM", r"--only", r"backup-", r"verified/\*"],
         "promote_release.sh 是“开发版→正式版”的唯一入口，2026-09-23 老板要求两道闸：\n"
         "① 晋升清单里若含 backup-* 标签钉住的提交（禁推正式版的备用方案）→ 直接拒绝，并提示改走 --only；\n"
         "② 推送前打印“将带上的提交清单 + 内容差异”，要求 PROMOTE_CONFIRM=<值> 才继续（防盲推）。\n"
