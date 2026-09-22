@@ -60,8 +60,8 @@ check_system() {
 }
 
 # ==================== 依赖安装 ====================
-# 全新装机的机器上，unattended-upgrades/apt-daily 往往正占着 apt 锁 —— 直接失败会中断整个安装。
-# 两道保险：① 先等锁释放（最多 5 分钟）；② 给 apt 传 DPkg::Lock::Timeout，让 apt 自己也会等。
+# 全新装机的机器上，unattended-upgrades/apt-daily 往往正占着 apt 锁 —— 直接失败会中断整个安装（真实事故）。
+# 两道保险：① 先等锁释放（最多 5 分钟，带提示）；② 给 apt 传 DPkg::Lock::Timeout，让 apt 自己也会等。
 APT_LOCK_TIMEOUT=600
 
 wait_for_apt_lock() {
@@ -108,88 +108,63 @@ install_deps() {
 }
 
 # ==================== Python 环境 ====================
-# 与官方一致的取法：Coco 自带一份 uv（$HERMES_HOME/bin/uv），由它准备 Python 与虚拟环境。
-# 顺序与官方 install.sh 相同：已有 uv → 装 uv → 已装 3.11 → 系统里有 3.11~3.13 就用它 →
-# 都没有时让 uv 下一个自带 Python（官方要 3.11，即 3.11.16，约 30MB，不需要 sudo）。
-# Coco 保留的兜底（官方没有）：PyPI 镜像解 uv 的 wheel、系统 Python 落在 3.11~3.14、直接下 Python 包。
-# 版本窗口 3.11 <= Python < 3.15（与 pyproject.toml 的 requires-python 一致）
-COCO_HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-UV_BIN_DIR="$COCO_HERMES_HOME/bin"
-PYTHON_REQUEST="3.11"                 # 交给 uv 的版本（与官方一致）
-PYTHON_SYSTEM_RANGE=">=3.11,<3.14"    # 复用系统解释器时接受的版本范围（与官方一致）
-UV_CMD=""
-
+# 版本窗口 3.11 <= Python < 3.15（见 pyproject.toml 的 requires-python）
+# 3.14 实测可用：依赖全部走 wheel、单测全绿；Ubuntu 26.04 自带 3.14，直接用
 _py_ok() { "$1" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)' 2>/dev/null; }
 
-# ---- 装 uv：官方两段式（先下安装脚本、再执行），二进制直接落到 $HERMES_HOME/bin ----
-# 不用 `curl | sh`（管道会吞掉 curl 的失败）；UV_UNMANAGED_INSTALL 同时关掉升级器下载与 shell rc 改写，
-# 安装脚本的输出留在日志文件里，失败时打出来 —— 不会出现"没反应"的黑盒。
-UV_INSTALL_ERR=""   # 最近一次取 uv 失败的原文（只在最终失败时才打出来）
+# ---- 取 uv 可执行文件：已装的 → PyPI 镜像下 wheel 解出二进制 → 官方安装脚本 ----
+# 用 pip download 而不是 pip install：下载不装包，不受系统 Python 的 PEP 668 限制
+# （Ubuntu 23.04 起 pip install 到系统 Python 会直接报错退出）；wheel 里就是 uv 的可执行文件
+UV_BIN=""
 
-install_uv_official() {   # 成功时设置 UV_CMD；失败时把原因留在 UV_INSTALL_ERR
-    local script="$TMPDIR_C/uv-installer.sh" log="$TMPDIR_C/uv-install.log"
-    mkdir -p "$UV_BIN_DIR"
-    if ! curl -fsSL --connect-timeout 20 --max-time 120 https://astral.sh/uv/install.sh -o "$script" 2>"$log"; then
-        UV_INSTALL_ERR="下载官方安装脚本失败：$(head -c 200 "$log" 2>/dev/null)"
-        return 1
-    fi
-    if ! timeout 300 env UV_UNMANAGED_INSTALL="$UV_BIN_DIR" sh "$script" >>"$log" 2>&1; then
-        UV_INSTALL_ERR="官方安装脚本执行失败：$(tail -n 2 "$log" 2>/dev/null | tr '
-' ' ')"
-        return 1
-    fi
-    if [[ ! -x "$UV_BIN_DIR/uv" ]]; then
-        UV_INSTALL_ERR="官方安装脚本跑完了，但没找到 $UV_BIN_DIR/uv"
-        return 1
-    fi
-    UV_CMD="$UV_BIN_DIR/uv"
-}
-
-# ---- 兜底取 uv：从 PyPI 镜像下 wheel 再解出里面的二进制（PEP 668 只拦 install、不拦 download）----
-uv_from_pypi() {   # 兜底取 uv：从 PyPI 镜像下 wheel 解出里面的二进制（输入：镜像地址）
+uv_from_pypi() {
     local mirror="$1" dl="$TMPDIR_C/uv-wheel" whl xbin
     rm -rf "$dl"; mkdir -p "$dl"
-    if ! python3 -m pip download --no-deps --only-binary=:all: -q -d "$dl" -i "$mirror" uv 2>"$dl/err.log"; then
-        UV_INSTALL_ERR="PyPI 镜像 $mirror 取 uv 失败：$(grep -m1 . "$dl/err.log" 2>/dev/null)"
-        return 1
-    fi
+    python3 -m pip download --no-deps --only-binary=:all: -q -d "$dl" -i "$mirror" uv 2>"$dl/err.log" || return 1
     whl="$(ls "$dl"/uv-*.whl 2>/dev/null | head -1)"
-    [[ -n "$whl" && -f "$whl" ]] || { UV_INSTALL_ERR="PyPI 镜像 $mirror 没有下到 uv 的 wheel"; return 1; }
-    python3 -m zipfile -e "$whl" "$dl/x" >/dev/null 2>&1 || { UV_INSTALL_ERR="解 wheel 失败：$whl"; return 1; }
+    [[ -n "$whl" && -f "$whl" ]] || return 1
+    python3 -m zipfile -e "$whl" "$dl/x" >/dev/null 2>&1 || return 1
     xbin="$(ls "$dl"/x/uv-*.data/scripts/uv 2>/dev/null | head -1)"
-    [[ -n "$xbin" && -f "$xbin" ]] || { UV_INSTALL_ERR="wheel 里没找到 uv 可执行文件"; return 1; }
-    mkdir -p "$UV_BIN_DIR" && cp "$xbin" "$UV_BIN_DIR/uv" && chmod +x "$UV_BIN_DIR/uv" || { UV_INSTALL_ERR="安装 uv 到 $UV_BIN_DIR 失败"; return 1; }
-    "$UV_BIN_DIR/uv" --version >/dev/null 2>&1 || { UV_INSTALL_ERR="解出的 uv 不能运行"; return 1; }
-    UV_CMD="$UV_BIN_DIR/uv"
+    [[ -n "$xbin" && -f "$xbin" ]] || return 1
+    mkdir -p "$HOME/.local/bin" && cp "$xbin" "$HOME/.local/bin/uv" && chmod +x "$HOME/.local/bin/uv" || return 1
+    "$HOME/.local/bin/uv" --version >/dev/null 2>&1 || return 1
+    UV_BIN="$HOME/.local/bin/uv"
 }
 
-prepare_uv() {   # 成功时 UV_CMD 非空；按仓库源分主次，两侧都留兜底
-    local mirrors m
-    [[ -x "$UV_BIN_DIR/uv" ]] && { UV_CMD="$UV_BIN_DIR/uv"; return 0; }
-    command -v uv &> /dev/null && { UV_CMD="$(command -v uv)"; return 0; }
-    # 国内机器（Gitee 源）先走 PyPI 镜像：实测最快最稳；海外机器先走官方安装脚本
+prepare_uv() {   # 成功时 UV_BIN 非空
+    local mirrors m err
+    if command -v uv &> /dev/null; then UV_BIN="$(command -v uv)"; return 0; fi
+    if [[ -x "$HOME/.local/bin/uv" ]]; then UV_BIN="$HOME/.local/bin/uv"; return 0; fi
+    # 按仓库源判断国内外：国内机器先试国内 PyPI 镜像，海外机器先试官方 PyPI
     mirrors="https://pypi.tuna.tsinghua.edu.cn/simple https://pypi.org/simple"
-    echo "  正在获取 uv..."
     if [[ "$COCO_CHOSEN_SOURCE" == "github" ]]; then
-        install_uv_official && return 0
-        echo "  这一路没成功${UV_INSTALL_ERR:+（$UV_INSTALL_ERR）}，换 PyPI 镜像重试..."
+        mirrors="https://pypi.org/simple https://pypi.tuna.tsinghua.edu.cn/simple"
     fi
+    echo "  正在获取 uv..."
     for m in $mirrors; do
-        uv_from_pypi "$m" && return 0
+        if uv_from_pypi "$m"; then
+            echo "  uv 已就绪"
+            return 0
+        fi
     done
-    if [[ "$COCO_CHOSEN_SOURCE" != "github" ]]; then
-        echo "  这一路没成功${UV_INSTALL_ERR:+（$UV_INSTALL_ERR）}，换官方安装脚本重试..."
-        install_uv_official && return 0
+    err="$TMPDIR_C/uv-wheel/err.log"
+    [[ -f "$err" ]] && echo "  ⚠️ PyPI 镜像获取 uv 失败：$(grep -m1 . "$err" 2>/dev/null)"
+    echo "  正在从官方安装脚本获取 uv..."
+    if curl -fsSL --connect-timeout 20 --max-time 120 https://astral.sh/uv/install.sh -o "$TMPDIR_C/uv-install.sh" 2>"$TMPDIR_C/uv-curl.log"; then
+        timeout 300 sh "$TMPDIR_C/uv-install.sh" 2>&1 | sed 's/^/  /' || true
+    else
+        echo "  ⚠️ 下载 uv 安装脚本失败：$(head -c 200 "$TMPDIR_C/uv-curl.log" 2>/dev/null)"
     fi
-    echo "  ⚠️ 未能获取 uv：${UV_INSTALL_ERR:-未知原因}"
+    export PATH="$HOME/.local/bin:$PATH"
+    if command -v uv &> /dev/null; then UV_BIN="$(command -v uv)"; return 0; fi
+    [[ -x "$HOME/.local/bin/uv" ]] && { UV_BIN="$HOME/.local/bin/uv"; return 0; }
     return 1
 }
 
-# ---- 兜底：完全不用 uv，直接下 python-build-standalone 的 3.13 解包当解释器 ----
+# ---- 兜底：不用 uv，直接从 python-build-standalone 取 3.13 解包当解释器 ----
 # 国内走南京大学镜像（GitHub Release 镜像），海外走 GitHub 官方 Release
 COCO_PYTHON_DIR="${COCO_PYTHON_DIR:-$HOME/.local/share/coco/python/3.13}"
-PBS_NJU_MIRROR="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone"   # uv 下 Python 本体用
-PBS_NJU_BASE="$PBS_NJU_MIRROR/LatestRelease"
+PBS_NJU_BASE="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone/LatestRelease"
 PBS_GH_REPO="https://github.com/astral-sh/python-build-standalone"
 
 pbs_arch() {
@@ -212,7 +187,7 @@ pbs_tarball_name() {
     printf '%s' "$name"
 }
 
-install_python_tarball() {   # 成功时设置 PYTHON_CMD
+install_python_tarball() {   # 成功时设置 PYTHON_CMD / PYTHON_VERSION
     local arch src list_url base tag tarball dl dest
     arch="$(pbs_arch)"
     if [[ -z "$arch" ]]; then
@@ -244,7 +219,8 @@ install_python_tarball() {   # 成功时设置 PYTHON_CMD
         fi
         if [[ -x "$dest/python/bin/python3" ]] && _py_ok "$dest/python/bin/python3"; then
             PYTHON_CMD="$dest/python/bin/python3"
-            ok "已准备 Python $("$PYTHON_CMD" --version 2>&1)"
+            PYTHON_VERSION="$("$PYTHON_CMD" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+            ok "已准备 Python $PYTHON_VERSION"
             return 0
         fi
         echo "  ⚠️ 解包出的 Python 不可用：$dest/python/bin/python3"
@@ -253,87 +229,75 @@ install_python_tarball() {   # 成功时设置 PYTHON_CMD
     return 1
 }
 
-prepare_python_interpreter() {   # 成功时 PYTHON_CMD 指向可用解释器
-    local v
-    if prepare_uv; then
-        echo "  uv 已就绪（$("$UV_CMD" --version 2>&1 | head -1)）"
-        if [[ "$(id -u)" == "0" ]]; then
-            # root 安装时把 uv 的 Python 放进全局可读目录，避免解释器落在 /root 下别的用户读不到
-            export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-/usr/local/share/uv/python}"
-            export UV_PYTHON_BIN_DIR="${UV_PYTHON_BIN_DIR:-/usr/local/share/uv/bin}"
-        fi
-        PYTHON_CMD="$("$UV_CMD" python find "$PYTHON_REQUEST" 2>/dev/null || true)"
-        if [[ -z "$PYTHON_CMD" ]]; then
-            PYTHON_CMD="$("$UV_CMD" python find --system "$PYTHON_SYSTEM_RANGE" 2>/dev/null || true)"
-            if [[ -n "$PYTHON_CMD" ]]; then
-                echo "  使用系统 Python：$("$PYTHON_CMD" --version 2>&1)"
-            fi
-        fi
-        if [[ -z "$PYTHON_CMD" ]]; then
-            info "用 uv 下载 Python $PYTHON_REQUEST（约 30MB，最长等 15 分钟）..."
-            # 国内机器先走国内镜像（实测几秒下完），海外机器先走官方源；哪条失败就换另一条
-            local _src_order _src
-            if [[ "$COCO_CHOSEN_SOURCE" == "gitee" ]]; then _src_order=(mirror official); else _src_order=(official mirror); fi
-            for _src in "${_src_order[@]}"; do
-                if [[ "$_src" == "mirror" ]]; then
-                    UV_PYTHON_INSTALL_MIRROR="$PBS_NJU_MIRROR" timeout 900 "$UV_CMD" python install "$PYTHON_REQUEST" || true
-                else
-                    timeout 900 "$UV_CMD" python install "$PYTHON_REQUEST" || true
-                fi
-                PYTHON_CMD="$("$UV_CMD" python find "$PYTHON_REQUEST" 2>/dev/null || true)"
-                [[ -n "$PYTHON_CMD" ]] && break
-                echo "  这一路没下到，换另一路重试..."
-            done
-        fi
+setup_python() {
+    info "配置 Python 环境..."
+    PYTHON_CMD="python3"
+    if ! command -v $PYTHON_CMD &> /dev/null; then
+        error "Python3 未安装"
     fi
+    PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    info "Python 版本: $PYTHON_VERSION"
 
-    # 兜底①：系统自带解释器正好在窗口内（3.11 ~ 3.14）
-    if [[ -z "$PYTHON_CMD" ]] && command -v python3 &> /dev/null && _py_ok python3; then
-        PYTHON_CMD="$(command -v python3)"
-        echo "  改用系统 Python：$(python3 --version 2>&1)"
+    if ! _py_ok "$PYTHON_CMD"; then
+        for _cand in python3.14 python3.13 python3.12 python3.11; do
+            if command -v "$_cand" &> /dev/null && _py_ok "$_cand"; then
+                PYTHON_CMD="$_cand"
+                PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+                info "改用已安装的 $PYTHON_CMD（$PYTHON_VERSION）"
+                break
+            fi
+        done
     fi
-    # 兜底②：apt 源里有 python3.13（部分发行版）
-    if [[ -z "$PYTHON_CMD" ]] && command -v apt-get &> /dev/null; then
-        info "尝试安装 python3.13..."
+    if ! _py_ok "$PYTHON_CMD" && command -v apt-get &> /dev/null; then
+        info "当前 Python $PYTHON_VERSION 不在 3.11~3.14 范围内，尝试安装 python3.13..."
         apt_get install -y -qq python3.13 python3.13-venv >/dev/null 2>&1 || true
         if command -v python3.13 &> /dev/null && _py_ok python3.13; then
-            PYTHON_CMD="$(command -v python3.13)"
+            PYTHON_CMD="python3.13"
+            PYTHON_VERSION="$(python3.13 --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+            info "已安装并使用 python3.13"
         fi
     fi
-    # 兜底③：不用 uv，直接下 Python 包
-    if [[ -z "$PYTHON_CMD" ]]; then
+    if ! _py_ok "$PYTHON_CMD"; then
+        info "尝试用 uv 准备 Python 3.13..."
+        # 国内机器（仓库源选到 gitee = 国内可达性更好）→ Python 下载默认走国内镜像；
+        # 海外 → 保持官方源。用户已设 UV_PYTHON_INSTALL_MIRROR 时一律尊重用户设置。
+        if [[ -z "${UV_PYTHON_INSTALL_MIRROR:-}" && "$COCO_CHOSEN_SOURCE" == "gitee" ]]; then
+            export UV_PYTHON_INSTALL_MIRROR="https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone"
+            echo "  已启用国内镜像下载 Python"
+        fi
+        if prepare_uv; then
+            echo "  正在下载并准备 Python 3.13（约 33MB，最长等 15 分钟）..."
+            if ! timeout 900 "$UV_BIN" python install 3.13; then
+                echo "  ⚠️ 下载 Python 3.13 超时或被中断（网络较慢）。可重跑本脚本重试；"
+                echo "     若持续失败，建议换 Ubuntu 24.04 LTS 安装（自带 Python 3.12，不需要下载 Python）。"
+            fi
+            _uvpy="$("$UV_BIN" python find 3.13 2>/dev/null || true)"
+            if [[ -n "$_uvpy" ]] && _py_ok "$_uvpy"; then
+                PYTHON_CMD="$_uvpy"
+                PYTHON_VERSION="$("$_uvpy" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+                info "已通过 uv 准备 Python $PYTHON_VERSION"
+            fi
+        fi
+    fi
+    if ! _py_ok "$PYTHON_CMD"; then
         info "改用直接下载的方式准备 Python 3.13..."
         install_python_tarball || true
     fi
-    [[ -n "$PYTHON_CMD" ]] && _py_ok "$PYTHON_CMD"
-}
-
-setup_python() {
-    info "配置 Python 环境..."
-    PYTHON_CMD=""
-    if ! prepare_python_interpreter; then
-        error "Python 环境准备失败（需要 3.11 ~ 3.14）。建议：① 检查服务器网络后重跑本脚本；或 ② 自行安装 python3.11 及以上版本后重跑。"
+    if ! _py_ok "$PYTHON_CMD"; then
+        error "Python 版本不合适（当前 $PYTHON_VERSION，需要 3.11 ~ 3.14）。建议：① 系统换成 Ubuntu 24.04 / 26.04 LTS 后重跑本脚本；或 ② 自行安装 python3.13（含 python3.13-venv）后重跑。"
     fi
-    ok "Python 解释器：$("$PYTHON_CMD" --version 2>&1)"
-
     if [[ -d "$INSTALL_DIR/venv" ]] && ! _py_ok "$INSTALL_DIR/venv/bin/python"; then
         warn "已有虚拟环境的 Python 版本不合适，重新创建"
         rm -rf "$INSTALL_DIR/venv"
     fi
+    
     if [[ ! -d "$INSTALL_DIR/venv" ]]; then
-        # 优先用 uv 建（顺带把 pip 装进 venv —— update.sh 依赖 venv 里的 pip）；失败退回标准库 venv
-        if [[ -n "$UV_CMD" ]] && "$UV_CMD" venv "$INSTALL_DIR/venv" --python "$PYTHON_CMD" --seed >"$TMPDIR_C/uv-venv.log" 2>&1; then
-            ok "虚拟环境创建完成"
-        else
-            [[ -s "$TMPDIR_C/uv-venv.log" ]] && echo "  ⚠️ uv 建虚拟环境失败，改用标准库方式：$(tail -n 2 "$TMPDIR_C/uv-venv.log" | tr '\n' ' ')"
-            "$PYTHON_CMD" -m venv "$INSTALL_DIR/venv"
-            ok "虚拟环境创建完成"
-        fi
+        $PYTHON_CMD -m venv "$INSTALL_DIR/venv"
+        ok "虚拟环境创建完成"
     fi
-    export UV_PYTHON="$INSTALL_DIR/venv/bin/python"   # 后续 uv 命令都钉在这个解释器上
     source "$INSTALL_DIR/venv/bin/activate"
-    pip install --upgrade pip -q || warn "pip 升级失败（继续）"
-    ok "Python 环境配置完成（$("$INSTALL_DIR/venv/bin/python" --version 2>&1)）"
+    pip install --upgrade pip -q
+    ok "Python 环境配置完成"
 }
 
 # ==================== 克隆项目 ====================
@@ -478,14 +442,12 @@ install_packages() {
     info "安装 Python 依赖..."
     source "$INSTALL_DIR/venv/bin/activate"
     
-    # 安装 Hermes 核心依赖（使用 pyproject.toml；失败时把 pip 输出打出来，不再静默）
-    local piplog="$TMPDIR_C/pip-core.log"
+    # 安装 Hermes 核心依赖（使用 pyproject.toml）
     cd "$INSTALL_DIR"
-    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -e . -q 2>"$piplog" \
-        || pip install -e . -q 2>>"$piplog" \
-        || pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt -q 2>>"$piplog" \
-        || pip install -r requirements.txt -q 2>>"$piplog" \
-        || { warn "核心依赖安装失败，pip 输出："; tail -n 5 "$piplog" 2>/dev/null | sed 's/^/    /'; }
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -e . -q 2>/dev/null \
+        || pip install -e . -q 2>/dev/null \
+        || pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt -q 2>/dev/null \
+        || pip install -r requirements.txt -q 2>/dev/null || true
     
     # 安装房产专用依赖（含海报生成所需 qrcode；Pillow 为核心依赖由 -e . 安装；
     # ddgs 为 web_search 的免费搜索后端（DuckDuckGo，无需 API Key））
