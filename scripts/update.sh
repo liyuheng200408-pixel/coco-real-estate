@@ -264,7 +264,13 @@ if [[ -x "$COCO_BIN" ]] && ! command -v coco >/dev/null 2>&1; then
     COCO_LINKED=1
   else
     mkdir -p "$HOME/.local/bin"
-    ln -sf "$COCO_BIN" "$HOME/.local/bin/coco" 2>/dev/null && COCO_LINKED=1
+    if ln -sf "$COCO_BIN" "$HOME/.local/bin/coco" 2>/dev/null; then
+      COCO_LINKED=1
+      # ~/.local/bin 常常不在 PATH：照官方那套补一行，否则用户敲 coco 会找不到命令
+      if [[ -f "$REPO_ROOT/scripts/path_guard.sh" ]]; then
+        bash "$REPO_ROOT/scripts/path_guard.sh" ensure || true
+      fi
+    fi
   fi
   if [[ "$COCO_LINKED" == "1" ]]; then
     ok "coco 命令已就绪（coco version 查版本号 / coco check 体检）"
