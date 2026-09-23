@@ -745,7 +745,11 @@ def match_property(customer_id: int, top_n: int = 5, task_id: str = None) -> str
         "customer_tier": customer.get('tier'),
         "matched": True,
         "total_properties": db.count_available_properties(),
-        "matches": [{k: v for k, v in m.items() if k in ('id','title','community','price','area','rooms','halls','district','score','match_reasons')} for m in matches],
+        # perfect_match 必须给到模型（提示词/操作手册都要求"只有 perfect_match=true 才能标完全匹配"，
+        # 2026-09-24 修：此前白名单把它过滤掉了，模型只能自己猜口径）；unit_price 用于单价展示
+        "matches": [{k: v for k, v in m.items() if k in ('id','title','community','price','area','rooms','halls',
+                                                         'district','score','match_reasons','perfect_match','unit_price')}
+                    for m in matches],
     }, ensure_ascii=False)
 
 
