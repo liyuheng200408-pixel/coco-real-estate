@@ -56,3 +56,60 @@ class TestBrandRuleInPrompt:
         src = (REPO_ROOT / "agent" / "real_estate_prompt.py").read_text(encoding="utf-8")
         assert "【品牌口径】" in src
         assert "不得出现 Hermes" in src
+
+
+BRANDED_NOTICE_FILES = {
+    "gateway/run_notifications.py": ["Coco update finished", "Coco is back and ready"],
+    "gateway/run_busy.py": ["Coco wasn't paused", "Coco is already paused"],
+    "hermes_cli/setup_platforms.py": ["where Coco delivers"],
+    "hermes_cli/gateway.py": ["where Coco delivers"],
+}
+
+
+class TestUserFacingNotices:
+    @pytest.mark.parametrize("rel,needles", sorted(BRANDED_NOTICE_FILES.items()))
+    def test_notice_strings_are_branded(self, rel, needles):
+        src = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        for needle in needles:
+            assert needle in src, f"{rel} 里的用户可见文案没有品牌化：{needle!r}"
+
+    def test_update_notice_points_at_coco_command(self):
+        src = (REPO_ROOT / "gateway" / "run_notifications.py").read_text(encoding="utf-8")
+        assert "run `coco update` manually" in src
+
+
+def _align_module():
+    import importlib.util
+
+    path = REPO_ROOT / "scripts" / "coco_config_align.py"
+    spec = importlib.util.spec_from_file_location("coco_config_align_t", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestInterfaceLanguage:
+    """语言口径：Coco 面向中文经纪人 —— 未设置时按官方默认处理并拉回中文"""
+
+    def test_standard_language_is_chinese(self):
+        mod = _align_module()
+        assert mod.STANDARD["display.language"] == "zh"
+        assert "en" in mod.OFFICIAL_DEFAULTS["display.language"]
+
+    def test_official_default_en_is_pulled_back_to_chinese(self):
+        mod = _align_module()
+        eff = dict(mod.STANDARD)
+        eff["display.language"] = "en"  # 官方向导写回的默认值
+        state = {"written": {k: v for k, v in mod.STANDARD.items() if k != "display.language"}}
+        items, preserved = mod.plan(eff, state)
+        assert ("display.language", "en", "zh") in items
+        assert not [k for k, _ in preserved if k == "display.language"]
+
+    def test_operator_chosen_language_is_preserved(self):
+        mod = _align_module()
+        eff = dict(mod.STANDARD)
+        eff["display.language"] = "ja"  # 使用者自己挑的语言
+        state = {"written": {k: v for k, v in mod.STANDARD.items() if k != "display.language"}}
+        items, preserved = mod.plan(eff, state)
+        assert ("display.language", "ja") in preserved
+        assert not [k for k, _g, _w in items if k == "display.language"]

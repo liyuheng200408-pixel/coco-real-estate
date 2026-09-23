@@ -144,6 +144,8 @@ CONTENT_CHECKS = [
             r'"compression\.threshold":\s*0\.8',
             r'"compression\.protect_last_n":\s*40',
             r'"compression\.hygiene_hard_message_limit":\s*5000',
+            r'"display\.language":\s*"zh"',
+            r'"display\.language": \("en",\)',
         ],
         "对齐脚本缺失或标准值被改，安装/更新就不会再校正运行时配置，\n"
         "表现为「代码默认值对了但服务器上不生效」或「重装后又回到 150 轮」。\n"
@@ -345,6 +347,36 @@ CONTENT_CHECKS = [
         "语言包被上游整批替换后，主页频道提示会退化成把键名 coco.home_channel_missing 露给用户。\n"
         "处理：跑 scripts/coco_locales_patch.py 补齐 17 个语言包"
         "（键集一致性由 tests/agent/test_i18n.py 与 tests/real_estate/test_coco_branding.py 守）。",
+    ),
+    (
+        "23",
+        "更新与网关重启提示的品牌口径",
+        "gateway/run_notifications.py",
+        [r"Coco update finished", r'!"Hermes update', r'!"Hermes is back'],
+        "更新完成/失败/超时与「网关已上线」这几种提示里写着 Hermes，coco update 之后经纪人会直接看到。\n"
+        "处理：把这几处文案换成 Coco，提示里引导的命令名也改成 coco update"
+        "（参考 patches/11-user-facing-notice-brand.patch）。",
+    ),
+    (
+        "24",
+        "暂停提示的品牌口径",
+        "gateway/run_busy.py",
+        [r"Coco wasn't paused", r"Coco is already paused"],
+        "「暂停 / 恢复」类提示里写着 Hermes（/pause）。\n处理：改成 Coco。",
+    ),
+    (
+        "25",
+        "设置向导的平台说明",
+        "hermes_cli/setup_platforms.py",
+        [r"where Coco delivers"],
+        "设置向导打印的「Home Channel」说明里写着 Hermes。\n处理：改成 Coco。",
+    ),
+    (
+        "26",
+        "设置向导的 Mattermost 说明",
+        "hermes_cli/gateway.py",
+        [r"where Coco delivers"],
+        "Mattermost 向导里 HOME_CHANNEL 的帮助文本写着 Hermes。\n处理：改成 Coco。",
     ),
 ]
 

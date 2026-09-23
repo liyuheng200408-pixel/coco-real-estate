@@ -170,7 +170,7 @@ def _setup_telegram():
         "TELEGRAM_ALLOWED_USERS", "Allowed user IDs (comma-separated, leave empty for open access)",
         "Telegram allowlist configured - only listed users can use the bot",
         "⚠️  No allowlist set - anyone who finds your bot can use it!", preset=allowed_users)
-    _info(None, "📬 Home Channel: where Hermes delivers cron job results,",
+    _info(None, "📬 Home Channel: where Coco delivers cron job results,",
           "   cross-platform messages, and notifications.",
           "   For Telegram DMs, this is your user ID (same as above).")
     first_user_id = allowed_users.split(",")[0].strip() if allowed_users else ""

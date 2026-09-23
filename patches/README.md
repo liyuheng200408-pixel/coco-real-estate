@@ -15,7 +15,7 @@
 > **正确的做法**：读本文件下面每一处的「改什么 / 为什么 / 上游变了怎么办」，
 > 在新底座上重新实现，再用自检脚本验证结果。
 
-## 改动清单（共 10 处官方文件 + 2 个自有文档）
+## 改动清单（共 11 处官方文件 + 2 个自有文档）
 
 | 编号 | 官方文件 | 改动内容 |
 |---|---|---|
@@ -29,6 +29,7 @@
 | 08 | `scripts/sandbox/pick-release-tags.sh` | 标签过滤正则放宽：同时认「日期式 `vYYYY.M.D`」和「语义化 `vX.Y.Z`（含 `-N` 后缀）」 |
 | 09 | `plugins/platforms/feishu/adapter.py` | 一键配对的链接参数改成 `from=coco&tp=coco`（官方是 `from=hermes&tp=hermes`，飞书配对页会显示 Hermes 字样） |
 | 10 | `gateway/run_turn.py` + `locales/*.yaml`（17 个） | 「未设主页频道」提示改走 i18n 键 `coco.home_channel_missing`，文案换成 Coco 品牌；17 个语言包由 `scripts/coco_locales_patch.py` 追加（官方有键集一致性测试，必须全加） |
+| 11 | `gateway/run_notifications.py`、`gateway/run_busy.py`、`hermes_cli/setup_platforms.py`、`hermes_cli/gateway.py` | 面向用户的提示去掉 Hermes：更新完成/失败/超时、网关已上线、暂停/恢复、设置向导的 Home Channel 说明；提示里引导的命令名 `hermes update` → `coco update` |
 
 另有 2 个**自有文档**（不属于官方代码，同步时直接保留即可）：
 `README.md`、`README.zh-CN.md`。
@@ -115,6 +116,19 @@
   只要它是硬编码英文，就用 `scripts/coco_locales_patch.py` + 这一行改写维持 Coco 口径。
   **注意**：`tests/agent/test_i18n.py` 强制「非英文语言包的键集必须与 en.yaml 完全一致」，
   所以 17 个语言包缺一个都会测试失败 —— 同步后务必跑一次该脚本。
+
+### 11 用户可见提示的品牌口径（更新 / 重启 / 暂停 / 向导）
+- **改什么**：把这几处官方字符串里的品牌名 Hermes 换成 Coco ——
+  `gateway/run_notifications.py`（更新完成/失败/超时、「♻️ 网关已上线」）、
+  `gateway/run_busy.py`（暂停/恢复）、`hermes_cli/setup_platforms.py` 与 `hermes_cli/gateway.py`（Home Channel 说明）；
+  同时把提示里引导的命令名 `hermes update` 改成 `coco update`（对外只暴露 coco 命令）。
+- **为什么**：这些提示会直接发到经纪人的飞书会话里（尤其 `coco update` 跑完那三条），
+  出现别的产品名会让人以为装错了东西。
+- **没动的同类文本**：`plugins/platforms/{mattermost,slack,matrix,discord}/adapter.py` 里同款
+  「📬 Home Channel: where Hermes delivers …」—— 这些平台 Coco 不用、向导也不显示，暂不改；
+  要改的话照本条的写法，在 `scripts/check_coco_hooks.py` 里加同款自检条目。
+- **上游变了怎么办**：这些是硬编码字符串（不在 `locales/*.yaml` 里），官方改文案后要按新文案重挂，
+  自检 23–26 负责把它们报出来。
 
 ## 使用方法（同步时）
 
