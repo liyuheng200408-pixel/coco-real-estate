@@ -7,6 +7,11 @@ import os
 from tools.registry import registry
 
 
+def _fmt_unit_price(value) -> str:
+    """单价展示统一两位小数（20000.0 → 20000.00）"""
+    return f"{float(value):.2f}"
+
+
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
     return get_real_estate_db()
@@ -211,7 +216,7 @@ def _draw_premium(img, draw, p, qr_content):
     draw.text((50, 830), price_text, font=f_price, fill=gold)
     f_unit = _load_font(34)
     if p.get('unit_price'):
-        draw.text((50, 990), f"单价 {p['unit_price']} 元/㎡", font=f_unit, fill=(120, 125, 140))
+        draw.text((50, 990), f"单价 {_fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=(120, 125, 140))
 
     # 信息卡（白色圆角卡片）
     area = p.get('area')
@@ -298,7 +303,7 @@ def _draw_modern(img, draw, p, qr_content):
     draw.text((50, 660), price_text, font=f_price, fill=accent)
     f_unit = _load_font(32)
     if p.get('unit_price'):
-        draw.text((50, 800), f"单价 {p['unit_price']} 元/㎡", font=f_unit, fill=gray)
+        draw.text((50, 800), f"单价 {_fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=gray)
 
     # 信息卡（三列白卡）
     area = p.get('area')
@@ -384,7 +389,7 @@ def _draw_vibrant(img, draw, p, qr_content):
     draw.text((50, 760), price_text, font=f_price, fill=red)
     f_unit = _load_font(34)
     if p.get('unit_price'):
-        draw.text((50, 930), f"单价 {p['unit_price']} 元/㎡", font=f_unit, fill=(140, 90, 70))
+        draw.text((50, 930), f"单价 {_fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=(140, 90, 70))
 
     # 信息卡（半透明白卡片）
     area = p.get('area')

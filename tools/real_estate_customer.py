@@ -5,6 +5,14 @@ import json
 from tools.registry import registry
 
 
+def _safe_contact(value):
+    """联系方式展示：空 → None；疑似密钥不一致的密文 → 可读提示（绝不把乱码丢给经纪人）"""
+    if not value:
+        return None
+    from agent.real_estate_db import KEY_MISMATCH_HINT, looks_like_ciphertext
+    return KEY_MISMATCH_HINT if looks_like_ciphertext(value) else value
+
+
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
     return get_real_estate_db()
@@ -60,7 +68,8 @@ def add_customer(
                    f"确实要新增请用 add_customer(..., force=True)。")
             return json.dumps({
                 "success": False, "duplicate": True, "identical": identical, "existing_customer": dup,
-                "error": (f"该客户已存在（id={dup['id']} {dup['name']}，手机 {dup.get('phone') or '未填'}）。" + msg),
+                "error": (f"该客户已存在（id={dup['id']} {dup['name']}，"
+                          f"手机 {_safe_contact(dup.get('phone')) or '未填'}）。" + msg),
             }, ensure_ascii=False)
     result = db.add_customer(
         name=name, phone=phone, wechat=wechat, tier=tier,

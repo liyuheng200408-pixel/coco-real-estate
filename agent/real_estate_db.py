@@ -97,6 +97,18 @@ AREA_TOLERANCE = 1.0
 _PROPERTY_TYPE_LABEL = {"new": "一手房", "second_hand": "二手房", "rental": "出租"}
 
 
+KEY_MISMATCH_HINT = "读取失败（密钥不一致，请检查备份的密钥文件）"
+
+
+def looks_like_ciphertext(value) -> bool:
+    """值看起来是 Fernet 密文 —— 密钥不一致时解密失败会把密文原样返回，
+    这种值绝不能被当成联系方式展示给经纪人（会看到一串乱码）。"""
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    return len(v) >= 40 and v.startswith("gAAAA") and all(ch.isalnum() or ch in "-_=" for ch in v)
+
+
 def _deal_kind(property_type):
     """判重归组（2026-09-24）：同一套房可以既卖又租，但**不可能既是新房又是二手房** ——
     所以出租单算一类，一手房与二手房同属「出售」一类；判重只在同一类内部进行。"""

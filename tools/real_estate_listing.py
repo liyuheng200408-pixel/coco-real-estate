@@ -6,6 +6,11 @@ import json
 from tools.registry import registry
 
 
+def _fmt_unit_price(value) -> str:
+    """单价展示统一两位小数（20000.0 → 20000.00）"""
+    return f"{float(value):.2f}"
+
+
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
     return get_real_estate_db()
@@ -72,7 +77,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"📍 {district} {community}\n"
             f"{basic}\n"
             f"💰 价格 {_fmt_price(p)}"
-            + (f"（单价 {unit_price}元/㎡）" if unit_price else "")
+            + (f"（单价 {_fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
             + "\n\n"
             f"感兴趣的私信我，随时约看房！"
         )
@@ -81,7 +86,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"{title}，{district} {community}\n"
             f"{basic}\n"
             f"价格：{_fmt_price(p)}"
-            + (f"，单价：{unit_price}元/㎡" if unit_price else "")
+            + (f"，单价：{_fmt_unit_price(unit_price)}元/㎡" if unit_price else "")
             + "\n"
             f"地址：{address or community}\n"
             f"真实房源，看房方便，欢迎咨询。"
@@ -92,7 +97,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"{district}·{community}\n"
             f"{basic}\n"
             f"价格：{_fmt_price(p)}"
-            + (f"（{unit_price}元/㎡）" if unit_price else "")
+            + (f"（{_fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
             + "\n"
             f"地址：{address or community}\n"
             f"房源真实有效，随时可看，中介费优惠，欢迎来电咨询。"
@@ -102,7 +107,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"{title}（{community or district}）\n"
             f"【房屋信息】{basic}\n"
             f"【价格】{_fmt_price(p)}"
-            + (f"（单价{unit_price}元/㎡）" if unit_price else "")
+            + (f"（单价{_fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
             + "\n"
             f"【位置】{address or community or district}\n"
             f"【亮点】真实房源，产权清晰，看房方便，价格可谈。"

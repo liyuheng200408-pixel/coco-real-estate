@@ -570,6 +570,9 @@ def _norm_orientation(value):
 _STATUS_LABELS = {"available": "在售", "sold": "已售", "rented": "已租"}
 
 
+from agent.real_estate_db import KEY_MISMATCH_HINT  # noqa: E402  密钥不一致时的展示提示
+
+
 def _fmt_price(prop: dict) -> str:
     """价格展示（系统存元）：二手/一手房 → '28.37万'，出租 → '1000元/月'"""
     price = prop.get("price")
@@ -586,6 +589,27 @@ def _fmt_field(value) -> str:
     return str(value) if value not in (None, "") else "未录入"
 
 
+def _fmt_unit_price(value) -> str:
+    """单价展示统一两位小数（20000.0 → 20000.00；11058.25 保持两位）"""
+    return f"{float(value):.2f}"
+
+
+def _fmt_area(value) -> str:
+    """面积展示：整数就显示整数（100㎡），有小数才带小数（128.5㎡）"""
+    if value in (None, ""):
+        return "未录入"
+    area = float(value)
+    return f"{area:.0f}" if area == int(area) else f"{area:g}"
+
+
+def _safe_contact(value):
+    """联系方式展示：空 → None；疑似密钥不一致的密文 → 给可读提示（绝不把乱码丢给经纪人）"""
+    if not value:
+        return None
+    from agent.real_estate_db import looks_like_ciphertext
+    return KEY_MISMATCH_HINT if looks_like_ciphertext(value) else value
+
+
 def _prop_brief(prop: dict) -> dict:
     """候选列表用的房源简短信息（编号/标题/价格/面积/单价/类型/状态）"""
     return {
@@ -600,8 +624,8 @@ def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
     """房源详情的人类可读摘要（模型照抄即可，避免它自己拼表时漏字段）"""
     lines = [f"【房源】{prop.get('title')}（编号 {prop.get('id')}）"]
     unit_price = prop.get("unit_price")
-    unit_part = f"单价 {unit_price}元/㎡" if unit_price else "单价 面积缺失，无法计算"
-    lines.append(f"总价 {_fmt_price(prop)} | 面积 {_fmt_field(prop.get('area'))}㎡ | {unit_part}")
+    unit_part = f"单价 {_fmt_unit_price(unit_price)}元/㎡" if unit_price else "单价 面积缺失，无法计算"
+    lines.append(f"总价 {_fmt_price(prop)} | 面积 {_fmt_area(prop.get('area'))}㎡ | {unit_part}")
     lines.append(
         f"类型 {_TYPE_LABELS.get(prop.get('property_type'), prop.get('property_type') or '未录入')}"
         f" | 状态 {_STATUS_LABELS.get(prop.get('status'), prop.get('status') or '未录入')}"
@@ -620,9 +644,11 @@ def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
     if prop.get("tenant_requirements"):
         lines.append(f"租客要求 {prop['tenant_requirements']}")
     if owner:
-        line = (f"【业主】{owner.get('name') or '未填姓名'}，电话 {owner.get('phone') or '未录入'}")
-        if owner.get("wechat"):
-            line += f"，微信 {owner['wechat']}"
+        line = (f"【业主】{owner.get('name') or '未填姓名'}，"
+                f"电话 {_safe_contact(owner.get('phone')) or '未录入'}")
+        _wechat = _safe_contact(owner.get("wechat"))
+        if _wechat:
+            line += f"，微信 {_wechat}"
         if prop.get("viewing_note"):
             line += f"，看房方式 {prop['viewing_note']}"
         lines.append(line)
@@ -679,14 +705,23 @@ def get_property_detail(property_id: int = None, title: str = None, task_id: str
     owner = rows[0].get("owner") if rows else None
     image_count = len([x for x in (prop.get("images") or "").split(",") if x.strip()])
     history = db.get_price_history(pid, limit=3)
-    return json.dumps({
+    from agent.real_estate_db import looks_like_ciphertext
+    key_warning = None
+    if owner and any(looks_like_ciphertext(owner.get(k)) for k in ("phone", "wechat")):
+        key_warning = ("业主联系方式读不出来：库里的加密内容用当前密钥解不开"
+                       "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
+                       "在此之前不要把这条联系方式给客户。")
+    response = {
         "success": True,
         "property": prop,
         "owner": owner,
         "images": {"count": image_count},
         "price_history": history,
         "message": _detail_message(prop, owner, image_count, history),
-    }, ensure_ascii=False)
+    }
+    if key_warning:
+        response["warning_key_mismatch"] = key_warning
+    return json.dumps(response, ensure_ascii=False)
 
 
 def match_property(customer_id: int, top_n: int = 5, task_id: str = None) -> str:

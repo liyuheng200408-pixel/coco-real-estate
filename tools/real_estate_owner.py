@@ -18,6 +18,14 @@ def _get_db():
     return RealEstateDB(database_url)
 
 
+def _safe_contact(value):
+    """联系方式展示：空 → None；疑似密钥不一致的密文 → 可读提示（绝不把乱码丢给经纪人）"""
+    if not value:
+        return None
+    from agent.real_estate_db import KEY_MISMATCH_HINT, looks_like_ciphertext
+    return KEY_MISMATCH_HINT if looks_like_ciphertext(value) else value
+
+
 def _mask_id(id_number: str) -> str:
     """身份证脱敏：保留前4后4，中间打星"""
     id_number = (id_number or '').strip()
@@ -51,20 +59,25 @@ def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
         if not o:
             lines.append(f"· {r['title']}（ID:{r['id']}）：未录入业主信息")
             continue
-        phone = o.get('phone')
-        wechat = o.get('wechat')
+        phone = _safe_contact(o.get('phone'))
+        wechat = _safe_contact(o.get('wechat'))
         view = f"，看房方式: {r.get('viewing_note')}" if r.get('viewing_note') else ""
         lines.append(
             f"· {r['title']}（ID:{r['id']}）：业主 {o.get('name')}，"
             f"电话 {phone or '未录'}"
             + (f"，微信 {wechat}" if wechat else "")
             + view)
-    return json.dumps({
+    payload = {
         "success": True,
         "count": len(rows),
         "properties": rows,
         "message": "\n".join(lines),
-    }, ensure_ascii=False)
+    }
+    if any('读取失败' in ln for ln in lines):
+        payload["warning_key_mismatch"] = ("有业主的联系方式读不出来：库里的加密内容用当前密钥解不开"
+                                           "（常见于换了机器、或恢复备份时没带上密钥文件）。"
+                                           "先用备份里的密钥文件恢复，在此之前不要把这条联系方式给客户。")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def find_person_by_name(name: str = None, task_id: str = None) -> str:
@@ -83,15 +96,17 @@ def find_person_by_name(name: str = None, task_id: str = None) -> str:
     owners = result.get('owners', [])
     lines = [f"按姓名「{name}」检索到 客户 {len(customers)} 人 / 业主 {len(owners)} 人："]
     for c in customers:
-        phone = c.get('phone')
+        phone = _safe_contact(c.get('phone'))
+        _wechat_c = _safe_contact(c.get('wechat'))
         lines.append(f"\n【客户】{c.get('name')}（ID:{c.get('id')}）"
-                     f"电话 {phone or '未录'} | 等级 {c.get('tier') or '-'} | "
+                     f"电话 {phone or '未录'} | 微信 {_wechat_c or '未录'} | 等级 {c.get('tier') or '-'} | "
                      f"类型 {c.get('customer_type') or '-'} | 预算 {'-'.join(filter(None,[str(c.get('budget_min') or ''),str(c.get('budget_max') or '')])) or '-'}万 | "
                      f"意向 {c.get('location') or '-'} {c.get('layout_pref') or ''}")
     for o in owners:
-        phone = o.get('phone')
+        phone = _safe_contact(o.get('phone'))
+        wechat = _safe_contact(o.get('wechat'))
         lines.append(f"\n【业主】{o.get('name')}（ID:{o.get('id')}）"
-                     f"电话 {phone or '未录'} | 微信 {o.get('wechat') or '未录'} | "
+                     f"电话 {phone or '未录'} | 微信 {wechat or '未录'} | "
                      f"脱敏证件 {o.get('id_masked') or '-'} | 信任度 {o.get('trust_note') or '-'}")
     if not customers and not owners:
         lines.append("\n客户表和业主表均无此人。可能未登记；如需新建客户请提供电话及需求，业主可先登记。")
