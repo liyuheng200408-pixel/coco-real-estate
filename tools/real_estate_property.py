@@ -1114,9 +1114,25 @@ registry.register(
 )
 
 
-def find_alternatives(property_id: int, limit: int = 5, task_id: str = None) -> str:
-    """一键平替：客户看中的房被抢/下架时，按贴近度找替代房源"""
+_FIND_ALT_LIMIT_DEFAULT = 5
+_FIND_ALT_LIMIT_MAX = 20
+
+
+def find_alternatives(property_id: int, limit: int = _FIND_ALT_LIMIT_DEFAULT, task_id: str = None) -> str:
+    """一键平替：客户看中的房被抢/下架时，按贴近度找替代房源（同用途内）"""
     db = _get_db()
+    # 原房源不存在要和"没有够贴近的替代"区分开（2026-09-24）
+    if not db.get_property(property_id):
+        return json.dumps({"success": False, "not_found": True,
+                           "error": f"没有编号为 {property_id} 的房源"}, ensure_ascii=False)
+    # limit 边界（2026-09-24）：传 0/负数/非数字一律按默认 5，并设上限 20（大库里一次吐几百套会撑爆上下文）
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _FIND_ALT_LIMIT_DEFAULT
+    if limit <= 0:
+        limit = _FIND_ALT_LIMIT_DEFAULT
+    limit = min(limit, _FIND_ALT_LIMIT_MAX)
     alts = db.find_alternatives(property_id, limit)
     if not alts:
         return json.dumps({"success": True, "message": "暂无贴近度足够的替代房源，建议扩大区域或预算范围", "alternatives": []}, ensure_ascii=False)
@@ -1140,7 +1156,7 @@ registry.register(
         "type": "object",
         "properties": {
             "property_id": {"type": "integer", "description": "原房源ID"},
-            "limit": {"type": "integer", "description": "最多返回几套（默认5）"},
+            "limit": {"type": "integer", "description": "最多返回几套（默认 5，最多 20）"},
         },
         "required": ["property_id"],
     }},

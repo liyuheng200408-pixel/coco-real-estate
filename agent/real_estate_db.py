@@ -1075,6 +1075,10 @@ class RealEstateDB:
                 Property.id != property_id,
                 Property.status == 'available',
             ).all()
+            # 用途隔离（2026-09-24）：出租只推出租、出售只推出售（一手房/二手房可互推）。
+            # 原先不分类型，实测一套 2500元/月 的出租房，平替里出现了 150 万的二手房（价差 600 倍）。
+            origin_kind = _deal_kind(origin.property_type)
+            candidates = [c for c in candidates if _deal_kind(c.property_type) == origin_kind]
 
         def closeness(c):
             """贴近度评分（越高越像）：小区40/户型25/价位20/面积15"""
