@@ -20,6 +20,7 @@ def test_standard_values_are_the_agreed_ones():
         "compression.hygiene_hard_message_limit": 5000,
         "timezone": "Asia/Shanghai",
         "display.language": "zh",   # 2026-09-23 拍板：界面语言中文
+        "cron.catch_up_missed": False,  # 2026-09-23 拍板：机器没开就不补跑
         "approvals.destructive_slash_confirm": False,
     }
 
@@ -35,15 +36,15 @@ def test_dig_reads_nested_and_missing():
 
 def test_diffs_flags_official_defaults():
     """官方向导写的 config.yaml（150 / 0.5 / 20）必须被判定为不一致。"""
-    eff = {
+    eff = dict(align.STANDARD)      # 以标准值为基准再覆盖，STANDARD 加键不必改本函数
+    eff.update({
         "agent.max_turns": 150,
         "compression.threshold": 0.5,
         "compression.protect_last_n": 20,
-        "compression.hygiene_hard_message_limit": 5000,
         "timezone": "UTC",
         "display.language": "en",   # 官方向导写回的语言默认值
-        "approvals.destructive_slash_confirm": False,
-    }
+        "cron.catch_up_missed": True,  # 官方默认：错过会补发一次
+    })
     bad = dict((k, (g, w)) for k, g, w in align.diffs(eff))
     assert set(bad) == {
         "agent.max_turns",
@@ -51,20 +52,14 @@ def test_diffs_flags_official_defaults():
         "compression.protect_last_n",
         "timezone",
         "display.language",
+        "cron.catch_up_missed",
     }
     assert bad["agent.max_turns"] == (150, 500)
 
 
 def test_diffs_ok_when_aligned():
-    eff = {
-        "agent.max_turns": 500,
-        "compression.threshold": 0.8000000000000001,  # 浮点写法差异不算偏差
-        "compression.protect_last_n": 40,
-        "compression.hygiene_hard_message_limit": 5000,
-        "timezone": "Asia/Shanghai",
-        "display.language": "zh",
-        "approvals.destructive_slash_confirm": False,
-    }
+    eff = dict(align.STANDARD)
+    eff["compression.threshold"] = 0.8000000000000001  # 浮点写法差异不算偏差
     assert align.diffs(eff) == []
 
 
@@ -77,30 +72,14 @@ def test_check_mode_reports_mismatch(monkeypatch, capsys):
 
 
 def test_check_mode_passes_when_aligned(monkeypatch, capsys):
-    eff = {
-        "agent.max_turns": 500,
-        "compression.threshold": 0.8,
-        "compression.protect_last_n": 40,
-        "compression.hygiene_hard_message_limit": 5000,
-        "timezone": "Asia/Shanghai",
-        "display.language": "zh",
-        "approvals.destructive_slash_confirm": False,
-    }
+    eff = dict(align.STANDARD)  # 以标准值为基准，STANDARD 加键不必改本用例
     monkeypatch.setattr(align, "effective_values", lambda: eff)
     assert align.main(["--check"]) == 0
     assert capsys.readouterr().out == ""
 
 
 def test_apply_is_noop_when_aligned(monkeypatch):
-    eff = {
-        "agent.max_turns": 500,
-        "compression.threshold": 0.8,
-        "compression.protect_last_n": 40,
-        "compression.hygiene_hard_message_limit": 5000,
-        "timezone": "Asia/Shanghai",
-        "display.language": "zh",
-        "approvals.destructive_slash_confirm": False,
-    }
+    eff = dict(align.STANDARD)  # 以标准值为基准，STANDARD 加键不必改本用例
     monkeypatch.setattr(align, "effective_values", lambda: eff)
     assert align.apply() == []
 

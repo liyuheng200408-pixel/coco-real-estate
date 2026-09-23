@@ -22,18 +22,26 @@ if str(SCRIPTS) not in sys.path:
 from coco_config_align import STANDARD, classify, plan, summary  # noqa: E402
 
 
-def eff(threshold=0.8, max_turns=500, protect=40, hygiene=5000, tz="Asia/Shanghai",
-        slash_confirm=False, language="zh"):
-    """造一份运行时生效值（默认=标准值）"""
-    return {
-        "agent.max_turns": max_turns,
-        "compression.threshold": threshold,
-        "compression.protect_last_n": protect,
-        "compression.hygiene_hard_message_limit": hygiene,
-        "timezone": tz,
-        "display.language": language,
-        "approvals.destructive_slash_confirm": slash_confirm,
-    }
+# 短名 → 运行时键；eff() 一律**以 STANDARD 为基准**再覆盖，
+# 否则 STANDARD 加一项就会在这里表现成"缺失"（2026-09-23 加 cron.catch_up_missed 时踩过）。
+_SHORT = {
+    "threshold": "compression.threshold",
+    "max_turns": "agent.max_turns",
+    "protect": "compression.protect_last_n",
+    "hygiene": "compression.hygiene_hard_message_limit",
+    "tz": "timezone",
+    "slash_confirm": "approvals.destructive_slash_confirm",
+    "language": "display.language",
+    "catch_up": "cron.catch_up_missed",
+}
+
+
+def eff(**overrides):
+    """造一份运行时生效值（默认=标准值，按需覆盖；值为 None 表示该项未生效）"""
+    values = dict(STANDARD)
+    for short, value in overrides.items():
+        values[_SHORT[short]] = value
+    return values
 
 
 def st(written=None):
@@ -125,3 +133,28 @@ class TestPlanAndSummary:
         s = summary(eff(threshold=0.5, protect=35), st())
         assert s["level"] == "warn"
         assert "自定义" in s["message"] and "保留" in s["message"]
+
+
+class TestCatchUpMissedDefault:
+    """漏跑不补（2026-09-23 老板拍板"机器没开定时任务就不跑了"）
+
+    官方默认 catch_up_missed=True：机器关机/网关没起时错过的提醒会在下次启动后补发一条
+    （如下午三点收到 09:00 的早报）。Coco 的标准值是 False。
+    """
+
+    def test_standard_and_official_cover_the_key(self):
+        assert STANDARD["cron.catch_up_missed"] is False
+        from coco_config_align import OFFICIAL_DEFAULTS
+
+        assert True in OFFICIAL_DEFAULTS["cron.catch_up_missed"]
+
+    def test_official_true_is_reclaimed(self):
+        _a, reclaimable, custom = classify(eff(catch_up=True), st())
+        assert {k: r for k, _v, r in reclaimable}.get("cron.catch_up_missed") == "official-default"
+        assert not custom
+
+    def test_code_default_is_catch_up(self):
+        """官方代码默认确实会补跑（我们只是把它按标准值拉成 False）"""
+        from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+        assert DEFAULT_CONFIG["cron"]["catch_up_missed"] is True

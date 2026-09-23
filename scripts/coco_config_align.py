@@ -35,6 +35,9 @@ STANDARD: "dict[str, object]" = {
     "compression.protect_last_n": 40,
     "compression.hygiene_hard_message_limit": 5000,
     "timezone": "Asia/Shanghai",
+    # 漏跑不补（2026-09-23 老板拍板"机器没开定时任务就不跑了"）：官方默认 True，
+    # 机器关机/网关没起时错过的提醒会在下次启动后补发一条（如下午 3 点收到早报）。
+    "cron.catch_up_missed": False,
     # 界面语言（2026-09-23 老板拍板=中文）：官方 i18n 的静态文案（未设主页频道提示、
     # 审批提示、会话相关回复等）都按这个值选语言；不设时官方默认 en，用户会看到英文。
     # 注意：只影响官方静态文案，不影响 Coco 的房产话术与模型输出。
@@ -59,6 +62,7 @@ OFFICIAL_DEFAULTS: "dict[str, tuple]" = {
     "timezone": ("", None),
     "display.language": ("en",),                      # 官方默认 en（不设或向导写回时都当官方默认）
     "approvals.destructive_slash_confirm": (True,),   # 官方默认 True（弹确认框）
+    "cron.catch_up_missed": (True,),                  # 官方默认 True（错过会补发一次）
 }
 
 
@@ -69,6 +73,7 @@ LABELS: "dict[str, str]" = {
     "compression.protect_last_n": "保留最近消息条数",
     "compression.hygiene_hard_message_limit": "网关强制压缩消息上限",
     "timezone": "时区",
+    "cron.catch_up_missed": "漏跑不补（机器没开就不发）",
     "display.language": "界面语言",
     "approvals.destructive_slash_confirm": "清空对话类命令的确认框",
 }
