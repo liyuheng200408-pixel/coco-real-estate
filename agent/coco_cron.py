@@ -72,6 +72,31 @@ _AVAILABLE_JOBS = (
      {"script": "coco_cron_weekly.py", "prompt": _WEEKLY_PROMPT}),
 )
 
+# 任务的中文名与「什么时候发」：工具说明、开启回执都从这里取，
+# 改任务表时只改这张表，话术不会跟真实时间表脱节（2026-09-24 修：曾写死旧时间表）。
+_JOB_LABELS = {
+    "coco_daily_report": ("上班早报", "09:00 每天"),
+    "coco_overdue_sentinel": ("逾期提醒", "10:00、17:00"),
+    "coco_opportunity": ("机会提醒", "12:30 每天"),
+    "coco_day_end": ("收工小结", "20:30 每天"),
+    "coco_weekly_report": ("周报", "周一 08:30"),
+}
+
+
+def job_label(name: str) -> str:
+    """任务名 → 给经纪人看的名字（认不出就原样返回，不编）"""
+    return _JOB_LABELS.get(name, (name, ""))[0]
+
+
+def job_schedule_summary() -> str:
+    """按 _AVAILABLE_JOBS 顺序生成「09:00 每天 上班早报 / 10:00、17:00 逾期提醒 / …」"""
+    parts = []
+    for item in _AVAILABLE_JOBS:
+        label, when = _JOB_LABELS.get(item[2], (item[2], ""))
+        parts.append(f"{when} {label}".strip())
+    return " / ".join(parts)
+
+
 # 已废弃任务：注册/同步时若发现残留就删掉（否则新旧一起发，经纪人被轰）
 # 2026-09-23 取消：coco_midday_check（与早报重叠，且没异常也发"今日无异常"）、
 # coco_overdue_check（每 30 分钟重复念同一批客户）；更早取消的生日/看门狗任务一并清掉。

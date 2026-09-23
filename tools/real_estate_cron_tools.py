@@ -1,6 +1,6 @@
 """
 Coco 房产工具 - 定时任务自助开关（2026-08-12 加）
-经纪人一句话开启/关闭定时提醒（早报/午间/逾期），无需操作服务器。
+经纪人一句话开启/关闭定时提醒（早报/逾期提醒/机会提醒/收工小结/周报），无需操作服务器。
 """
 import json
 import logging
@@ -41,8 +41,27 @@ def _get_chat_id(task_id: str = None, **kwargs) -> str:
     return os.getenv('COCO_CHAT_ID', '')
 
 
+def _schedule_text() -> str:
+    """定时任务时间表（取自任务表，任务表改了这里自动跟上）"""
+    try:
+        from agent.coco_cron import job_schedule_summary
+        return job_schedule_summary()
+    except Exception as e:  # 取不到也不能让开关功能挂
+        logger.debug("[Coco] 读取任务表失败，用兜底时间表: %s", e)
+        return "09:00 每天 上班早报 / 10:00、17:00 逾期提醒 / 12:30 每天 机会提醒 / 20:30 每天 收工小结 / 周一 08:30 周报"
+
+
+def _job_labels(names) -> str:
+    """任务名 → 给经纪人看的名字（不把内部名暴露给经纪人）"""
+    try:
+        from agent.coco_cron import job_label
+    except Exception:
+        return "、".join(names)
+    return "、".join(job_label(n) for n in names)
+
+
 def enable_cron(task_id: str = None, **kwargs) -> str:
-    """开启定时任务（每日早报/午间检查/逾期提醒）"""
+    """开启定时任务（时间表见 _schedule_text）"""
     from agent.coco_cron import enable_coco_cron_jobs
     chat_id = _get_chat_id(task_id, **kwargs)
     if not chat_id:
@@ -63,7 +82,7 @@ def enable_cron(task_id: str = None, **kwargs) -> str:
         return json.dumps({
             "success": True,
             "enabled": registered,
-            "message": f"定时任务已开启：{'、'.join(registered)}（早报 09:00 / 午间 13:00 / 逾期每 30 分钟）",
+            "message": f"定时任务已开启：{_job_labels(registered)}（{_schedule_text()}）",
         }, ensure_ascii=False)
     if skipped:
         # 区分"已存在跳过"与"注册失败"（2026-08-13 加：注册失败必须如实报错，
@@ -93,7 +112,7 @@ def disable_cron(task_id: str = None) -> str:
         return json.dumps({
             "success": True,
             "disabled": removed,
-            "message": f"定时任务已关闭：{'、'.join(removed)}",
+            "message": f"定时任务已关闭：{_job_labels(removed)}",
         }, ensure_ascii=False)
     return json.dumps({
         "success": True,
@@ -105,7 +124,7 @@ def disable_cron(task_id: str = None) -> str:
 registry.register(
     name="enable_cron",
     toolset="real_estate",
-    schema={"name": "enable_cron", "description": "开启定时任务（每日早报 09:00 / 午间检查 13:00 / 逾期提醒每 30 分钟），经纪人要求开启定时提醒时调用", "parameters": {
+    schema={"name": "enable_cron", "description": f"开启定时任务（{_schedule_text()}），经纪人要求开启定时提醒时调用", "parameters": {
         "type": "object",
         "properties": {},
     }},
@@ -124,7 +143,7 @@ registry.register(
 registry.register(
     name="disable_cron",
     toolset="real_estate",
-    schema={"name": "disable_cron", "description": "关闭定时任务（早报/午间/逾期提醒全部停止），经纪人要求关闭定时提醒时调用", "parameters": {
+    schema={"name": "disable_cron", "description": f"关闭定时任务（早报/逾期提醒/机会提醒/收工小结/周报全部停止），经纪人要求关闭定时提醒时调用", "parameters": {
         "type": "object",
         "properties": {},
     }},

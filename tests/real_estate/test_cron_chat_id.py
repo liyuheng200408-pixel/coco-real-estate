@@ -129,3 +129,37 @@ def test_legacy_composite_session_id_still_supported():
 
     assert out.get("success") is True, out
     assert _jobs()["coco_daily_report"].get("deliver") == f"feishu:{CHAT_ID}"
+
+
+def test_enable_reply_uses_real_schedule_and_plain_names():
+    """开启回执照任务表说话，且不把内部任务名/旧时间表甩给经纪人
+
+    2026-09-24 修：回执曾写死「早报 09:00 / 午间 13:00 / 逾期每 30 分钟」，
+    与重设计后的 5 条任务（无午间、无 30 分钟）对不上，经纪人会以为提醒没生效。
+    """
+    from agent.coco_cron import _AVAILABLE_JOBS, job_label
+
+    session_id = _bind_gateway_turn(CHAT_ID)
+    out = _dispatch("enable_cron", {}, session_id=session_id, task_id=session_id)
+    message = out.get("message", "")
+
+    assert out.get("success") is True, out
+    for item in _AVAILABLE_JOBS:
+        assert job_label(item[2]) in message, f"{item[2]} 的中文名没出现在回执里：{message}"
+    for stale in ("13:00", "30 分钟", "midday", "coco_"):
+        assert stale not in message, f"回执里还有旧口径/内部名 {stale!r}：{message}"
+
+
+def test_enable_tool_description_follows_the_job_table():
+    """工具说明里的时间表来自任务表，不许写死（否则模型照旧时间表回答）"""
+    from agent.coco_cron import _AVAILABLE_JOBS, job_schedule_summary
+    from tools.registry import registry
+
+    import tools.real_estate_cron_tools  # noqa: F401  触发注册
+
+    description = registry.get_schema("enable_cron")["description"]
+    assert job_schedule_summary() in description, description
+    assert description.count(" / ") == len(_AVAILABLE_JOBS) - 1, description  # 说明覆盖全部任务
+    for stale in ("13:00", "30 分钟", "午间"):
+        assert stale not in description, f"工具说明里还有旧口径 {stale!r}：{description}"
+
