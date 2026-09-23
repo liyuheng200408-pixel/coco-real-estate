@@ -91,9 +91,9 @@ python3 scripts/check_coco_hooks.py    # 应全部 PASS
 | 关卡 | 命令 | 通过标准 | 谁跑 |
 |---|---|---|---|
 | ① 部署体检 | `python3 scripts/healthcheck.py` | 各项无 FAIL | 我 |
-| ② 工具冒烟 | `python3 scripts/smoke_test_real_estate.py` | 67 个工具逐个真实调用，无 EXC | 我 |
+| ② 工具冒烟 | `python3 scripts/smoke_test_real_estate.py` | 工具逐个真实调用，无 EXC | 我 |
 | ③ 单元测试 | `.venv-dev/bin/python -m pytest tests/real_estate/ -q` | 全绿 | 我 |
-| ④ **飞书全量实测** | 按 `docs/TESTING_FEISHU_FULL.md` 发 51 条指令 | 逐条对照，关键链路查库确认 | **老板** |
+| ④ **飞书全量实测** | 按 `docs/TESTING_FEISHU_FULL.md` 逐条发指令 | 逐条对照，关键链路查库确认 | **老板** |
 
 > ⚠️ **冒烟 ≠ 没问题**：冒烟只证明"工具本身能跑"，证明不了"模型会在该用的时候调用它"。
 > 第 ④ 关必须真人在飞书里走一遍，且**每测一项都查数据库确认落库**，不能只看回复文本。
