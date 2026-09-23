@@ -309,15 +309,16 @@ def main(argv=None):
 
     choice = _menu_choice(db)
     if choice == "1":
-        preview = db.purge_preview(kind="all")
+        preview = db.purge_preview(kind="all", statuses=statuses, before=args.before)
         _print_preview(preview)
         print("\n（预演结束，未做任何修改。要执行请重新运行并选择 2/3/4）")
         return 0
     if choice in ("2", "3", "4"):
         kind = {"2": "customer", "3": "property", "4": "all"}[choice]
-        return _run_delete(db, kind, args.before, args.force, args.yes, args.mode, args.no_backup)
+        return _run_delete(db, kind, args.before, args.force, args.yes, args.mode,
+                           args.no_backup, statuses)
     if choice == "5":
-        return _run_restore(db, "all", args.before, args.yes, args.no_backup)
+        return _run_restore(db, "all", args.before, args.yes, args.no_backup, statuses)
     print("已取消，未做任何修改。")
     return 0
 

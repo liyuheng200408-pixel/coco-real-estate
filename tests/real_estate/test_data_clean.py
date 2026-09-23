@@ -135,3 +135,52 @@ class TestArchiveAndRestore:
         assert dc.main(["--restore", "--yes", "--no-backup"]) == 0
         assert db.get_customer(clean["id"])["status"] == "active"
         assert db.get_property(prop["id"])["status"] == "available"
+
+
+def _run_menu(mod, answers, extra=("--no-backup",)):
+    """用 pty 跑一次向导（假装真人在终端敲键）→ (退出码, 输出)"""
+    import os
+    import pty
+    import subprocess
+    import sys
+
+    mod._load_db().engine.dispose()  # 放开 sqlite 文件句柄，免得子进程写不进去
+    env = {**os.environ, "DATABASE_URL": f"sqlite:///{mod._db_path}"}
+    master, slave = pty.openpty()
+    proc = subprocess.Popen([sys.executable, str(SCRIPT), *extra], cwd=REPO_ROOT,
+                            stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            env=env, text=True)
+    os.close(slave)
+    try:
+        os.write(master, ("\n".join(answers) + "\n").encode())
+        out = proc.communicate(timeout=90)[0]
+    finally:
+        os.close(master)
+    return proc.returncode, out
+
+
+class TestWizardMenu:
+    """向导菜单（真终端）：预演 / 清理 / 取消 三条路都要走得通"""
+
+    def test_menu_preview_changes_nothing(self, dc):
+        _seed(dc)
+        before = _counts(dc)
+        code, out = _run_menu(dc, ["1"])
+        assert code == 0, out
+        assert "数据清理向导" in out and "预演结束" in out
+        assert _counts(dc) == before
+
+    def test_menu_clean_with_confirmation(self, dc):
+        db, clean, protected, prop = _seed(dc)
+        code, out = _run_menu(dc, ["4", "yes"])
+        assert code == 0, out
+        assert "清理前" in out and "清理后" in out
+        assert db.get_property(prop["id"]) is None
+
+    def test_menu_cancel_changes_nothing(self, dc):
+        _seed(dc)
+        before = _counts(dc)
+        code, out = _run_menu(dc, ["6"])
+        assert code == 0, out
+        assert "已取消" in out
+        assert _counts(dc) == before
