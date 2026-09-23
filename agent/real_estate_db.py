@@ -2101,13 +2101,25 @@ class RealEstateDB:
             customers = [c for c in customers
                          if c.location and (dnorm == self._norm_district(c.location) or dnorm in c.location)]
 
-        # 不缓存全量候选池：改为每个客户按自己的硬条件（类型/户型）下推查询，
-        # 内存占用小、且在"库里同类房源不多"时明显更快（池子缓存版本实测 6 万套 41 秒/20 客户）。
-        pool = None
-        
+        # 候选池按客户类型分桶、整批只从库拉一次（2026-09-24 修：原先每个客户各自
+        # iter_available_properties 全量拉一遍，实测 12000 套 × 100 客户要 41 秒）。
+        # 户型/租买/类型/价格/区域判定全在 match_property 的评分循环里，与"池是否预筛"无关，
+        # 所以复用同一份候选不会改变结果（改前改后逐客户比对完全一致，见 tests/real_estate/test_batch_match_pool.py）。
+        pool_cache = {}
+
+        def _pool_for(ctype):
+            key = self._CUSTOMER_TYPE_TO_PROP_TYPE.get(ctype or '') or '__all__'
+            if key not in pool_cache:
+                pushdown = {}
+                want = self._CUSTOMER_TYPE_TO_PROP_TYPE.get(ctype or '')
+                if want:
+                    pushdown['property_type'] = want
+                pool_cache[key] = list(self.iter_available_properties(**pushdown))
+            return pool_cache[key]
+
         rows = []
         for c in customers:
-            matches = self.match_property(c.id, top_n, pool=pool)
+            matches = self.match_property(c.id, top_n, pool=_pool_for(c.customer_type))
             has_perfect = any(m.get('perfect_match') for m in matches)
             status = '完全匹配' if has_perfect else ('接近匹配' if matches else '无匹配')
             rows.append({
