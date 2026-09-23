@@ -227,25 +227,25 @@ def test_title_with_area_but_different_room_passes(db):
 
 # ---------- 疑似重复：不拦，但要让经纪人看得见 ----------
 def test_suspected_when_existing_record_is_off_market(db, monkeypatch):
-    """库里那条已售/已租 → 不拦，但返回疑似提示（原因写明状态）"""
+    """库里那条已售（同类型）→ 不拦，但返回疑似提示（原因写明状态）"""
     import tools.real_estate_property as t
     monkeypatch.setattr(t, "_get_db", lambda: db)
-    make_property(db, title="京华城 4号楼1单元1802", area=45.0, status="rented")
+    make_property(db, title="京华城 4号楼1单元1802", area=45.0, status="sold")
 
     out = json.loads(t.add_property(title="京华城 4号楼1单元1802", price=2200, area=45.0,
-                                    property_type="rental"))
+                                    property_type="second_hand"))
     assert out["success"] is True, out
-    assert "已租" in out["suspected_duplicate"]["reason"] or "rented" in out["suspected_duplicate"]["reason"]
+    assert "sold" in out["suspected_duplicate"]["reason"]
 
 
 def test_suspected_when_area_mismatch(db, monkeypatch):
-    """同房号但面积不符（45 vs 48）→ 不拦，但返回疑似提示（原因写明面积）"""
+    """同房号同类型但面积不符（45 vs 48）→ 不拦，但返回疑似提示（原因写明面积）"""
     import tools.real_estate_property as t
     monkeypatch.setattr(t, "_get_db", lambda: db)
     make_property(db, title="京华城 4号楼1单元1802", area=45.0)
 
     out = json.loads(t.add_property(title="京华城 4号楼1单元1802", price=2200, area=48.0,
-                                    property_type="rental"))
+                                    property_type="second_hand"))
     assert out["success"] is True, out
     assert "㎡" in out["suspected_duplicate"]["reason"]
 

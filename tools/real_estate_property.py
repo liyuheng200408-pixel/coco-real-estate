@@ -34,10 +34,35 @@ def add_property(
     force=True 跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用，默认 False）。
     """
     db = _get_db()
+    # 入口归一与基础校验（2026-09-24 加）：模型有时会把经纪人的原话直接传下来（"185万""一百二十平"），
+    # 也可能传空标题/非法类型 —— 这里统一换算成 元 / ㎡ 并挡住脏数据，认不出的给中文提示，不静默入库。
+    title = (title or '').strip()
+    if not title:
+        return json.dumps({"success": False, "error": (
+            "房源标题是空的：请给一个能认出是哪套房的标题（小区名 + 楼栋/房号）")}, ensure_ascii=False)
+    normalized = {}
+    price_value = _norm_money(price)
+    if price_value is None:
+        return json.dumps({"success": False, "error": (
+            f"价格没能识别：收到的是「{price}」。请按元给数字（如 185万 记作 1850000；出租月租 2200 就写 2200）")},
+            ensure_ascii=False)
+    if price_value != price:
+        normalized['price'] = f"{price} → {price_value}元"
+    area_value = _norm_area_value(area)
+    if area_value is None or area_value <= 0:
+        return json.dumps({"success": False, "error": (
+            f"面积没能识别或不是正数：收到的是「{area}」。请给平方米数字（如 128.5 或 128平）")},
+            ensure_ascii=False)
+    if area_value != area:
+        normalized['area'] = f"{area} → {area_value}㎡"
+    if property_type not in ("new", "second_hand", "rental"):
+        normalized['property_type'] = f"类型「{property_type}」不认识，已按二手房记（要改就说一声）"
+        property_type = "second_hand"
+    price, area = price_value, area_value
     # 录入前查重（2026-08-29 老板要求：跟客户一致，重复就不录入；2026-09-21 改按身份要素判定）
     suspected = None
     if not force:
-        dup, suspected = db.find_property_conflict(title=title, area=area)
+        dup, suspected = db.find_property_conflict(title=title, area=area, property_type=property_type)
         if dup:
             incoming = {"price": price, "area": area, "community": community, "district": district,
                         "address": address, "rooms": rooms, "halls": halls, "bathrooms": bathrooms,
@@ -83,9 +108,14 @@ def add_property(
     # 业主信息一步关联：失败要如实告知经纪人（原先静默吞掉，经纪人以为登记好了）
     owner = None
     owner_warning = None
+    owner_note = None
     if owner_name or owner_phone:
         try:
-            owner = db.link_owner_to_property(result['id'], name=owner_name, phone=owner_phone, wechat=owner_wechat)
+            owner, owner_info = db.link_owner_to_property(result['id'], name=owner_name, phone=owner_phone,
+                                                          wechat=owner_wechat, return_info=True)
+            if owner_info.get('created') and owner_info.get('same_name_exists'):
+                owner_note = (f"库内已有同名房东（另一个号码），这次的号码库里没有，已按新号码另记一位房东。"
+                              f"如果其实是同一个人，说一声我把它并过去。")
         except Exception as exc:
             owner = None
             owner_warning = f"业主信息登记失败：{type(exc).__name__}: {exc}（房源已录入，可用 update_property 补录业主）"
@@ -127,6 +157,11 @@ def add_property(
                                      "（不对就直接说新值）")
     if owner:
         response["owner"] = owner
+    if owner_note:
+        response["owner_note"] = owner_note
+    if normalized:
+        response["normalized"] = normalized
+        response["note_normalized"] = "上面这些值是我按经纪人的说法换算/归一的，请如实转述并请他核对"
     if owner_warning:
         response["warning_owner"] = owner_warning
     if match_warning:
@@ -137,6 +172,85 @@ def add_property(
         response["matched_customers"] = matched
         response["message"] = f"房源已添加，有 {len(matched)} 位客户可能感兴趣"
     return json.dumps(response, ensure_ascii=False)
+
+
+_CN_DIGITS = {'零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
+              '六': 6, '七': 7, '八': 8, '九': 9}
+_CN_UNITS = {'十': 10, '百': 100, '千': 1000, '万': 10000, '亿': 100000000}
+
+
+def _cn_number(text):
+    """把「一百五十」「三千二」这类中文数字转成数值；认不出返回 None"""
+    total = section = number = 0
+    seen = False
+    for ch in text:
+        if ch in _CN_DIGITS:
+            number = _CN_DIGITS[ch]
+            seen = True
+        elif ch in _CN_UNITS:
+            unit = _CN_UNITS[ch]
+            seen = True
+            if unit >= 10000:
+                section = (section + number) * unit
+                total += section
+                section = number = 0
+            else:
+                section += (number or 1) * unit
+                number = 0
+        else:
+            return None
+    return (total + section + number) if seen else None
+
+
+def _norm_money(value):
+    """把「185万 / 一百五十万 / 1,850,000 元 / 2200」这类写法换算成元（int）；认不出返回 None。
+
+    模型偶尔会把经纪人原话里的说法直接传下来，这里兜住；认不出就由调用方给中文提示，绝不静默存错。
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip().replace(',', '').replace('，', '').replace(' ', '')
+    # 只清"价格尾巴"；单价类写法（3000/平米）不允许被当成总价，宁可认不出让模型回头问
+    for junk in ('人民币', '元整', '元', '万整', '块', '¥', '￥', '/月', '／月', '每月', '/套'):
+        text = text.replace(junk, '')
+    if not text:
+        return None
+    multiplier = 1
+    if '亿' in text:
+        multiplier, text = 100000000, text.replace('亿', '')
+    elif '万' in text:
+        multiplier, text = 10000, text.replace('万', '')
+    try:
+        num = float(text)
+    except ValueError:
+        num = _cn_number(text)
+        if num is None:
+            return None
+    return int(round(num * multiplier))
+
+
+def _norm_area_value(value):
+    """把「128.5㎡ / 一百二十平 / 约128平 / 128」这类写法换算成平方米（float）；认不出返回 None"""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    for junk in ('建筑面积', '平方米', '平米', '平方', '㎡', '平', '米', '约', '大约', '左右', ' '):
+        text = text.replace(junk, '')
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        num = _cn_number(text)
+        return float(num) if num is not None else None
 
 
 def _blank(v) -> bool:
@@ -226,9 +340,14 @@ def update_property(
         return json.dumps({"success": False, "error": "房源不存在"}, ensure_ascii=False)
     owner = None
     owner_warning = None
+    owner_note = None
     if owner_name or owner_phone:
         try:
-            owner = db.link_owner_to_property(property_id, name=owner_name, phone=owner_phone, wechat=owner_wechat)
+            owner, owner_info = db.link_owner_to_property(property_id, name=owner_name, phone=owner_phone,
+                                                          wechat=owner_wechat, return_info=True)
+            if owner_info.get('created') and owner_info.get('same_name_exists'):
+                owner_note = (f"库内已有同名房东（另一个号码），这次的号码库里没有，已按新号码另记一位房东。"
+                              f"如果其实是同一个人，说一声我把它并过去。")
         except Exception as exc:
             owner = None
             owner_warning = f"业主信息登记失败：{type(exc).__name__}: {exc}（房源已更新，可重试补录业主）"
@@ -243,6 +362,8 @@ def update_property(
                                  "若确实要用新值覆盖，请再调一次 update_property（不带 fill_missing_only）")
     if owner:
         response["owner"] = owner
+    if owner_note:
+        response["owner_note"] = owner_note
     if owner_warning:
         response["warning_owner"] = owner_warning
     return json.dumps(response, ensure_ascii=False)

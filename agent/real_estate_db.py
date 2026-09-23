@@ -93,6 +93,16 @@ _CN_NUM = {"一": "1", "二": "2", "三": "3", "四": "4", "五": "5",
 AREA_TOLERANCE = 1.0
 
 
+# 房源类型的中文名（提示文案用）
+_PROPERTY_TYPE_LABEL = {"new": "一手房", "second_hand": "二手房", "rental": "出租"}
+
+
+def _deal_kind(property_type):
+    """判重归组（2026-09-24）：同一套房可以既卖又租，但**不可能既是新房又是二手房** ——
+    所以出租单算一类，一手房与二手房同属「出售」一类；判重只在同一类内部进行。"""
+    return "rental" if (property_type or "second_hand") == "rental" else "sell"
+
+
 def _normalize_title(t):
     """去地理前缀 + 空白/标点（旧的"整串完全相同"判据，继续作为兜底保留）"""
     if not t:
@@ -1250,20 +1260,23 @@ class RealEstateDB:
                 'owners': [o.to_dict() for o in owners],
             }
 
-    def link_owner_to_property(self, property_id, name=None, phone=None, wechat=None):
+    def link_owner_to_property(self, property_id, name=None, phone=None, wechat=None, return_info=False):
         """找到或新建房东并关联到房源（设 owner_id）。电话/微信加密存（EncryptedString）。
 
-        防重复：优先按 手机号(读出即解密明文) 匹配；其次按 姓名（未提供电话时）；都无则新建。
-        若读出的值疑似密文（密钥不一致），不强行匹配同名/同号（避免误合）。返回房东 dict。
+        防重复（2026-09-24 改）：**给了手机号就只按手机号认人** —— 号码库里没有就新建房东，
+        不再退回按姓名合并（同名不同人 / 同一房东两个号会被合成一条，后给的号还会被静默丢弃）。
+        只有没给手机号时才按姓名认人。若读出的值疑似密文（密钥不一致），不参与匹配（避免误合）。
+        return_info=True 时返回 (房东 dict, info)：info.created=是否新建、info.matched_by=靠什么认出来的、
+        info.same_name_exists=库里是否已有同名房东（给工具层提示"要不要合并"用）。
         """
         name = (name or '').strip()
         phone = str(phone).strip() if phone else None
         if not name and not phone:
-            return None
+            return (None, {}) if return_info else None
         with self.get_session() as s:
             prop = s.query(Property).get(property_id)
             if not prop:
-                return None
+                return (None, {}) if return_info else None
             owners = [o.to_dict() for o in s.query(Owner).all()]
 
             def _fk(v, probe):
@@ -1278,23 +1291,28 @@ class RealEstateDB:
                 return True
 
             owner = None
+            matched_by = None
             if phone:
                 for o in owners:
                     v = o.get('phone')
                     if v is None or _fk(v, phone):
                         continue
                     if v == phone:
-                        owner = s.query(Owner).get(o['id']); break
-            if not owner and name:
+                        owner = s.query(Owner).get(o['id']); matched_by = 'phone'; break
+            elif name:
                 for o in owners:
                     if o.get('name') == name:
-                        owner = s.query(Owner).get(o['id']); break
+                        owner = s.query(Owner).get(o['id']); matched_by = 'name'; break
+            same_name_exists = bool(name) and any(o.get('name') == name for o in owners)
+            created = False
             if not owner:
                 owner = Owner(name=name or phone, phone=phone, wechat=wechat)
-                s.add(owner); s.flush()
+                s.add(owner); s.flush(); created = True
             prop.owner_id = owner.id
             s.commit()
-            return owner.to_dict()
+            info = {'created': created, 'matched_by': matched_by, 'same_name_exists': same_name_exists}
+            owner_dict = owner.to_dict()
+            return (owner_dict, info) if return_info else owner_dict
 
     def exclusive_expiring(self, days=30):
         """独家委托 N 天内到期清单（重新谈委托/降价的时机）"""
@@ -1316,31 +1334,38 @@ class RealEstateDB:
             result.sort(key=lambda x: x['days_remaining'])
             return result
 
-    def find_duplicate_property(self, title, area, exclude_id=None):
+    def find_duplicate_property(self, title, area, exclude_id=None, property_type=None):
         """查在售房源里是否已有这套房（防重复录入）→ 返回已存在房源 dict；没有则 None
 
-        判定（2026-09-21 重做）：整串标题归一化后完全相同，或身份要素相同
-        （小区主体同一个 + 期数一致 + 楼栋/单元不冲突 + 房号相同）+ 面积差 ≤1㎡。
-        价格不算身份（会被改价/调价），只认 小区 + 房号 + 面积。
+        判定（2026-09-21 重做、2026-09-24 加类型维度）：整串标题归一化后完全相同，或身份要素相同
+        （小区主体同一个 + 期数一致 + 楼栋/单元不冲突 + 房号相同）+ 面积差 ≤1㎡ + **同类型**。
+        价格不算身份（会被改价/调价），只认 小区 + 房号 + 面积 + 类型。
         """
-        return self.find_property_conflict(title=title, area=area, exclude_id=exclude_id)[0]
+        return self.find_property_conflict(title=title, area=area, exclude_id=exclude_id,
+                                           property_type=property_type)[0]
 
-    def find_suspected_property(self, title, area, exclude_id=None):
+    def find_suspected_property(self, title, area, exclude_id=None, property_type=None):
         """疑似同一套（只提示、不拦）：小区同一个 + 面积同口径，但标题里房号不全"""
-        return self.find_property_conflict(title=title, area=area, exclude_id=exclude_id)[1]
+        return self.find_property_conflict(title=title, area=area, exclude_id=exclude_id,
+                                           property_type=property_type)[1]
 
-    def find_property_conflict(self, title, area, exclude_id=None):
+    def find_property_conflict(self, title, area, exclude_id=None, property_type=None):
         """一次扫描同时判定「确定重复」与「疑似重复」，返回 (dup, suspected)
 
-        确定重复：整串标题归一化后相同，或身份要素相同（小区+期数+楼栋+单元+房号）+ 面积差 ≤1㎡。
-        疑似（只提示、不拦录入，三种情形各带 reason）：
+        确定重复：整串标题归一化后相同，或身份要素相同（小区+期数+楼栋+单元+房号）+ 面积差 ≤1㎡，
+        **且只跟同一「交易性质」的房源比**（2026-09-24 加）：出租与出售分开（同一套房可以既卖又租），
+        一手房与二手房同属出售、同房号仍算同一套。跨性质命中不拦录入，只给「同房号已有另一用途记录」的提示。
+
+        疑似（只提示、不拦录入，四种情形各带 reason）：
           ① 同小区同面积，但标题里房号不全；
           ② 同房号、但库里那条已售/已租（不在售）；
-          ③ 同房号、但面积与本次填写不符。
+          ③ 同房号、但面积与本次填写不符；
+          ④ 同房号、但用途不同（本次出租、库里是出售；或反之）。
         """
         area_value = float(area or 0)
         norm_title = _normalize_title(title)
         ident = parse_property_identity(title)
+        want_group = _deal_kind(property_type) if property_type else None
         cands = {}
         with self.get_session() as s:
             for p in s.query(Property).all():
@@ -1349,22 +1374,33 @@ class RealEstateDB:
                 other = parse_property_identity(p.title or '')
                 close = _area_close(p.area, area_value)
                 available = (p.status == 'available')
-                if available and close:
+                # 类型维度（2026-09-24）：只跟同一「交易性质」的房源比 ——
+                # 出租与出售分开（同一套房可既卖又租）；一手房与二手房同属出售，同房号仍按重复处理
+                same_type = want_group is None or _deal_kind(p.property_type) == want_group
+                if same_type and available and close:
                     if norm_title and _normalize_title(p.title or '') == norm_title:
                         return p.to_dict(), None
                     if same_property_identity(ident, other):
                         return p.to_dict(), None
                 if same_property_identity(ident, other):
-                    if not available:
+                    if not same_type:
+                        _other = _PROPERTY_TYPE_LABEL.get(p.property_type, p.property_type)
+                        _mine = ("出租" if want_group == "rental"
+                                 else f"出售（{_PROPERTY_TYPE_LABEL.get(property_type, property_type)}）")
+                        cands.setdefault("other_type", {**p.to_dict(), "reason": (
+                            f"库里有一条同房号的{_other}房源（编号 {p.id}，状态 {p.status}），"
+                            f"与本次的{_mine}是两条独立记录（同一套房可以既卖又租），已按新记录录入")})
+                    elif not available:
                         cands.setdefault("off_market", {**p.to_dict(), "reason": (
                             f"库里有一条同房号的记录（编号 {p.id}，状态 {p.status}），本次同房号重新录入")})
                     elif not close:
                         cands.setdefault("area_mismatch", {**p.to_dict(), "reason": (
                             f"库里有一条同房号的房源（编号 {p.id}，面积 {p.area}㎡），本次填写 {area_value}㎡")})
-                elif available and close and suspected_same_property_identity(ident, other):
+                elif same_type and available and close and suspected_same_property_identity(ident, other):
                     cands.setdefault("room_unknown", {**p.to_dict(), "reason": (
                         f"库里有一条同小区、同面积的房源（编号 {p.id}），但标题里房号不全，无法确定是不是同一套")})
-            suspected = cands.get("room_unknown") or cands.get("area_mismatch") or cands.get("off_market")
+            suspected = (cands.get("room_unknown") or cands.get("area_mismatch")
+                         or cands.get("off_market") or cands.get("other_type"))
             return None, suspected
 
     def find_duplicate_properties(self):
@@ -1375,14 +1411,17 @@ class RealEstateDB:
         没有房号的按「归一化标题 + 面积」分桶（等同旧规则）——既不漏，也不做 O(n²) 全比。
         """
         with self.get_session() as s:
-            rows = [(p.id, p.title or '', float(p.area or 0), parse_property_identity(p.title or ''))
+            rows = [(p.id, p.title or '', float(p.area or 0), parse_property_identity(p.title or ''),
+                     _deal_kind(p.property_type))
                     for p in s.query(Property).all()]
         buckets = {}
-        for pid, title, area, ident in rows:
+        for pid, title, area, ident, kind in rows:
+            # 分桶键带交易性质（2026-09-24）：出租与出售分开（同一套房可既卖又租）；
+            # 一手房与二手房同属出售，同房号仍是同一套
             if ident["room"]:
-                buckets.setdefault((ident["room"], int(area)), []).append((pid, area, ident))
+                buckets.setdefault((kind, ident["room"], int(area)), []).append((pid, area, ident))
             else:
-                buckets.setdefault(("title", _normalize_title(title), round(area, 2)), []).append((pid, area, ident))
+                buckets.setdefault(("title", kind, _normalize_title(title), round(area, 2)), []).append((pid, area, ident))
         parent = {}
 
         def find(x):
@@ -1403,7 +1442,7 @@ class RealEstateDB:
                 for other in items[1:]:
                     union(items[0][0], other[0])
             else:
-                by_room.setdefault(key[0], {})[key[1]] = items
+                by_room.setdefault((key[0], key[1]), {})[key[2]] = items
         for area_map in by_room.values():
             areas = sorted(area_map)
             for idx, area_key in enumerate(areas):
