@@ -29,7 +29,9 @@ class TestNoCapabilityGuessingGuard:
         assert "楼层与朝向等字段必须单独传参" in MANUAL
 
 
-CRON = (REPO_ROOT / "agent" / "coco_cron.py").read_text(encoding="utf-8")
+from agent.coco_cron import _AVAILABLE_JOBS  # noqa: E402
+
+DAILY_PROMPT = next(item[3] for item in _AVAILABLE_JOBS if item[2] == "coco_daily_report")
 
 
 class TestReportWordingGuards:
@@ -49,9 +51,10 @@ class TestReportWordingGuards:
         assert "S/A/B/C 四级都要提" in MANUAL
 
     def test_daily_cron_asks_for_all_tiers(self):
-        assert "S/A/B/C 四级都要提" in CRON
-        assert "不要添加引导清单" in CRON
-        assert "S/A级客户状态" not in CRON, "旧口径（只点 S/A）是漏 B 级的根源"
+        """盯实际注册的早报提示词（不是整份文件——文件里会提到旧文案作为教训）"""
+        assert "S/A/B/C 四级都要提" in DAILY_PROMPT
+        assert "不要添加引导清单" in DAILY_PROMPT
+        assert "S/A级客户状态" not in DAILY_PROMPT, "旧口径（只点 S/A）是漏 B 级的根源"
 
 
 class TestGuidanceMenuGuards:
@@ -66,6 +69,11 @@ class TestGuidanceMenuGuards:
 
     def test_prompt_forbids_claiming_viewing_and_deal(self):
         assert "不能替经纪人带看或成交" in PROMPT
+
+    def test_prompt_covers_greeting_scene(self):
+        """老板确认：这段清单是 Coco 打招呼时说的（不是早报带的）"""
+        assert "打招呼（开场自我介绍）时" in PROMPT
+        assert "开场带这段清单是可以的" in PROMPT
 
     def test_manual_has_menu_script(self):
         assert "引导菜单话术（2026-09-23 加）" in MANUAL

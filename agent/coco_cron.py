@@ -61,6 +61,41 @@ def _job_exists(job_name: str) -> bool:
     return False
 
 
+def _refresh_coco_job_prompts() -> list:
+    """把已注册任务的提示词对齐到代码里的最新文案（2026-09-23 加）
+
+    为什么要有这一步：定时任务的提示词是**注册时写进任务记录**的（cron/jobs.json），
+    代码里改文案**不会**自动覆盖已经存在的任务——注册路径遇到同名任务一律跳过，
+    结果就是"改了代码，早报还按旧口径报"。真实教训：早报指令原文只点"S/A级客户状态"，
+    改成四级全列后，经纪人机器上那条老任务仍是旧文案，早报继续漏 B 级。
+
+    只动名字与 _AVAILABLE_JOBS 完全一致的任务（coco_ 三个），且只在提示词不一致时更新；
+    脚本型任务（dict 提示词，如 watchdog）与非 Coco 任务不碰。返回被刷新的任务名。
+    """
+    refreshed = []
+    try:
+        from cron.jobs import list_jobs, update_job
+
+        existing = {j.get("name"): j for j in list_jobs(include_disabled=True) if j.get("name")}
+        for item in _AVAILABLE_JOBS:
+            name, prompt = item[2], item[3]
+            if not isinstance(prompt, str):
+                continue  # 脚本型任务（dict）不刷提示词
+            job = existing.get(name)
+            if not job:
+                continue
+            if (job.get("prompt") or "") == prompt:
+                continue
+            if update_job(job.get("id"), {"prompt": prompt}) is None:
+                logger.warning("[Coco] cron job prompt refresh skipped (job gone): %s", name)
+                continue
+            refreshed.append(name)
+            logger.info("[Coco] cron job prompt refreshed: %s", name)
+    except Exception as e:
+        logger.warning("[Coco] refresh coco cron prompts failed: %s", e)
+    return refreshed
+
+
 def register_coco_cron_jobs(chat_id: str) -> dict:
     """注册 Coco 定时任务到指定飞书会话（默认关闭，2026-08-12 老板决定）
 
@@ -74,6 +109,12 @@ def register_coco_cron_jobs(chat_id: str) -> dict:
         dict: {"registered": [job names], "skipped": [job names]}
     """
     result = {"registered": [], "skipped": []}
+
+    # 已存在任务的提示词对齐到代码最新文案：不论任务是不是本次注册的都要对齐
+    # （口径改过才能生效），失败不影响后续注册
+    refreshed = _refresh_coco_job_prompts()
+    if refreshed:
+        result["refreshed"] = refreshed
 
     # 开关：默认关闭；COCO_ENABLE_CRON=1 才注册
     if os.getenv('COCO_ENABLE_CRON', '0') != '1':
@@ -141,6 +182,9 @@ def enable_coco_cron_jobs(chat_id: str) -> dict:
     result = {"registered": [], "skipped": []}
     if not _cron_store_ready():
         return {"registered": [], "skipped": [], "error": "定时任务服务暂时不可用，请稍后再试。"}
+    refreshed = _refresh_coco_job_prompts()
+    if refreshed:
+        result["refreshed"] = refreshed
     for item in _AVAILABLE_JOBS:
         job_name, schedule, name = item[0], item[1], item[2]
         if _job_exists(name):
