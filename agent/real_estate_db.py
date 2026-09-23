@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Float, Numeric, BigInteger,
-    DateTime, ForeignKey, CheckConstraint, Index
+    DateTime, ForeignKey, CheckConstraint, Index, or_
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from sqlalchemy.types import TypeDecorator
@@ -2256,6 +2256,264 @@ class RealEstateDB:
             s.commit()
         return {'downgrades': downgrades, 'still_stale': len(stale) - len(downgrades)}
     
+    # ---------- 数据清理（彻底删除 / 归档 / 恢复，2026-09-23 加） ----------
+    # 背景：经纪人要求"删除/清空"数据时，系统此前只能把状态改成已售/已租/已关闭，
+    # 记录连同电话、价格、业主信息一直留在库里，而"列客户""客户总数"又会把已关闭的
+    # 算进去 → 数据越积越"虚"。这里补上真正的物理删除能力；保护口径与去重一致：
+    # 有关联带看/成交/跟进的记录默认不删（宁可留着不误删），明确要求才连历史一起删。
+
+    _PURGE_LABELS = {
+        'followups': '跟进', 'viewings': '带看', 'deals': '成交',
+        'changes': '需求变更', 'referrals': '转介绍', 'price_history': '调价记录',
+    }
+
+    def _purge_boundary(self, before):
+        """把 YYYY-MM-DD / datetime 统一成"创建时间早于它"的比较值（None = 不限）"""
+        if before in (None, ''):
+            return None
+        if isinstance(before, datetime):
+            return before
+        text = str(before).strip()
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+            try:
+                dt = datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+            return dt if fmt.endswith('%H:%M:%S') else datetime.combine(dt.date(), datetime.min.time())
+        raise ValueError(f'时间格式不对：{before}（请用 YYYY-MM-DD）')
+
+    def _purge_related_counts(self, s, kind, oid):
+        """一条记录挂了多少关联历史（决定物理删除是否安全）"""
+        if kind == 'property':
+            return {
+                'price_history': s.query(PriceHistory).filter(PriceHistory.property_id == oid).count(),
+                'followups': s.query(Followup).filter(Followup.property_id == oid).count(),
+                'viewings': s.query(Viewing).filter(Viewing.property_id == oid).count(),
+                'deals': s.query(Deal).filter(Deal.property_id == oid).count(),
+            }
+        return {
+            'followups': s.query(Followup).filter(Followup.customer_id == oid).count(),
+            'viewings': s.query(Viewing).filter(Viewing.customer_id == oid).count(),
+            'deals': s.query(Deal).filter(Deal.customer_id == oid).count(),
+            'changes': s.query(CustomerChange).filter(CustomerChange.customer_id == oid).count(),
+            'referrals': s.query(Referral).filter(or_(
+                Referral.referrer_customer_id == oid,
+                Referral.referred_customer_id == oid)).count(),
+        }
+
+    def _purge_skip_reason(self, related, kind):
+        """不可以直接物理删除的理由（None = 可以删）
+
+        调价记录属于房源自身明细，随房源一起删，不算"牵挂"。
+        """
+        protected = ('followups', 'viewings', 'deals') if kind == 'property' \
+            else ('followups', 'viewings', 'deals', 'changes', 'referrals')
+        hit = {k: related.get(k) for k in protected if related.get(k)}
+        if hit:
+            detail = '、'.join(f'{self._PURGE_LABELS[k]}{v}条' for k, v in hit.items())
+            return f'有关联记录（{detail}），需要明确要求"连历史一起删"'
+        return None
+
+    def _purge_targets(self, s, kind, statuses=None, before=None):
+        """按状态 + 创建时间挑出候选记录（只读）"""
+        cutoff = self._purge_boundary(before)
+        targets = []
+        if kind in ('property', 'all'):
+            q = s.query(Property).filter(Property.status.in_(statuses or ['sold', 'rented']))
+            if cutoff:
+                q = q.filter(Property.created_at < cutoff)
+            targets += [('property', p) for p in q.order_by(Property.id).all()]
+        if kind in ('customer', 'all'):
+            q = s.query(Customer).filter(Customer.status.in_(statuses or ['closed']))
+            if cutoff:
+                q = q.filter(Customer.created_at < cutoff)
+            targets += [('customer', c) for c in q.order_by(Customer.id).all()]
+        return targets
+
+    def _purge_entry(self, s, kind, obj):
+        """把一条候选记录整理成"给经纪人看的清单条目"（含关联条数与不能删的原因）"""
+        related = self._purge_related_counts(s, kind, obj.id)
+        if kind == 'property':
+            entry = {'kind': 'property', 'id': obj.id, 'title': obj.title,
+                     'status': obj.status, 'district': obj.district,
+                     'price': float(obj.price) if obj.price is not None else None,
+                     'area': obj.area}
+        else:
+            entry = {'kind': 'customer', 'id': obj.id, 'name': obj.name,
+                     'status': obj.status, 'tier': obj.tier, 'source': obj.source}
+        entry['related'] = related
+        entry['related_total'] = sum(related.values())
+        entry['skip_reason'] = self._purge_skip_reason(related, kind)
+        return entry
+
+    def purge_preview(self, kind='all', statuses=None, before=None):
+        """清理预演：只列"会删什么、会跳过什么、为什么跳过"，绝不修改数据"""
+        with self.get_session() as s:
+            targets = self._purge_targets(s, kind, statuses, before)
+            entries = [self._purge_entry(s, k, o) for k, o in targets]
+        deletable = [e for e in entries if not e['skip_reason']]
+        skipped = [e for e in entries if e['skip_reason']]
+        return {
+            'success': True, 'kind': kind, 'before': before,
+            'matched': len(entries), 'deletable': len(deletable), 'skipped': len(skipped),
+            'deletable_ids': [e['id'] for e in deletable],
+            'skipped_entries': skipped,
+            'entries': entries,
+            'related_total': sum(e['related_total'] for e in deletable),
+        }
+
+    def _purge_delete(self, s, kind, oid):
+        """连带删除一条记录及其关联行（调用方负责确认与提交）"""
+        if kind == 'property':
+            s.query(PriceHistory).filter(PriceHistory.property_id == oid).delete(synchronize_session=False)
+            s.query(Followup).filter(Followup.property_id == oid).delete(synchronize_session=False)
+            s.query(Viewing).filter(Viewing.property_id == oid).delete(synchronize_session=False)
+            s.query(Deal).filter(Deal.property_id == oid).delete(synchronize_session=False)
+            row = s.query(Property).get(oid)
+        else:
+            s.query(Followup).filter(Followup.customer_id == oid).delete(synchronize_session=False)
+            s.query(Viewing).filter(Viewing.customer_id == oid).delete(synchronize_session=False)
+            s.query(Deal).filter(Deal.customer_id == oid).delete(synchronize_session=False)
+            s.query(CustomerChange).filter(CustomerChange.customer_id == oid).delete(synchronize_session=False)
+            ref_ids = [r[0] for r in s.query(Referral.id).filter(or_(
+                Referral.referrer_customer_id == oid,
+                Referral.referred_customer_id == oid)).all()]
+            if ref_ids:
+                # 别人的成交单可能还挂在这条转介绍上：只摘链接，不动成交单
+                s.query(Deal).filter(Deal.referral_id.in_(ref_ids)).update(
+                    {'referral_id': None}, synchronize_session=False)
+                s.query(Referral).filter(Referral.id.in_(ref_ids)).delete(synchronize_session=False)
+            row = s.query(Customer).get(oid)
+        if row is not None:
+            s.delete(row)
+
+    def _delete_one(self, kind, property_id=None, title=None, customer_id=None,
+                    name=None, phone=None, force=False, dry_run=False):
+        label = '房源' if kind == 'property' else '客户'
+        model = Property if kind == 'property' else Customer
+        oid = property_id if kind == 'property' else customer_id
+        with self.get_session() as s:
+            if oid is not None:
+                row = s.query(model).get(oid)
+                if row is None:
+                    return {'success': False, 'error': 'not_found',
+                            'message': f'库里没有 id={oid} 的{label}'}
+            else:
+                key = title if kind == 'property' else name
+                if not key:
+                    return {'success': False, 'error': 'missing_key',
+                            'message': f'请提供{label}编号或{label}名称'}
+                col = Property.title if kind == 'property' else Customer.name
+                rows = s.query(model).filter(col == key).all()
+                if kind == 'customer' and phone:
+                    rows = [r for r in rows if (r.phone or '') == phone]
+                if not rows:
+                    return {'success': False, 'error': 'not_found',
+                            'message': f'没找到叫"{key}"的{label}，可先列一下确认名称或编号'}
+                if len(rows) > 1:
+                    return {'success': False, 'error': 'ambiguous',
+                            'message': f'有 {len(rows)} 条叫"{key}"的{label}，请报编号确认',
+                            'candidates': [self._purge_entry(s, kind, r) for r in rows]}
+                row = rows[0]
+            entry = self._purge_entry(s, kind, row)
+            entry['dry_run'] = dry_run
+            if entry['skip_reason'] and not force:
+                entry.update(success=False, error='has_history',
+                             message=f'没有删除这条{label}：{entry["skip_reason"]}')
+                return entry
+            if dry_run:
+                entry.update(success=True,
+                             message=f'预演：可以删掉这条{label}（连同 {entry["related_total"]} 条关联记录）')
+                return entry
+            self._purge_delete(s, kind, row.id)
+            s.commit()
+            entry.update(success=True, deleted_related=entry['related_total'],
+                         message=f'已彻底删除这条{label}（连同 {entry["related_total"]} 条关联记录）')
+            return entry
+
+    def delete_property(self, property_id=None, title=None, force=False, dry_run=False):
+        """彻底删除一套房源（含调价记录；有关联带看/成交/跟进时默认拒删）
+
+        force=True 连关联历史一起删；dry_run=True 只报告不动手。
+        """
+        return self._delete_one('property', property_id=property_id, title=title,
+                                force=force, dry_run=dry_run)
+
+    def delete_customer(self, customer_id=None, name=None, phone=None, force=False, dry_run=False):
+        """彻底删除一位客户（含跟进/带看/成交/需求变更/转介绍引用；有历史时默认拒删）"""
+        return self._delete_one('customer', customer_id=customer_id, name=name, phone=phone,
+                                force=force, dry_run=dry_run)
+
+    def purge_data(self, kind='all', statuses=None, before=None, mode='delete',
+                   dry_run=True, force=False):
+        """批量清理：默认只删"没有关联历史"的，有历史的跳过并列出原因
+
+        mode='delete' 彻底删除；mode='archive' 只改状态（房源→已售/已租，客户→已关闭）。
+        """
+        if mode not in ('delete', 'archive'):
+            return {'success': False, 'error': 'bad_mode', 'message': 'mode 只能是 delete 或 archive'}
+        with self.get_session() as s:
+            targets = self._purge_targets(s, kind, statuses, before)
+            if mode == 'archive':
+                archived, already = [], []
+                for (k, obj), entry in zip(targets, [self._purge_entry(s, k, o) for k, o in targets]):
+                    new_status = 'closed' if k == 'customer' else (
+                        'rented' if obj.property_type == 'rental' else 'sold')
+                    if obj.status == new_status:
+                        already.append(entry)
+                        continue
+                    if not dry_run:
+                        obj.status = new_status
+                    archived.append({**entry, 'new_status': new_status})
+                if not dry_run:
+                    s.commit()
+                return {'success': True, 'mode': 'archive', 'dry_run': dry_run,
+                        'matched': len(targets), 'archived': len(archived),
+                        'already_marked': len(already), 'entries': archived,
+                        'message': f'{"预演：" if dry_run else ""}将把 {len(archived)} 条标记为已成交/已关闭'
+                                   f'（另有 {len(already)} 条已经是该状态）'}
+            done, skipped = [], []
+            entries = [self._purge_entry(s, k, o) for k, o in targets]
+            for (k, obj), entry in zip(targets, entries):
+                if entry['skip_reason'] and not force:
+                    skipped.append(entry)
+                    continue
+                if not dry_run:
+                    self._purge_delete(s, k, obj.id)
+                done.append(entry)
+            if not dry_run:
+                s.commit()
+            return {'success': True, 'mode': 'delete', 'dry_run': dry_run,
+                    'matched': len(targets), 'deleted': len(done), 'skipped_count': len(skipped),
+                    'deleted_entries': done, 'skipped_entries': skipped,
+                    'deleted_related': sum(e['related_total'] for e in done),
+                    'message': (f'{"预演：" if dry_run else ""}将彻底删除 {len(done)} 条'
+                                f'（连同 {sum(e["related_total"] for e in done)} 条关联记录），'
+                                f'跳过 {len(skipped)} 条（有关联历史，需明确要求连历史一起删）')}
+
+    def restore_status(self, kind='all', statuses=None, before=None, dry_run=True):
+        """撤销"为了清空而误标"的状态：房源已售/已租 → 在售，客户已关闭 → 在跟
+
+        原始状态没有留痕，这里只能整体复位；只改状态，不新增或删除任何记录。
+        """
+        with self.get_session() as s:
+            targets = self._purge_targets(s, kind, statuses, before)
+            restored = []
+            for k, obj in targets:
+                new_status = 'active' if k == 'customer' else 'available'
+                if obj.status == new_status:
+                    continue
+                if not dry_run:
+                    obj.status = new_status
+                if k == 'property':
+                    restored.append({'kind': k, 'id': obj.id, 'title': obj.title, 'new_status': new_status})
+                else:
+                    restored.append({'kind': k, 'id': obj.id, 'name': obj.name, 'new_status': new_status})
+            if not dry_run:
+                s.commit()
+            return {'success': True, 'dry_run': dry_run, 'restored': len(restored), 'entries': restored,
+                    'message': f'{"预演：" if dry_run else ""}将把 {len(restored)} 条恢复为在售/在跟'}
+
     # ---------- 统计 ----------
     def get_stats(self):
         with self.get_session() as s:
