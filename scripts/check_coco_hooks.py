@@ -319,6 +319,15 @@ CONTENT_CHECKS = [
         "更新过程中的配置迁移提示指回官方 hermes config migrate（用户会照抄）。"
         "处理：把提示里的 hermes config migrate 改回 coco config migrate。",
     ),
+    (
+        "20",
+        "飞书配对页品牌参数",
+        "plugins/platforms/feishu/adapter.py",
+        [r"from=coco&tp=coco", r'!"from=hermes'],
+        "一键配对飞书时，配对链接会带上官方品牌参数（from/tp=hermes），飞书配对页随之显示 Hermes 字样。\n"
+        "处理：把 _begin_registration() 里追加的参数改回 from=coco&tp=coco"
+        "（参考 patches/09-feishu-registration-brand.patch）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示

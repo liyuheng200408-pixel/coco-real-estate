@@ -76,6 +76,7 @@ class TestBeginRegistration:
         assert result["device_code"] == "dc_123"
         assert "qr_url" in result
         assert "accounts.feishu.cn" in result["qr_url"]
+        assert "from=coco&tp=coco" in result["qr_url"]  # Coco 品牌参数（官方为 from=hermes&tp=hermes）
         assert result["user_code"] == "ABCD-1234"
         assert result["interval"] == 5
         assert result["expire_in"] == 600

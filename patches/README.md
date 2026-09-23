@@ -27,6 +27,7 @@
 | 06 | `plugins/platforms/feishu/adapter.py` | 首次对话三件事：发欢迎语、发加密密钥备份提醒、自动注册定时任务 |
 | 07 | `gateway/run_turn.py`（官方 v0.21 起从 `gateway/run.py` 拆到这里） | 首次对话开场白换成 Coco 自我介绍；关闭官方 profile-build 引导 |
 | 08 | `scripts/sandbox/pick-release-tags.sh` | 标签过滤正则放宽：同时认「日期式 `vYYYY.M.D`」和「语义化 `vX.Y.Z`（含 `-N` 后缀）」 |
+| 09 | `plugins/platforms/feishu/adapter.py` | 一键配对的链接参数改成 `from=coco&tp=coco`（官方是 `from=hermes&tp=hermes`，飞书配对页会显示 Hermes 字样） |
 
 另有 2 个**自有文档**（不属于官方代码，同步时直接保留即可）：
 `README.md`、`README.zh-CN.md`。
@@ -95,6 +96,14 @@
 - **上游变了怎么办**：只要 Coco 还用语义化标签，这个放宽就必须保留；
   官方若改了该脚本的挑标签方式，按新方式重新放宽。
 
+### 09 plugins/platforms/feishu/adapter.py —— 配对链接的品牌参数
+- **改什么**：`_begin_registration()` 里给飞书返回的配对链接追加的参数，
+  由 `from=hermes&tp=hermes` 改成 `from=coco&tp=coco`。
+- **为什么**：这两个参数是我们自己加的（飞书不返回它们），但飞书配对页会据此
+  带出官方品牌文案（页面上出现「Hermes Agent 正在配置中…」）。
+- **上游变了怎么办**：参数追加写在 `_begin_registration()` 的 `qr_url +=` 一行，
+  官方若改了配对流程（例如换成别的注册接口），在新流程里同样只追加 coco 品牌参数。
+
 ## 使用方法（同步时）
 
 ```bash
@@ -107,7 +116,7 @@ bash scripts/sync_upstream.sh <官方版本tag>
 # 3. 逐处重新应用上面的改动
 #    （按语义在新版代码里实现，不要机械 apply patch）
 
-# 4. 自检：确认 7 处挂钩点 + 自建文件都在
+# 4. 自检：确认挂钩点与自建文件都在（清单以脚本内 CONTENT_CHECKS/PATH_CHECKS 为准）
 python3 scripts/check_coco_hooks.py
 
 # 5. 三层验收

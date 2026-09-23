@@ -4045,7 +4045,7 @@ def _begin_registration(domain: str = "feishu") -> dict:
     if not device_code:
         raise RuntimeError("Feishu / Lark registration did not return a device_code")
     qr_url = res.get("verification_uri_complete", "")
-    qr_url += ("&" if "?" in qr_url else "?") + "from=hermes&tp=hermes"
+    qr_url += ("&" if "?" in qr_url else "?") + "from=coco&tp=coco"  # Coco: 官方是 from=hermes&tp=hermes
     return {
         "device_code": device_code, "qr_url": qr_url, "user_code": res.get("user_code", ""),
         "interval": res.get("interval") or 5, "expire_in": res.get("expire_in") or 600,
