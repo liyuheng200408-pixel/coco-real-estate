@@ -3,7 +3,7 @@
 用法（在服务器或本地）:
     在安装目录内执行：python3 scripts/smoke_test_real_estate.py
 
-覆盖: 工具集静态清单全部 62 个工具 + 出租房附加用例。
+覆盖: 工具集静态清单里的全部工具 + 出租房附加用例。
 输出: 每个工具的 OK/ERR/EXC 汇总 + 未注册/遗漏提示。
 """
 import os, sys, json, glob, importlib, traceback
@@ -69,6 +69,7 @@ STATIC_TOOLS = [
     "price_history","price_drop_alerts","update_customer_stage","stage_stagnation",
     "churn_warning","find_alternatives","clear_defect_tag","add_referral","referral_stats",
     "loan_compare","tax_breakdown_report","market_brief",
+    "delete_property","delete_customer","purge_data",
 ]
 
 # ---------- 造一张测试图片 ----------
@@ -138,6 +139,16 @@ vid = r[1]['viewing']['id']; results['schedule_viewing'] = r
 r = call('start_deal', {"customer_id":cid,"property_id":pid,"price":1250000,"deposit_amount":20000,
     "deposit_date":"2026-08-15","notes":"测试成交"})
 did = r[1]['deal']['id']; results['start_deal'] = r
+
+# 数据清理冒烟种子（2026-09-23）：一套无牵挂的已售房源 + 一位无牵挂的已关闭客户，
+# 直接用 db 层建（不产生跟进/变更历史），专供删除用例——不碰上面那些带历史的种子数据
+from agent.real_estate_db import get_real_estate_db as _get_estate_db
+_estate_db = _get_estate_db()
+purge_pid = _estate_db.add_property(
+    title="待清理的已售房源", price=900000, area=60.0, community="测试小区",
+    district="朝阳", rooms=2, halls=1, property_type="second_hand", status="sold")["id"]
+purge_cid = _estate_db.add_customer(
+    name="待清理的已关闭客户", tier="C", customer_type="buy_second_hand", status="closed")["id"]
 
 # ---------- 2. 全部工具按序调用 ----------
 CASES = [
@@ -232,6 +243,12 @@ CASES = [
     ("find_person_by_name", {"name":"测试房东"}),
     ("find_person_by_name", {"name":"测试客户张先生"}),
     ("find_person_by_name", {"name":"查无此人"}),
+    # 数据清理（2026-09-23 加）：先预演再真删，只用专门的"待清理"种子，不动其它数据
+    ("delete_property", {"property_id":purge_pid,"dry_run":True}),
+    ("delete_customer", {"customer_id":purge_cid,"dry_run":True}),
+    ("delete_property", {"property_id":purge_pid}),
+    ("delete_customer", {"customer_id":purge_cid}),
+    ("purge_data", {"kind":"all","dry_run":True}),
 ]
 
 for name, args in CASES:

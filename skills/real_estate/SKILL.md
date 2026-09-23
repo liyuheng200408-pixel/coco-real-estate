@@ -164,6 +164,16 @@ tags: [real-estate, property, customer, followup, viewing, deal]
 - 短视频脚本：`generate_short_video_script`（房源ID，platform=douyin/shipinhao）生成30秒口播脚本
 - 渠道统计：`channel_stats` 查看各渠道来客数/成交率，判断广告投放性价比
 
+### 6.8 数据清理（彻底删除 / 归档，2026-09-23 加）
+
+经纪人要求"删除/清空房源、客户"时，先定性再动手，禁止直接回"系统不支持删除"：
+
+- **只想不再看到** → 改状态：房源 `update_property(status="sold"/"rented")`、客户 `update_customer(status="closed")`，并回显改了什么。状态标记不等于删除，记录仍在库内（统计口径见【统计数字铁律】）。
+- **要从库里彻底去掉** → `delete_property` / `delete_customer`（单条：按编号或名称，同名带手机号区分），或 `purge_data`（批量：按状态 + `before="YYYY-MM-DD"` 只清某日期之前录入的；`mode="archive"` 改为只标状态）。
+- **保护规则**：有关联带看/成交/跟进/需求变更/转介绍记录的默认拒删并说明原因；经纪人明确要求"连历史一起删"时才传 `force=true`。
+- **执行纪律**：物理删除必须两步——先 `dry_run=true` 预演（报将删什么、关联多少条记录、跳过哪些及原因），经纪人确认后再执行；执行后报删除条数、跳过条数及原因。
+- 整库重置（连业主、话术、经纪人名片一起清空）不在工具范围内，如实说明需要在服务器上操作。
+
 ### 7. 计算与政策
 
 - 贷款月供：`mortgage_calculator`
