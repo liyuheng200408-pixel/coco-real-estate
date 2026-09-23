@@ -768,11 +768,17 @@ class RealEstateDB:
             c = s.query(Customer).get(cid)
             return c.to_dict() if c else None
     
-    def list_customers(self, tier=None, status=None, customer_type=None, limit=50):
+    def list_customers(self, tier=None, status=None, customer_type=None, limit=50, include_closed=False):
+        """列客户。默认只列在跟的（active 活跃 / paused 暂缓）
+
+        2026-09-23 改：此前不传 status 会把已关闭(closed)的客户也列出来，导致"列客户"
+        与"客户总数"越用越虚。要看已关闭客户，显式传 status='closed' 或 include_closed=True。
+        """
         with self.get_session() as s:
             q = s.query(Customer)
             if tier: q = q.filter(Customer.tier == tier)
             if status: q = q.filter(Customer.status == status)
+            elif not include_closed: q = q.filter(Customer.status != 'closed')
             if customer_type: q = q.filter(Customer.customer_type == customer_type)
             return [c.to_dict() for c in q.limit(limit).all()]
 
@@ -2516,18 +2522,31 @@ class RealEstateDB:
 
     # ---------- 统计 ----------
     def get_stats(self):
+        """统计。客户数按"在跟"口径（活跃+暂缓），已关闭单列不计入
+
+        2026-09-23 改：客户数此前把已关闭(closed)的也算了进去，客户越多、关掉的越多，
+        报表数字就越"虚"。现在 total_customers=在跟客户数，已关闭放 closed_customers。
+        """
         with self.get_session() as s:
-            total = s.query(Customer).count()
-            tiers = {t: s.query(Customer).filter(Customer.tier == t).count() for t in ['S','A','B','C']}
+            tracking = s.query(Customer).filter(Customer.status != 'closed').count()
+            closed = s.query(Customer).filter(Customer.status == 'closed').count()
+            tiers = {t: s.query(Customer).filter(
+                Customer.tier == t, Customer.status != 'closed').count() for t in ['S','A','B','C']}
             props = s.query(Property).filter(Property.status == 'available').count()
             overdue = len(self.get_overdue())
             return {
-                'total_customers': total, 'tier_counts': tiers,
+                'total_customers': tracking, 'closed_customers': closed,
+                'customer_count_note': '客户数按"在跟"统计（活跃+暂缓），已关闭单列不计入',
+                'tier_counts': tiers,
                 'available_properties': props, 'overdue_followups': overdue,
             }
     
     def get_channel_stats(self):
-        """渠道线索统计：按客户来源分组统计客户数、分级、成交数、成交率"""
+        """渠道线索统计：按客户来源分组统计客户数、分级、成交数、成交率
+
+        2026-09-23 改：已关闭客户不再算进渠道来客数（该渠道单列 closed）——客户关了就不再
+        跟进，继续算进"这个渠道来了多少人"会让渠道量越用越虚。
+        """
         with self.get_session() as s:
             # 2026-09-18 修：原先每客户查一次成交（N+1），现改为一次取出"有成交的客户集合"
             deal_customer_ids = {row[0] for row in s.query(Deal.customer_id).distinct().all()}
@@ -2535,9 +2554,12 @@ class RealEstateDB:
             for c in s.query(Customer).all():
                 src = (c.source or '').strip() or '未填写'
                 ch = channels.setdefault(src, {
-                    'source': src, 'customers': 0,
+                    'source': src, 'customers': 0, 'closed': 0,
                     'tiers': {'S': 0, 'A': 0, 'B': 0, 'C': 0}, 'deals': 0,
                 })
+                if c.status == 'closed':
+                    ch['closed'] += 1
+                    continue
                 ch['customers'] += 1
                 tier = c.tier or 'C'
                 ch['tiers'][tier] = ch['tiers'].get(tier, 0) + 1

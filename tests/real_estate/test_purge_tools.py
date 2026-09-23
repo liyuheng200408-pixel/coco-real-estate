@@ -96,7 +96,7 @@ class TestPurgeDataTool:
         result = _call("purge_data", {})
         assert result["success"] is True and result["dry_run"] is True
         assert result["deleted"] == 1
-        assert [c["name"] for c in db.list_customers()] == ["关闭客户"]
+        assert len(db.list_customers(include_closed=True)) == 1
 
     def test_rejects_unknown_kind(self, purge_tools):
         result = _call("purge_data", {"kind": "everything"})

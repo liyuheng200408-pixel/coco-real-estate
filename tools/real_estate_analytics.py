@@ -186,7 +186,7 @@ def channel_stats(task_id: str = None) -> str:
 registry.register(
     name="channel_stats",
     toolset="real_estate",
-    schema={"name": "channel_stats", "description": "渠道线索统计：按客户来源分组统计客户数、分级、成交数、成交率，判断哪个渠道来客多、成交率高", "parameters": {
+    schema={"name": "channel_stats", "description": "渠道线索统计：按客户来源分组统计客户数、分级、成交数、成交率（客户数只算在跟客户，已关闭单列 closed），判断哪个渠道来客多、成交率高", "parameters": {
         "type": "object",
         "properties": {},
     }},
