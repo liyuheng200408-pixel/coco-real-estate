@@ -1771,6 +1771,52 @@ class RealEstateDB:
                 })
             return out
 
+    def recent_properties(self, days: int = 1, limit: int = 200) -> list:
+        """近期新录入的在售房源（一次 SQL 查出来，供机会提醒用）
+
+        2026-09-23 加：定时"机会提醒"要拿"今天新录的房源"去匹配 S/A 级客户，
+        原先只能遍历全部在售房源（老板库里 6 万+）再逐条比 created_at。
+        """
+        from datetime import datetime, timedelta
+        since = datetime.now() - timedelta(days=days)
+        with self.get_session() as s:
+            rows = (s.query(Property)
+                    .filter(Property.status == 'available', Property.created_at >= since)
+                    .order_by(Property.created_at.desc())
+                    .limit(limit).all())
+            return [p.to_dict() for p in rows]
+
+    def activity_counts(self, days: int = 1) -> dict:
+        """近 N 天的活动量（各表 count，一次会话跑完，供日报/收工小结/周报用）
+
+        2026-09-23 加：定时任务要报"今天/这周做了什么"，原先得遍历客户逐条查跟进（N+1）。
+        统计口径：带看按 viewing_time 算，成交按主键创建与交房日期算。
+        """
+        from datetime import datetime, timedelta
+        since = datetime.now() - timedelta(days=days)
+        with self.get_session() as s:
+            return {
+                "new_customers": s.query(Customer).filter(Customer.created_at >= since).count(),
+                "new_properties": s.query(Property).filter(Property.created_at >= since).count(),
+                "followups": s.query(Followup).filter(Followup.created_at >= since).count(),
+                "viewings": s.query(Viewing).filter(Viewing.viewing_time >= since).count(),
+                "viewings_done": s.query(Viewing).filter(
+                    Viewing.viewing_time >= since, Viewing.status == 'done').count(),
+                "viewings_interested": s.query(Viewing).filter(
+                    Viewing.viewing_time >= since, Viewing.result == 'interested').count(),
+                "deals_created": s.query(Deal).filter(Deal.created_at >= since).count(),
+                "deals_updated": s.query(Deal).filter(Deal.updated_at >= since).count(),
+                "deals_finalized": s.query(Deal).filter(Deal.finalize_date >= since).count(),
+            }
+
+    def viewings_between(self, start, end) -> list:
+        """时间段内的带看（按带看时间过滤，供"今天的带看""明天的安排"用）"""
+        with self.get_session() as s:
+            rows = (s.query(Viewing)
+                    .filter(Viewing.viewing_time >= start, Viewing.viewing_time < end)
+                    .order_by(Viewing.viewing_time.asc()).all())
+            return [v.to_dict() for v in rows]
+
     def count_available_properties(self) -> int:
         """在售房源总数（SQL count，不受任何 limit 影响）"""
         with self.get_session() as s:
@@ -2188,7 +2234,7 @@ class RealEstateDB:
                 .filter(Followup.customer_id == customer_id)
                 .order_by(Followup.created_at.desc()).limit(limit).all()]
     
-    def get_overdue(self):
+    def get_overdue(self, before=None):
         """逾期跟进：按客户取最新一条跟进，其 next_date 已过期才算逾期
 
         2026-08-12 修复：原逻辑返回所有 next_date 过期的跟进记录，导致
@@ -2196,6 +2242,10 @@ class RealEstateDB:
         逾期列表——经纪人记了新跟进也不消解，cron 每 30 分钟重复提醒。
         现改为：每个客户只看最新一条跟进（created_at 最大），只有它也过期
         才报逾期；客户有过更新的跟进记录说明已处理，旧提醒不再报。
+
+        before: 截止时间，默认当前时刻。传"明天零点"即"今天要跟进或已逾期"
+        （早报 09:00 要提醒今天到期的客户，而那些 next_date 还没到点，
+        只用 now 当截止会漏掉——2026-09-23 加）。
         """
         with self.get_session() as s:
             # 全量取出按创建时间升序，Python 聚合每组取最新（避免 PG 专有函数）
@@ -2205,7 +2255,7 @@ class RealEstateDB:
                 if f.customer_id is not None:
                     latest_by_customer[f.customer_id] = f
             overdue = []
-            now = datetime.now()
+            now = before or datetime.now()
             for f in latest_by_customer.values():
                 if f.next_date is not None and f.next_date < now:
                     overdue.append(f)

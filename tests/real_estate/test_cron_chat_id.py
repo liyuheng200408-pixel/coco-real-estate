@@ -23,7 +23,10 @@ CHAT_ID = "oc_1f2e3d4c5b6a79887766554433221100"
 OTHER_CHAT_ID = "oc_00112233445566778899aabbccddeeff"
 EXPLICIT_CHAT_ID = "oc_ffeeddccbbaa99887766554433221100"
 
-EXPECTED_JOBS = {"coco_daily_report", "coco_midday_check", "coco_overdue_check"}
+# 2026-09-23 重设计后的任务表（5 条；午间检查与每 30 分钟检查已取消）
+EXPECTED_JOBS = {"coco_daily_report", "coco_overdue_sentinel", "coco_opportunity",
+                 "coco_day_end", "coco_weekly_report"}
+PURE_SCRIPT_JOBS = {"coco_overdue_sentinel"}  # 纯脚本任务不叫模型、不带工具集
 
 
 def _store_guard() -> None:
@@ -76,7 +79,10 @@ def test_gateway_turn_enables_cron_to_current_chat():
     assert set(jobs) == EXPECTED_JOBS, jobs
     for name, job in jobs.items():
         assert job.get("deliver") == f"feishu:{CHAT_ID}", f"{name}: {job}"
-        assert job.get("enabled_toolsets") == ["real_estate"], f"{name}: {job}"
+        if name in PURE_SCRIPT_JOBS:
+            assert job.get("no_agent") is True, f"{name}: {job}"
+        else:
+            assert job.get("enabled_toolsets") == ["real_estate"], f"{name}: {job}"
 
 
 def test_disable_cron_removes_the_jobs_it_enabled():

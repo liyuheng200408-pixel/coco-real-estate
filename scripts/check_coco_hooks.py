@@ -398,17 +398,19 @@ CONTENT_CHECKS = [
     ),
     (
         "28",
-        "早报定时任务的汇报口径",
+        "定时任务表与同步（2026-09-23 重设计）",
         "agent/coco_cron.py",
-        [r"S/A/B/C 四级都要提", r"不要重复上面已列出的数字", r"不要添加引导清单",
-         r"_refresh_coco_job_prompts", r"update_job\("],
-        "早报是每天 09:00 自动发的，它的提示词决定了模型报什么：原来只写\"S/A级客户状态\"，"
-        "模型就照这个口径写、把 B 级漏了。\n"
-        "处理：恢复成\"各等级客户分布（S/A/B/C 四级都要提，不许只提 S/A）\"，"
-        "并保留「数据要点只写解读」与「不要添加引导清单」两句。\n"
-        "另外必须有 _refresh_coco_job_prompts（用它 update_job 把已注册任务的提示词对齐代码）："
-        "任务提示词是注册时写进 cron/jobs.json 的，没有这一步，改了文案早报仍按旧口径报"
-        "（单测 tests/real_estate/test_cron_prompt_sync.py 会守）。",
+        [r"coco_overdue_sentinel", r"coco_opportunity", r"coco_day_end", r"coco_weekly_report",
+         r"0 10,17 \* \* \*", r"no_agent", r"_sync_coco_jobs", r"_install_cron_scripts",
+         r"_DEPRECATED_JOB_NAMES"],
+        "定时任务是 Coco 主动帮经纪人的唯一通道，整张表被换掉就等于把「提醒体系」打回原形。\n"
+        "现在的定义（老板 2026-09-23 拍板）：09:00 早报、10:00/17:00 逾期哨兵（纯脚本不烧 token）、"
+        "12:30 机会提醒、20:30 收工小结、周一 08:30 周报；午间检查与每 30 分钟检查已取消。\n"
+        "处理：恢复这 5 条与三件配套机制——\n"
+        "① _install_cron_scripts（cron 脚本只能放 HERMES_HOME/scripts/，这里生成转发入口）；\n"
+        "② _sync_coco_jobs（提示词/时间/脚本对齐已注册任务，改代码才真生效）；\n"
+        "③ _DEPRECATED_JOB_NAMES（清掉老版本残留的午间/30 分钟任务，避免新旧一起发）。\n"
+        "单测：tests/real_estate/test_cron_prompt_sync.py 与 test_cron_scripts.py。",
     ),
 ]
 
@@ -440,6 +442,7 @@ PATH_CHECKS = [
     ("A24", "测试号脚本", "scripts/tag_test_version.sh", "file", 1, "测试号脚本丢失（测试版无法编号，容易分不清测的是哪一版）"),
     ("A25", "卸载脚本", "scripts/uninstall.sh", "file", 1, "卸载脚本丢失（正式版实例没有卸载通道，只能重装系统）"),
     ("A26", "PATH 兜底脚本", "scripts/path_guard.sh", "file", 1, "PATH 兜底脚本丢失（coco 入口装到 ~/.local/bin 时用户会敲不到命令）"),
+    ("A27", "定时任务脚本", "scripts/coco_cron_*.py", "glob", 5, "定时任务脚本丢失（逾期哨兵/机会提醒/早报/收工小结/周报的数据收集都在这里）"),
                     ]
 
 

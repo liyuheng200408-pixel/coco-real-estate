@@ -50,11 +50,39 @@ class TestReportWordingGuards:
         assert "日报口径（2026-09-23 加）" in MANUAL
         assert "S/A/B/C 四级都要提" in MANUAL
 
-    def test_daily_cron_asks_for_all_tiers(self):
-        """盯实际注册的早报提示词（不是整份文件——文件里会提到旧文案作为教训）"""
-        assert "S/A/B/C 四级都要提" in DAILY_PROMPT
-        assert "不要添加引导清单" in DAILY_PROMPT
+    def test_daily_cron_prompt_contract(self):
+        """盯实际注册的早报提示词（2026-09-23 重设计：数据由脚本给，模型只成文）
+
+        早报不再自己调工具、不再做数据汇总播报；板块缺了就照实写"无"、不许编造。
+        等级四级全列的规矩仍在【日报口径】里，管的是"要报数字"的场景（见上个用例）。
+        """
+        assert "Script Output" in DAILY_PROMPT
+        assert "老板早，今天的情况：" in DAILY_PROMPT
+        assert "生日板块只列数据里给出的客户" in DAILY_PROMPT
+        assert "不许添加" in DAILY_PROMPT
         assert "S/A级客户状态" not in DAILY_PROMPT, "旧口径（只点 S/A）是漏 B 级的根源"
+
+
+class TestCronTableGuards:
+    """定时任务表（2026-09-23 重设计）：5 条、时间、生日硬规则、只提醒不执行"""
+
+    def test_prompt_lists_the_five_jobs(self):
+        for token in ("09:00 上班早报", "10:00、17:00 逾期哨兵", "12:30 机会提醒",
+                      "20:30 收工小结", "周一 08:30 周报"):
+            assert token in PROMPT, token
+        assert "午间" not in PROMPT or "取消" in PROMPT
+
+    def test_prompt_says_reminder_only(self):
+        assert "只是**提醒**" in PROMPT
+        assert "不替经纪人跟进" in PROMPT
+
+    def test_birthday_only_when_recorded(self):
+        assert "已录入" in PROMPT
+        assert "不许按年龄、星座、购房时间推测" in PROMPT
+
+    def test_manual_matches_the_table(self):
+        assert "定时任务（2026-09-23 重设计）" in MANUAL
+        assert "10:00 与 17:00 逾期哨兵" in MANUAL
 
 
 class TestGuidanceMenuGuards:
