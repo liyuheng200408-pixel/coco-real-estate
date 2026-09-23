@@ -398,19 +398,45 @@ def update_property(
     return json.dumps(response, ensure_ascii=False)
 
 
+_SEARCH_LIMIT_DEFAULT = 20
+_SEARCH_LIMIT_MAX = 200
+_SEARCH_STATUS_VALUES = ("available", "sold", "rented", "all")
+_SEARCH_SORT_VALUES = ("latest", "price_asc", "price_desc")
+_SEARCH_SORT_LABEL = {"latest": "最新录入优先", "price_asc": "总价从低到高", "price_desc": "总价从高到低"}
+
+
 def search_property(
     min_price: int = None, max_price: int = None,
     min_area: float = None, max_area: float = None,
     rooms: int = None, district: str = None,
     renovation: str = None, property_type: str = None,
-    title: str = None, limit: int = 20, task_id: str = None,
+    title: str = None, status: str = None, sort: str = None,
+    limit: int = _SEARCH_LIMIT_DEFAULT, task_id: str = None,
 ) -> str:
-    """搜索房源（支持按标题关键词、价格、面积、户型、区域、类型筛选）
+    """搜索房源（支持按标题关键词、价格、面积、户型、区域、类型、状态筛选）
     
     title: 标题关键词（模糊匹配，如"华庭"可匹配滨海华庭）
     property_type: new(一手房) / second_hand(二手房) / rental(租房)
+    status: available(在售，默认) / sold(已售) / rented(已租) / all(全部)
+    sort: latest(最新录入优先，默认) / price_asc(总价低到高) / price_desc(总价高到低)
+    limit: 本次返回条数（默认 20，最多 200；传 0/负数按默认 20 处理，不会放大返回量）
     """
     db = _get_db()
+    if status is not None and status not in _SEARCH_STATUS_VALUES:
+        return json.dumps({"success": False, "error": (
+            f"状态「{status}」不认识：只能是 available（在售）/ sold（已售）/ rented（已租）/ all（全部）")},
+            ensure_ascii=False)
+    if sort is not None and sort not in _SEARCH_SORT_VALUES:
+        return json.dumps({"success": False, "error": (
+            f"排序「{sort}」不认识：只能是 latest（最新录入优先）/ price_asc（总价低到高）/ price_desc（总价高到低）")},
+            ensure_ascii=False)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _SEARCH_LIMIT_DEFAULT
+    if limit <= 0:
+        limit = _SEARCH_LIMIT_DEFAULT
+    limit = min(limit, _SEARCH_LIMIT_MAX)
     filters = {}
     if min_price: filters['min_price'] = min_price
     if max_price: filters['max_price'] = max_price
@@ -421,9 +447,18 @@ def search_property(
     if renovation: filters['renovation'] = renovation
     if property_type: filters['property_type'] = property_type
     if title: filters['title'] = title
-    if limit: filters['limit'] = limit
-    result = db.search_properties(**filters)
-    return json.dumps({"success": True, "properties": result, "count": len(result)}, ensure_ascii=False)
+    filters['limit'] = limit
+    filters['status'] = status or 'available'
+    filters['sort'] = sort or 'latest'
+    filters['with_total'] = True
+    result, total = db.search_properties(**filters)
+    response = {"success": True, "properties": result, "count": len(result), "total": total,
+                "truncated": bool(total and total > len(result))}
+    if response["truncated"]:
+        response["message"] = (f"共匹配 {total} 套房源，本次返回 {len(result)} 套"
+                              f"（{_SEARCH_SORT_LABEL[filters['sort']]}）。要看得更全就缩小条件，"
+                              f"或把 limit 调大（最多 200）")
+    return json.dumps(response, ensure_ascii=False)
 
 
 _TYPE_LABELS = {"new": "一手房", "second_hand": "二手房", "rental": "租房"}
@@ -763,7 +798,7 @@ TOOLS = [
             "fill_missing_only": {"type": "boolean", "description": "True=只补空缺：库里已有值的字段一律不动（合并重复房源时用这一档）"}
         }, "required": ["property_id"],
     }, "handler": lambda args, **kw: update_property(**args)},
-    {"name": "search_property", "description": "搜索房源（支持按标题关键词/价格/面积/户型/区域/类型筛选）", "parameters": {
+    {"name": "search_property", "description": "搜索房源（可按标题关键词/价格/面积/户型/区域/类型/状态筛选，默认只看在售、按最新录入优先）", "parameters": {
         "type": "object", "properties": {
             "title": {"type": "string", "description": "标题关键词（模糊匹配，如华庭可匹配滨海华庭）"},
             "min_price": {"type": "integer", "description": "最低价（元）"}, "max_price": {"type": "integer", "description": "最高价（元）"},
@@ -771,7 +806,9 @@ TOOLS = [
             "rooms": {"type": "integer"}, "district": {"type": "string"},
             "renovation": {"type": "string"},
             "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型筛选：new(一手房)/second_hand(二手房)/rental(租房)"},
-            "limit": {"type": "integer", "description": "最多返回多少条（默认 20；要全量统计时显式给大值）"},
+            "status": {"type": "string", "enum": ["available", "sold", "rented", "all"], "description": "房源状态：available(在售，默认)/sold(已售)/rented(已租)/all(全部)"},
+            "sort": {"type": "string", "enum": ["latest", "price_asc", "price_desc"], "description": "排序：latest(最新录入优先，默认)/price_asc(总价低到高)/price_desc(总价高到低)"},
+            "limit": {"type": "integer", "description": "本次返回条数（默认 20，最多 200）"},
         },
     }, "handler": lambda args, **kw: search_property(**args)},
     {"name": "match_property", "description": "根据客户需求智能匹配房源", "parameters": {
@@ -840,7 +877,7 @@ registry.register(
 registry.register(
     name="search_property",
     toolset="real_estate",
-    schema={"name": "search_property", "description": "搜索房源", "parameters": TOOLS[2]["parameters"]},
+    schema={"name": "search_property", "description": "搜索房源（可按标题关键词/价格/面积/户型/区域/类型/状态筛选，默认只看在售、按最新录入优先）。返回 total=匹配总数、count=本次返回条数、truncated，被截断时给 message", "parameters": TOOLS[2]["parameters"]},
     handler=TOOLS[2]["handler"],
 )
 registry.register(

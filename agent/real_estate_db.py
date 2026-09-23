@@ -1722,8 +1722,24 @@ class RealEstateDB:
             return results[:top_n]
 
     def search_properties(self, **filters):
+        """按条件搜房源。默认只看在售、不排序（历史行为不变）。
+
+        2026-09-24 加三个可选参数（不传时行为与以前完全一致）：
+          status: available / sold / rented / all（不传 = 只看在售）
+          sort: latest（按最新录入倒序）/ price_asc / price_desc（不传 = 不排序）
+          with_total: True 时返回 (rows, 匹配总数)，供上层区分"本次返回条数"与"匹配总数"
+        """
         with self.get_session() as s:
-            q = s.query(Property).filter(Property.status == 'available')
+            status = filters.pop('status', None)
+            sort = filters.pop('sort', None)
+            with_total = filters.pop('with_total', False)
+            q = s.query(Property)
+            if status == 'all':
+                pass
+            elif status:
+                q = q.filter(Property.status == status)
+            else:
+                q = q.filter(Property.status == 'available')
             limit = filters.pop('limit', 50)
             if 'min_price' in filters: q = q.filter(Property.price >= filters['min_price'])
             if 'max_price' in filters: q = q.filter(Property.price <= filters['max_price'])
@@ -1734,7 +1750,15 @@ class RealEstateDB:
             if 'renovation' in filters: q = q.filter(Property.renovation == filters['renovation'])
             if 'property_type' in filters: q = q.filter(Property.property_type == filters['property_type'])
             if 'title' in filters: q = q.filter(Property.title.contains(filters['title']))
-            return [p.to_dict() for p in q.limit(limit).all()]
+            if sort == 'latest':
+                q = q.order_by(Property.id.desc())
+            elif sort == 'price_asc':
+                q = q.order_by(Property.price.asc())
+            elif sort == 'price_desc':
+                q = q.order_by(Property.price.desc())
+            total = q.count() if with_total else None
+            rows = [p.to_dict() for p in q.limit(limit).all()]
+            return (rows, total) if with_total else rows
     
     def get_property(self, property_id):
         """按 id 取单套房源（含现算单价），不存在返回 None"""
