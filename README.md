@@ -217,6 +217,18 @@ coco status
 coco logs
 ```
 
+### 终端输出
+
+**关闭终端输出：**
+```bash
+coco config set display.platforms.feishu.tool_progress off
+```
+
+**开启终端输出：**
+```bash
+coco config set display.platforms.feishu.tool_progress new
+```
+
 ### 数据库备份
 
 安装时已自动设置每日凌晨 2 点备份，备份文件在 `~/backups/real_estate/`，保留 30 天。加密密钥同时自动备份到 `~/backups/real_estate/enc_key.txt`。
