@@ -15,7 +15,7 @@
 > **正确的做法**：读本文件下面每一处的「改什么 / 为什么 / 上游变了怎么办」，
 > 在新底座上重新实现，再用自检脚本验证结果。
 
-## 改动清单（共 9 处官方文件 + 2 个自有文档）
+## 改动清单（共 10 处官方文件 + 2 个自有文档）
 
 | 编号 | 官方文件 | 改动内容 |
 |---|---|---|
@@ -28,6 +28,7 @@
 | 07 | `gateway/run_turn.py`（官方 v0.21 起从 `gateway/run.py` 拆到这里） | 首次对话开场白换成 Coco 自我介绍；关闭官方 profile-build 引导 |
 | 08 | `scripts/sandbox/pick-release-tags.sh` | 标签过滤正则放宽：同时认「日期式 `vYYYY.M.D`」和「语义化 `vX.Y.Z`（含 `-N` 后缀）」 |
 | 09 | `plugins/platforms/feishu/adapter.py` | 一键配对的链接参数改成 `from=coco&tp=coco`（官方是 `from=hermes&tp=hermes`，飞书配对页会显示 Hermes 字样） |
+| 10 | `gateway/run_turn.py` + `locales/*.yaml`（17 个） | 「未设主页频道」提示改走 i18n 键 `coco.home_channel_missing`，文案换成 Coco 品牌；17 个语言包由 `scripts/coco_locales_patch.py` 追加（官方有键集一致性测试，必须全加） |
 
 另有 2 个**自有文档**（不属于官方代码，同步时直接保留即可）：
 `README.md`、`README.zh-CN.md`。
@@ -103,6 +104,17 @@
   带出官方品牌文案（页面上出现「Hermes Agent 正在配置中…」）。
 - **上游变了怎么办**：参数追加写在 `_begin_registration()` 的 `qr_url +=` 一行，
   官方若改了配对流程（例如换成别的注册接口），在新流程里同样只追加 coco 品牌参数。
+
+### 10 gateway/run_turn.py + locales/*.yaml —— 「未设主页频道」提示的品牌与语言
+- **改什么**：官方把这条提示的英文原文写死在 `gateway/run_turn.py`（`📬 No home channel is set for … A home channel is where Hermes delivers …`）。
+  改成走 i18n：`t("coco.home_channel_missing", platform=…, sethome_cmd=…)`；17 个语言包各追加一个 `coco.home_channel_missing` 键
+  （中文/繁体写中文，其它语言先用英文），由 `scripts/coco_locales_patch.py` 追加。
+- **为什么**：原文里的品牌名是 Hermes，经纪人侧会看到（飞书客户端把英文提示自动翻译成中文时照搬了这个词）。
+  顺带把「系统/频道类提示一律称 Coco」写进 `agent/real_estate_prompt.py` 的【品牌口径】，防止模型转述时又抄出 Hermes。
+- **上游变了怎么办**：官方若把这条提示也 i18n 了（换成它自己的键），按官方新键重挂；
+  只要它是硬编码英文，就用 `scripts/coco_locales_patch.py` + 这一行改写维持 Coco 口径。
+  **注意**：`tests/agent/test_i18n.py` 强制「非英文语言包的键集必须与 en.yaml 完全一致」，
+  所以 17 个语言包缺一个都会测试失败 —— 同步后务必跑一次该脚本。
 
 ## 使用方法（同步时）
 

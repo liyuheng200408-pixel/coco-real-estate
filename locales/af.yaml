@@ -460,3 +460,7 @@ Future messages in this room will use that transcript until `/reset` or another 
     session_db_unavailable_prefix: "Sessie-databasis is nie beskikbaar"
     session_not_found:           "Sessie nie in databasis gevind nie."
     warn_passthrough:            "⚠️ {error}"
+
+# Coco 自有文案（上游同步后由 scripts/coco_locales_patch.py 重新追加）
+coco:
+  home_channel_missing: "📬 No home channel is set for {platform}. A home channel is where Coco delivers cron job results and cross-platform messages.\n\nType {sethome_cmd} to make this chat your home channel, or ignore to skip."

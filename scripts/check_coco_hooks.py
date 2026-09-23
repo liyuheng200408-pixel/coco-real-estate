@@ -328,6 +328,24 @@ CONTENT_CHECKS = [
         "处理：把 _begin_registration() 里追加的参数改回 from=coco&tp=coco"
         "（参考 patches/09-feishu-registration-brand.patch）。",
     ),
+    (
+        "21",
+        "主页频道提示文案（走语言包）",
+        "gateway/run_turn.py",
+        [r't\("coco\.home_channel_missing"', r"!Hermes delivers"],
+        "官方把「未设主页频道」提示的英文原文写死在这个文件里（含品牌名 Hermes），被飞书翻译后仍带 Hermes。\n"
+        "处理：改成 t(\"coco.home_channel_missing\", …)，并跑 scripts/coco_locales_patch.py 补齐 17 个语言包"
+        "（参考 patches/10-home-channel-notice-i18n.patch）。",
+    ),
+    (
+        "22",
+        "语言包里的 Coco 文案",
+        "locales/zh.yaml",
+        [r"coco:\s*\n\s*home_channel_missing"],
+        "语言包被上游整批替换后，主页频道提示会退化成把键名 coco.home_channel_missing 露给用户。\n"
+        "处理：跑 scripts/coco_locales_patch.py 补齐 17 个语言包"
+        "（键集一致性由 tests/agent/test_i18n.py 与 tests/real_estate/test_coco_branding.py 守）。",
+    ),
 ]
 
 # 文件/目录存在性检查：编号 / 名称 / 相对路径 / 类型(file|dir|glob) / 最少数量 / 失败提示

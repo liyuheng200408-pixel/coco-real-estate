@@ -460,3 +460,7 @@ Future messages in this room will use that transcript until `/reset` or another 
     session_db_unavailable_prefix: "会话数据库不可用"
     session_not_found:           "数据库中未找到该会话。"
     warn_passthrough:            "⚠️ {error}"
+
+# Coco 自有文案（上游同步后由 scripts/coco_locales_patch.py 重新追加）
+coco:
+  home_channel_missing: "📬 还没有给 {platform} 设置主页频道。主页频道是 Coco 定时任务结果与跨平台消息的送达通道。\n\n输入 {sethome_cmd} 可以把当前会话设为主页频道，或忽略本条消息跳过设置。"
