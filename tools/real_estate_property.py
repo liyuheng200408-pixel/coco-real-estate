@@ -306,22 +306,50 @@ def update_property(
     floor: str = None, orientation: str = None, address: str = None,
     year_built: int = None, has_elevator: int = None, parking: int = None,
     tags: str = None, fill_missing_only: bool = False,
+    property_type: str = None, tenant_requirements: str = None,
     owner_name: str = None, owner_phone: str = None, owner_wechat: str = None,
     task_id: str = None,
 ) -> str:
     """更新房源信息（可同时补充业主联系方式：owner_name/owner_phone/owner_wechat，自动登记房东并关联）
 
     也支持补录/修改：户型(rooms/halls/bathrooms)、楼层(floor)、朝向(orientation)、
-    详细地址(address)、建造年份(year_built)、电梯(has_elevator)、车位(parking)、标签(tags)。
+    详细地址(address)、建造年份(year_built)、电梯(has_elevator)、车位(parking)、标签(tags)、
+    房源类型(property_type，录错时可纠正)、租客要求(tenant_requirements)。
+    楼层没传时，只在**库里还没有楼层**的情况下按房号补一个（不会覆盖已有值）。
     fill_missing_only=True 时**只补空缺**：库里已有值的字段一律不动（合并重复房源时用这一档）。
     """
     db = _get_db()
+    # 入参归一与校验（2026-09-24 加，与 add_property 同一套）：经纪人原话（"185万"）先换算成元/㎡，
+    # 认不出的、非正面积的、非法状态/类型都挡在写库之前 —— 避免把库里已有数据改成坏值。
+    if price is not None:
+        _price = _norm_money(price)
+        if _price is None:
+            return json.dumps({"success": False, "error": (
+                f"价格没能识别：收到的是「{price}」。请按元给数字（如 185万 记作 1850000；出租月租 2200 就写 2200）")},
+                ensure_ascii=False)
+        price = _price
+    if area is not None:
+        _area = _norm_area_value(area)
+        if _area is None or _area <= 0:
+            return json.dumps({"success": False, "error": (
+                f"面积没能识别或不是正数：收到的是「{area}」。请给平方米数字（如 128.5 或 128平）")},
+                ensure_ascii=False)
+        area = _area
+    if status is not None and status not in ("available", "sold", "rented"):
+        return json.dumps({"success": False, "error": (
+            f"状态「{status}」不认识：只能是 available（在售）/ sold（已售）/ rented（已租）")},
+            ensure_ascii=False)
+    if property_type is not None and property_type not in ("new", "second_hand", "rental"):
+        return json.dumps({"success": False, "error": (
+            f"房源类型「{property_type}」不认识：只能是 new（一手房）/ second_hand（二手房）/ rental（出租）")},
+            ensure_ascii=False)
     inferred = {}
     if floor is None:
         _old = db.get_available_property(property_id) or db.get_property(property_id) or {}
-        guess, why = infer_floor(title or _old.get("title"), address or _old.get("address"))
-        if guess:
-            floor, inferred["floor"] = guess, f"{guess}（按{why}推断，不对请直接纠正）"
+        if _blank(_old.get("floor")):
+            guess, why = infer_floor(title or _old.get("title"), address or _old.get("address"))
+            if guess:
+                floor, inferred["floor"] = guess, f"{guess}（按{why}推断，不对请直接纠正）"
     kwargs = {k: v for k, v in {
         'title': title, 'price': price, 'area': area, 'status': status,
         'community': community, 'district': district, 'renovation': renovation,
@@ -329,6 +357,7 @@ def update_property(
         'floor': _norm_floor(floor), 'orientation': _norm_orientation(orientation),
         'address': address, 'year_built': year_built,
         'has_elevator': has_elevator, 'parking': parking, 'tags': tags,
+        'property_type': property_type, 'tenant_requirements': tenant_requirements,
     }.items() if v is not None}
     kept_existing = {}
     if fill_missing_only and kwargs:
@@ -729,6 +758,8 @@ TOOLS = [
             "owner_name": {"type": "string", "description": "业主姓名。填了即自动登记房东并关联此房源"},
             "owner_phone": {"type": "string", "description": "业主手机号，加密存储"},
             "owner_wechat": {"type": "string", "description": "业主微信号，加密存储"},
+            "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型（录错时可纠正）：new(一手房)/second_hand(二手房)/rental(出租)"},
+            "tenant_requirements": {"type": "string", "description": "出租房源的租客要求（如不吸烟/办居住证/学生优先），可修改"},
             "fill_missing_only": {"type": "boolean", "description": "True=只补空缺：库里已有值的字段一律不动（合并重复房源时用这一档）"}
         }, "required": ["property_id"],
     }, "handler": lambda args, **kw: update_property(**args)},
@@ -803,7 +834,7 @@ registry.register(
 registry.register(
     name="update_property",
     toolset="real_estate",
-    schema={"name": "update_property", "description": "更新房源信息", "parameters": TOOLS[1]["parameters"]},
+    schema={"name": "update_property", "description": "更新/纠正房源信息：价格、面积、状态（在售/已售/已租）、户型、楼层、朝向、标签、小区、区域、类型（一手/二手/出租，录错可纠正）、租客要求、业主联系方式（自动登记房东并关联）；fill_missing_only=true 时只补空缺不覆盖", "parameters": TOOLS[1]["parameters"]},
     handler=TOOLS[1]["handler"],
 )
 registry.register(
