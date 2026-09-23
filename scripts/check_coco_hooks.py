@@ -145,6 +145,7 @@ CONTENT_CHECKS = [
             r'"compression\.protect_last_n":\s*40',
             r'"compression\.hygiene_hard_message_limit":\s*5000',
             r'"display\.language":\s*"zh"',
+         r'"cron\.catch_up_missed":\s*False',
             r'"display\.language": \("en",\)',
         ],
         "对齐脚本缺失或标准值被改，安装/更新就不会再校正运行时配置，\n"
@@ -411,6 +412,27 @@ CONTENT_CHECKS = [
         "② _sync_coco_jobs（提示词/时间/脚本对齐已注册任务，改代码才真生效）；\n"
         "③ _DEPRECATED_JOB_NAMES（清掉老版本残留的午间/30 分钟任务，避免新旧一起发）。\n"
         "单测：tests/real_estate/test_cron_prompt_sync.py 与 test_cron_scripts.py。",
+    ),
+    (
+        "29",
+        "假数据工具已删除（转化漏斗/市场周报）",
+        "tools/real_estate_analytics.py",
+        [r"!conversion_funnel", r"!weekly_market_report"],
+        "这两个工具的输出是假的：conversion_funnel 写的是「假设30%带看/10%意向/3%成交」"
+        "（代码注释自认模拟），weekly_market_report 的「本周重点」是写死的三句空话。\n"
+        "老板 2026-09-23 决定：没用就删掉，别让经纪人看到编出来的数字。\n"
+        "处理：从 tools/real_estate_analytics.py 删掉这两个函数与其注册块，同时清掉"
+        "toolsets.py 清单、scripts/smoke_test_real_estate.py 静态清单与用例、"
+        "agent/real_estate_prompt.py 的工具清单（否则工具数三处不一致）。\n"
+        "周报的真实统计在 scripts/coco_cron_weekly.py（用 db 的真实计数）。",
+    ),
+    (
+        "30",
+        "假数据工具不在工具集清单里",
+        "toolsets.py",
+        [r'!"conversion_funnel"', r'!"weekly_market_report"'],
+        "toolsets.py 是「模型能看见哪些工具」的清单：注册表里删了、清单里还留着，"
+        "会出现清单数与冒烟静态清单数不一致（tests/real_estate/test_tool_visibility.py 会红）。",
     ),
 ]
 
