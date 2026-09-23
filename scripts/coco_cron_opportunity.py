@@ -69,12 +69,16 @@ def collect_opportunities(db, state: dict, now: datetime = None) -> tuple:
             "matches": matches[:3],
         })
 
+    drop_ids = {i["property_id"] for i in fresh if i["kind"] == "drop"}
     try:
         new_props = db.recent_properties(days=_LOOKBACK_DAYS, limit=50)
     except Exception:
         new_props = []
     for prop in new_props:
         pid = prop.get("id")
+        # 刚降价的房源已经按"降价捞回"报过了（本轮或近 7 天内），别换个名头再报一遍
+        if pid in drop_ids or _seen_recently({"seen": seen}, f"prop:{pid}", now):
+            continue
         try:
             raw = db.match_customers_for_property(pid, top_n=3)
         except Exception:
@@ -99,7 +103,9 @@ def collect_opportunities(db, state: dict, now: datetime = None) -> tuple:
         })
 
     for item in fresh:
-        for key in [item["key"]] + list(item.get("extra_keys") or []):
+        keys = [item["key"]] + list(item.get("extra_keys") or [])
+        keys.append(f"prop:{item['property_id']}")  # 同一套房 7 天内不许换渠道再推
+        for key in keys:
             seen[key] = now.isoformat()
     return fresh, {"seen": seen}
 

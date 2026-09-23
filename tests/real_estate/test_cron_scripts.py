@@ -182,6 +182,16 @@ class TestOpportunity:
         assert new and new[0]["matches"][0]["customer_name"] == "张敏"
         assert "新上房源" in m.format_data(fresh)
 
+    def test_fresh_dropped_property_is_not_reported_twice(self, mods, db):
+        """刚降价的房源已经在"降价捞回"里报过，不该在同一条消息里再当"新上房源"报一遍"""
+        m = mods["coco_cron_opportunity"]
+        prop = self._seed_drop(db)
+        make_customer(db, name="李伟", tier="A", budget_min=1_500_000, budget_max=2_000_000)
+        fresh, _ = m.collect_opportunities(db, {}, datetime.now())
+        assert [i["kind"] for i in fresh] == ["drop"]
+        text = m.format_data(fresh)
+        assert text.count(f"编号{prop['id']}") == 1
+
 
 class TestDailyData:
     """早报数据：四块齐全，生日只认已录入的客户"""
