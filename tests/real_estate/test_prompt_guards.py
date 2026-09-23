@@ -27,3 +27,46 @@ class TestNoCapabilityGuessingGuard:
         """同批加的楼层/朝向规则不能被顺手删掉"""
         assert "楼层/朝向等字段要单独传参" in PROMPT
         assert "楼层与朝向等字段必须单独传参" in MANUAL
+
+
+CRON = (REPO_ROOT / "agent" / "coco_cron.py").read_text(encoding="utf-8")
+
+
+class TestReportWordingGuards:
+    """日报口径（2026-09-23 老板要求）：等级四级全列、数据要点只留解读
+
+    真实教训：早报写"暂无 S 级 / A 级高意向客户"，把 B 级漏了；根源是早报的
+    定时任务提示词只点了 S/A，且"数据要点"重复了上面已经列过的数字。
+    """
+
+    def test_prompt_requires_all_four_tiers(self):
+        assert "【日报口径】" in PROMPT
+        assert "S / A / B / C 四级都要提" in PROMPT
+        assert "不要重复上面已经单列过的数字" in PROMPT
+
+    def test_manual_has_report_rule(self):
+        assert "日报口径（2026-09-23 加）" in MANUAL
+        assert "S/A/B/C 四级都要提" in MANUAL
+
+    def test_daily_cron_asks_for_all_tiers(self):
+        assert "S/A/B/C 四级都要提" in CRON
+        assert "不要添加引导清单" in CRON
+        assert "S/A级客户状态" not in CRON, "旧口径（只点 S/A）是漏 B 级的根源"
+
+
+class TestGuidanceMenuGuards:
+    """引导菜单话术（2026-09-23 老板选定版本 2）：只列 Coco 真能做的事"""
+
+    def test_prompt_has_fixed_menu(self):
+        assert "【引导菜单标准话术】" in PROMPT
+        assert "我帮你录：客户、房源、跟进、带看结果、成交单" in PROMPT
+        assert "我帮你配：客户 ↔ 房源匹配" in PROMPT
+        assert "我帮你推：成交节点提醒（定金→签约→贷款→过户→交房）" in PROMPT
+        assert "我帮你出：日报 / 周报 / 业绩看板" in PROMPT
+
+    def test_prompt_forbids_claiming_viewing_and_deal(self):
+        assert "不能替经纪人带看或成交" in PROMPT
+
+    def test_manual_has_menu_script(self):
+        assert "引导菜单话术（2026-09-23 加）" in MANUAL
+        assert "我帮你**录**（客户/房源/跟进/带看结果/成交单）" in MANUAL

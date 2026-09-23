@@ -17,7 +17,7 @@ _CRON_JOBS = ()
 # 任务定义清单（供手动开启时参考，与 _CRON_JOBS 内容一致）
 _AVAILABLE_JOBS = (
     ("coco_daily_report", "0 9 * * *", "coco_daily_report",
-     "你是Coco房产助理。请直接调用 daily_report 工具生成每日早报（不要使用 tool_call，直接调用工具），然后用简洁清单体向经纪人汇报：今日待跟进客户、S/A级客户状态、逾期预警。不要添加额外内容。"),
+     "你是Coco房产助理。请直接调用 daily_report 工具生成每日早报（不要使用 tool_call，直接调用工具），然后用简洁清单体向经纪人汇报：今日待跟进客户、各等级客户分布（S/A/B/C 四级都要提，不许只提 S/A）、逾期预警。数据要点这类小结只写解读与建议，不要重复上面已列出的数字。不要添加引导清单（\"需要我做什么\"那套）或其它额外内容。"),
     ("coco_midday_check", "0 13 * * *", "coco_midday_check",
      "你是Coco房产助理。请直接调用 midday_check 工具做午间检查（不要使用 tool_call，直接调用工具），汇报：逾期未跟进客户、今日剩余任务。没有异常就简短回复'今日无异常'。"),
     ("coco_overdue_check", "*/30 * * * *", "coco_overdue_check",
