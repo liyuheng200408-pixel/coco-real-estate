@@ -928,7 +928,7 @@ registry.register(
 registry.register(
     name="property_stats",
     toolset="real_estate",
-    schema={"name": "property_stats", "description": "获取房源统计数据", "parameters": TOOLS[4]["parameters"]},
+    schema={"name": "property_stats", "description": "房源与客户统计概览：客户（在跟数/已关闭数/各等级分布）、房源（总数、在售、已售、已租，以及在售按类型分布 new=一手房/second_hand=二手房/rental=出租）、逾期跟进数。经纪人问\"我有多少套房\"\"多少套在出租\"\"卖了几套\"\"客户多少个\"时用本工具", "parameters": TOOLS[4]["parameters"]},
     handler=TOOLS[4]["handler"],
 )
 registry.register(

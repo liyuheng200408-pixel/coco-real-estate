@@ -2670,12 +2670,27 @@ class RealEstateDB:
             tiers = {t: s.query(Customer).filter(
                 Customer.tier == t, Customer.status != 'closed').count() for t in ['S','A','B','C']}
             props = s.query(Property).filter(Property.status == 'available').count()
+            # 房源侧多维统计（2026-09-24 加）：原先只报一个"在售数"，经纪人问"一共多少套/卖了几套/
+            # 多少套在出租"都答不了，而客户侧却有 4 个维度。
+            total_props = s.query(Property).count()
+            sold_props = s.query(Property).filter(Property.status == 'sold').count()
+            rented_props = s.query(Property).filter(Property.status == 'rented').count()
+            avail_by_type = {t: s.query(Property).filter(Property.status == 'available',
+                                                        Property.property_type == t).count()
+                             for t in ('new', 'second_hand', 'rental')}
             overdue = len(self.get_overdue())
             return {
                 'total_customers': tracking, 'closed_customers': closed,
                 'customer_count_note': '客户数按"在跟"统计（活跃+暂缓），已关闭单列不计入',
                 'tier_counts': tiers,
-                'available_properties': props, 'overdue_followups': overdue,
+                'total_properties': total_props,
+                'available_properties': props,
+                'sold_properties': sold_props,
+                'rented_properties': rented_props,
+                'available_by_type': avail_by_type,
+                'property_count_note': ('房源：total=全部（含已售已租）；available=在售；sold/rented 已售已租；'
+                                        'available_by_type 只统计在售（new=一手房 / second_hand=二手房 / rental=出租）'),
+                'overdue_followups': overdue,
             }
     
     def get_channel_stats(self):
