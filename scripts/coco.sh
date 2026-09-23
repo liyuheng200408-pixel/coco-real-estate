@@ -3,7 +3,7 @@
 # Coco 命令入口（一个前缀管到底）
 #
 # 命令分三组：
-#   日常运维（我们自己的工具）：version / check / backup / backups / restore / update / uninstall
+#   日常运维（我们自己的工具）：version / check / backup / backups / restore / data-clean / update / uninstall
 #   服务与诊断：                status / logs / start / stop / restart
 #   安装配置（转发官方命令）：  model / setup / gateway / pairing
 #
@@ -116,6 +116,11 @@ case "${1:-version}" in
       exec "$VENV_PY" "$REPO_ROOT/scripts/backup_db.py" restore --restore-file "$R_FILE"
     fi
     ;;
+  data-clean)
+    shift
+    need_venv
+    exec "$VENV_PY" "$REPO_ROOT/scripts/data_clean.py" "$@"
+    ;;
   update)
     shift
     if [[ -f "$REPO_ROOT/scripts/update.sh" ]]; then
@@ -191,6 +196,7 @@ Coco v${COCO_VER}
   backup     手动备份数据库（coco backup --force 强制备份）
   backups    查看备份列表
   restore    恢复数据：coco restore --file <备份.dump> / --migration <迁移包.tar.gz>
+  data-clean 数据清理：预演 / 清理已关闭客户与已成交房源（向导式，动手前自动备份）
   update     更新到最新版（内部即完整更新流程：备份 → 拉代码 → 依赖 → 迁移 → 重启 → 体检）
   uninstall  卸载 Coco（三档菜单 + 输 yes 确认；1/2 档会先自动备份，3 档不备份）
 

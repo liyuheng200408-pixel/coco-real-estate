@@ -2,7 +2,7 @@
 
 覆盖：
   · 转发组（model / setup / gateway / pairing）用 exec 原样转发给官方 hermes 程序；
-  · 运维组（check / backup / backups / restore / update / uninstall）行为正确；
+  · 运维组（check / backup / backups / restore / data-clean / update / uninstall）行为正确；
   · 危险操作要输 yes 才执行；缺 Python 环境时报错清楚（不抛裸 shell 错）；
   · help 分组列出命令集合 —— 与文档口径一致。
 
@@ -127,6 +127,14 @@ class TestLocalCommands:
         r = _run(root, ["restore", "--migration", "/root/m.tar.gz", "--yes"])
         assert "backup_db.py restore_migration --migration-tar /root/m.tar.gz" in r.stdout, r.stdout
 
+    def test_data_clean_maps_to_script(self, tmp_path):
+        """data-clean 把参数原样交给 data_clean.py（本机不碰真数据，只验映射）"""
+        root = _fake_install(tmp_path)
+        r = _run(root, ["data-clean", "--dry-run"])
+        assert "data_clean.py --dry-run" in r.stdout, r.stdout
+        r = _run(root, ["data-clean", "--kind", "all", "--yes"])
+        assert "data_clean.py --kind all --yes" in r.stdout, r.stdout
+
     def test_restore_without_target_shows_usage(self, tmp_path):
         root = _fake_install(tmp_path)
         r = _run(root, ["restore"])
@@ -179,5 +187,5 @@ class TestDocsUseCocoPrefix:
     def test_readmes_document_coco_commands(self):
         for rel in ("README.md", "README.zh-CN.md"):
             t = (REPO_ROOT / rel).read_text(encoding="utf-8")
-            for cmd in ("coco update", "coco check", "coco backup", "coco restore", "coco uninstall"):
+            for cmd in ("coco update", "coco check", "coco backup", "coco restore", "coco data-clean", "coco uninstall"):
                 assert cmd in t, f"{rel} 未统一到 {cmd}"
