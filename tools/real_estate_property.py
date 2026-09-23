@@ -999,23 +999,35 @@ registry.register(
 )
 
 
-def price_history(property_id: int, limit: int = 20, task_id: str = None) -> str:
-    """查询房源调价历史"""
+_PRICE_HISTORY_LIMIT_DEFAULT = 20
+_PRICE_HISTORY_LIMIT_MAX = 200
+
+
+def price_history(property_id: int, limit: int = _PRICE_HISTORY_LIMIT_DEFAULT, task_id: str = None) -> str:
+    """查询房源调价历史（limit 最多返回多少条明细；次数与累计变动始终按**全部**调价统计）"""
     db = _get_db()
+    # 房源不存在要和"没调过价"区分开（2026-09-24）：否则模型会对不存在的房源说"这套房没调过价"
+    prop = db.get_property(property_id)
+    if not prop:
+        return json.dumps({"success": False, "not_found": True,
+                           "error": f"没有编号为 {property_id} 的房源"}, ensure_ascii=False)
+    # limit 边界（2026-09-24）：传 0/负数/非数字一律按默认 20，不再出现"0 条却报没调过价"或全量拉取
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _PRICE_HISTORY_LIMIT_DEFAULT
+    if limit <= 0:
+        limit = _PRICE_HISTORY_LIMIT_DEFAULT
+    limit = min(limit, _PRICE_HISTORY_LIMIT_MAX)
     history = db.get_price_history(property_id, limit)
-    if not history:
+    summary = db.get_price_history_summary(property_id)
+    if not summary['count']:
         return json.dumps({"success": True, "message": "该房源暂无调价记录", "history": []}, ensure_ascii=False)
-    total_change = 0
-    has_old = False
-    first_old = None
-    for h in history:
-        if h["old_price"] is not None:
-            if not has_old:
-                first_old = h["old_price"]
-                has_old = True
-            total_change += h["change"]
-    message = f"共 {len(history)} 次调价，累计变动 {total_change/10000:+.1f}万"
-    return json.dumps({"success": True, "message": message, "history": history}, ensure_ascii=False)
+    message = f"共 {summary['count']} 次调价，累计变动 {summary['change']/10000:+.1f}万"
+    if summary['count'] > len(history):
+        message += f"（下面列出最近 {len(history)} 次明细）"
+    return json.dumps({"success": True, "message": message, "history": history,
+                       "total_changes": summary['count']}, ensure_ascii=False)
 
 
 def price_drop_alerts(days: int = 7, task_id: str = None) -> str:

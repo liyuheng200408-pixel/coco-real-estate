@@ -858,6 +858,16 @@ class RealEstateDB:
             return d
 
     # ---------- 调价历史与反匹配（2026-08-28 功能1） ----------
+    def get_price_history_summary(self, property_id):
+        """调价总次数与累计变动（2026-09-24 加：原先工具层用"最近 N 条"来数、来加，
+        超过返回条数时会报出偏小的次数与累计，模型照抄就说错话）"""
+        with self.get_session() as s:
+            rows = s.query(PriceHistory).filter(PriceHistory.property_id == property_id).all()
+            total = len(rows)
+            change = sum((r.new_price - r.old_price) for r in rows
+                         if r.old_price is not None and r.new_price is not None)
+            return {'count': total, 'change': change}
+
     def get_price_history(self, property_id, limit=20):
         """房源调价历史（新→旧）"""
         with self.get_session() as s:
