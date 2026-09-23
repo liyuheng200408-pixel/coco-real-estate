@@ -23,7 +23,7 @@ from coco_config_align import STANDARD, classify, plan, summary  # noqa: E402
 
 
 def eff(threshold=0.8, max_turns=500, protect=40, hygiene=5000, tz="Asia/Shanghai",
-        slash_confirm=False):
+        slash_confirm=False, language="zh"):
     """造一份运行时生效值（默认=标准值）"""
     return {
         "agent.max_turns": max_turns,
@@ -31,6 +31,7 @@ def eff(threshold=0.8, max_turns=500, protect=40, hygiene=5000, tz="Asia/Shangha
         "compression.protect_last_n": protect,
         "compression.hygiene_hard_message_limit": hygiene,
         "timezone": tz,
+        "display.language": language,
         "approvals.destructive_slash_confirm": slash_confirm,
     }
 

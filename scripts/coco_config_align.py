@@ -35,6 +35,10 @@ STANDARD: "dict[str, object]" = {
     "compression.protect_last_n": 40,
     "compression.hygiene_hard_message_limit": 5000,
     "timezone": "Asia/Shanghai",
+    # 界面语言（2026-09-23 老板拍板=中文）：官方 i18n 的静态文案（未设主页频道提示、
+    # 审批提示、会话相关回复等）都按这个值选语言；不设时官方默认 en，用户会看到英文。
+    # 注意：只影响官方静态文案，不影响 Coco 的房产话术与模型输出。
+    "display.language": "zh",
     # 对话清空类命令（/new、/clear、/reset、/undo）不再弹确认框：经纪人不会输入 /always，
     # 三选一反而卡住「开新会话」；关掉后直接执行（业务数据都在库里，不受影响）。
     "approvals.destructive_slash_confirm": False,
@@ -53,6 +57,7 @@ OFFICIAL_DEFAULTS: "dict[str, tuple]" = {
     "compression.protect_last_n": (20,),           # 官方默认 20
     "compression.hygiene_hard_message_limit": (5000,),
     "timezone": ("", None),
+    "display.language": ("en",),                      # 官方默认 en（不设或向导写回时都当官方默认）
     "approvals.destructive_slash_confirm": (True,),   # 官方默认 True（弹确认框）
 }
 
@@ -64,6 +69,7 @@ LABELS: "dict[str, str]" = {
     "compression.protect_last_n": "保留最近消息条数",
     "compression.hygiene_hard_message_limit": "网关强制压缩消息上限",
     "timezone": "时区",
+    "display.language": "界面语言",
     "approvals.destructive_slash_confirm": "清空对话类命令的确认框",
 }
 
