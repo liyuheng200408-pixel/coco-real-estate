@@ -858,7 +858,13 @@ class ToolRegistry:
 
     @staticmethod
     def _missing_required_params(entry, args) -> list:
-        """schema 里标为必填、但这次调用没给的参数名（COCO-PATCH 2026-09-18）"""
+        """schema 里标为必填、但这次调用没给（或给了 null）的参数名
+
+        COCO-PATCH 2026-09-18 / 2026-09-24：看"值"而不是"键"—— 模型常把没问出来的必填参数
+        显式写成 null（{"name": null}），只看键存在会放行到 handler，实测 9 个工具会直接崩在
+        数据库约束上（add_customer / mortgage_calculator / generate_poster_grid 等），
+        而模型看到"执行失败"会转向自己编答案。
+        """
         try:
             params = ((entry.schema or {}).get("parameters") or {})
             required = params.get("required") or []
@@ -867,7 +873,7 @@ class ToolRegistry:
         if not required:
             return []
         given = args if isinstance(args, dict) else {}
-        return [k for k in required if k not in given]
+        return [k for k in required if k not in given or given.get(k) is None]
 
     # ---- Query helpers -----------------------------------------------
 
