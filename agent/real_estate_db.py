@@ -882,7 +882,20 @@ class RealEstateDB:
                 'created_at': r.created_at.isoformat() if r.created_at else None,
             } for r in rows]
 
-    def find_customers_for_price_drop(self, property_id, days=7):
+    def customers_for_drop_pool(self):
+        """降价反匹配的候选客户池（一次取出）：active + 填了预算上限 + 没有成交记录
+
+        2026-09-24 加：原先对每套降价房源各查一次客户（N+1），50 套房 × 1000 客户要 30 秒。
+        """
+        with self.get_session() as s:
+            rows = s.query(Customer).filter(Customer.status == 'active',
+                                            Customer.budget_max.isnot(None)).all()
+            deal_ids = {row[0] for row in s.query(Deal.customer_id).distinct().all()}
+            return [{'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                     'budget_min': c.budget_min, 'budget_max': c.budget_max,
+                     'phone': c.phone} for c in rows if c.id not in deal_ids]
+
+    def find_customers_for_price_drop(self, property_id, days=7, pool=None, limit=None):
         """降价反匹配：找"预算差一点够得着"的客户
 
         纳入条件：预算上限 >= 新价*0.95 且 < 旧价（就差一点），
@@ -906,25 +919,32 @@ class RealEstateDB:
                 return []  # 只反匹配"降价"
 
             threshold = new_price * 0.95
-            customers = s.query(Customer).filter(
-                Customer.status == 'active',
-                Customer.budget_max.isnot(None),
-                Customer.budget_max >= threshold,
-                Customer.budget_max < old_price,
-            ).all()
+            if pool is not None:
+                # 用预取好的客户池在内存里筛（调用方一次取出，避免每套房各查一次数据库）
+                rows = [c for c in pool
+                        if (c.get('budget_max') or 0) >= threshold and (c.get('budget_max') or 0) < old_price]
+            else:
+                rows = s.query(Customer).filter(
+                    Customer.status == 'active',
+                    Customer.budget_max.isnot(None),
+                    Customer.budget_max >= threshold,
+                    Customer.budget_max < old_price,
+                ).all()
+                rows = [{'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                         'budget_min': c.budget_min, 'budget_max': c.budget_max,
+                         'phone': c.phone} for c in rows if not self.customer_has_deal(c.id)]
             result = []
-            for c in customers:
-                if self.customer_has_deal(c.id):
-                    continue
+            for c in rows:
+                bmax = c.get('budget_max') or 0
                 result.append({
-                    'customer_id': c.id, 'name': c.name, 'tier': c.tier,
-                    'budget_min': c.budget_min, 'budget_max': c.budget_max,
-                    'phone': c.phone,  # EncryptedString 自动加解密
-                    'gap': int(old_price - c.budget_max),  # 之前差多少
-                    'now_affordable': c.budget_max >= new_price,
+                    'customer_id': c.get('customer_id'), 'name': c.get('name'), 'tier': c.get('tier'),
+                    'budget_min': c.get('budget_min'), 'budget_max': bmax,
+                    'phone': c.get('phone'),  # EncryptedString 自动加解密
+                    'gap': int(old_price - bmax),  # 之前差多少
+                    'now_affordable': bmax >= new_price,
                 })
             result.sort(key=lambda x: x['budget_max'], reverse=True)
-            return result
+            return result[:limit] if limit else result
 
     # ---------- 生命周期阶段（2026-08-28 功能5） ----------
     VALID_STAGES = ['lead', 'interested', 'strong', 'viewed',
@@ -1826,10 +1846,11 @@ class RealEstateDB:
                         'unit_price': r.unit_price_value(),
                     }
 
-    def recent_price_drops(self, days: int = 7, limit: int = 200):
+    def recent_price_drops(self, days: int = 7, limit: int = None):
         """近期**发生过降价**的在售房源（一次 SQL 查出来，不再对每套房各查一次）
 
         2026-09-18 修：降价提醒原先遍历 1 万套房、对每套各查一次调价历史（N+1，慢且漏）。
+        2026-09-24 修：limit 原写死 200，实测 300 套房降价时后 100 套静默漏掉；默认改为不限（全量扫）。
         """
         from datetime import datetime, timedelta
         since = datetime.now() - timedelta(days=days)

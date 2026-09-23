@@ -1030,14 +1030,26 @@ def price_history(property_id: int, limit: int = _PRICE_HISTORY_LIMIT_DEFAULT, t
                        "total_changes": summary['count']}, ensure_ascii=False)
 
 
+_PRICE_DROP_MAX_ALERTS = 50          # 一次最多列多少套房（多了模型也读不完、还烧 token）
+_PRICE_DROP_MAX_CUSTOMERS = 5        # 每套房最多列多少位可联系客户（按最接近成交排序）
+
+
 def price_drop_alerts(days: int = 7, task_id: str = None) -> str:
     """降价提醒：扫描近期降价房源，反匹配"预算差一点够得着"的客户，输出联系建议"""
     db = _get_db()
     # 2026-09-18 修：原先遍历 1 万套房、对每套各查一次调价历史 + 一次客户反匹配（N+1 很慢且漏房源）。
     # 现在先用一次 SQL 取出"近期降过价的在售房源"，再只对这些房源做客户反匹配。
+    # 2026-09-24 修：① 扫描不再写死条数（原先 200 条上限，300 套房降价会静默漏 100 套）；
+    # ② 客户池一次取出，不再对每套房各查一次（50 套 × 1000 客户原先要 30 秒）；
+    # ③ 输出设上限（否则一次返回 7MB 明细，模型上下文会被撑爆）。
+    drops = db.recent_price_drops(days=days)
+    if not drops:
+        return json.dumps({"success": True, "message": f"近{days}天没有房源降价", "alerts": []}, ensure_ascii=False)
+    pool = db.customers_for_drop_pool()
     alerts = []
-    for drop in db.recent_price_drops(days=days):
-        customers = db.find_customers_for_price_drop(drop["property_id"], days=days)
+    for drop in drops:
+        customers = db.find_customers_for_price_drop(drop["property_id"], days=days, pool=pool,
+                                                     limit=_PRICE_DROP_MAX_CUSTOMERS)
         if not customers:
             continue
         alerts.append({
@@ -1049,19 +1061,28 @@ def price_drop_alerts(days: int = 7, task_id: str = None) -> str:
             "matched_customers": customers,
         })
     if not alerts:
-        return json.dumps({"success": True, "message": f"近{days}天无降价房源或降价后无可捞回客户", "alerts": []}, ensure_ascii=False)
+        return json.dumps({
+            "success": True, "alerts": [], "drops_found": len(drops),
+            "message": f"近{days}天有 {len(drops)} 套房源降价，但没有预算够得着的客户",
+        }, ensure_ascii=False)
+    shown = alerts[:_PRICE_DROP_MAX_ALERTS]
     total_hits = sum(len(a["matched_customers"]) for a in alerts)
-    lines = [f"📢 近{days}天降价提醒：{len(alerts)} 套房降价，可捞回 {total_hits} 位客户"]
-    for a in alerts:
+    head = f"📢 近{days}天降价提醒：{len(alerts)} 套房降价可捞回客户，共列出 {total_hits} 位（每套列最接近成交的 {_PRICE_DROP_MAX_CUSTOMERS} 位）"
+    if len(alerts) > len(shown):
+        head += f"；这里列前 {len(shown)} 套"
+    lines = [head]
+    for a in shown:
         drop_w = (a["drop_amount"] or 0) / 10000
         lines.append(f"\n· {a['title']}（ID:{a['property_id']}）降价 {drop_w:.0f}万 → 现价 {a['new_price']/10000:.0f}万")
-        for c in a["matched_customers"][:5]:
+        for c in a["matched_customers"]:
             afford = "现在够得着" if c["now_affordable"] else "还差一点"
             lines.append(f"   → {c['name']}（{c['tier']}级，预算上限{c['budget_max']/10000:.0f}万，上次差{c['gap']/10000:.0f}万，{afford}）建议联系")
     return json.dumps({
         "success": True,
         "summary": f"{len(alerts)}套降价、{total_hits}位可捞回客户",
-        "alerts": alerts,
+        "drops_found": len(drops),
+        "truncated": len(alerts) > len(shown),
+        "alerts": shown,
         "message": "\n".join(lines),
     }, ensure_ascii=False)
 
