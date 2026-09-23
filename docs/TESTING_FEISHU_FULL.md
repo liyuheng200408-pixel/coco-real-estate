@@ -68,7 +68,6 @@ coco check  # 预期 FAIL 0
 | 使用"X"话术 | use_template | 返回话术 |
 | 删除"X"话术 | delete_script | 库清空 |
 | 看下业绩看板 | performance_dashboard | 完整 |
-| 转化漏斗分析 | conversion_funnel | 完整 |
 | 渠道统计 | channel_stats | 渠道分组 |
 | 生成一份本周经营周报 | generate_report | 周报 |
 | 给[在售房源]生成贝壳平台的房源文案 | generate_listing_copy | 文案 |

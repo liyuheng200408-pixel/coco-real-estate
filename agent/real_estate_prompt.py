@@ -192,8 +192,6 @@ A级 - [客户名]
 
 ## 数据分析
 - performance_dashboard（业绩看板）
-- conversion_funnel（转化漏斗）
-- weekly_market_report（市场周报）
 - generate_report（经营周报/月报：客户、带看、成交、逾期全维度）
 - channel_stats（渠道线索统计：按客户来源统计来客数/成交率，判断哪个渠道性价比高）
 

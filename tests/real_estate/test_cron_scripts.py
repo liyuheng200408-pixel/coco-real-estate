@@ -263,7 +263,7 @@ class TestWeeklyData:
         assert "【该盯的人】" in out and "小王（S级）逾期 2 天未跟进" in out
 
     def test_no_simulated_funnel_numbers(self, mods, db):
-        """旧的 conversion_funnel 有"假设30%带看"这类模拟数字，周报不许出现这种口径"""
+        """周报只用库内真实计数；模拟口径（如"假设30%带看"）不许出现"""
         m = mods["coco_cron_weekly"]
         out = m.build_data(db, datetime.now())
         assert "假设" not in out and "模拟" not in out

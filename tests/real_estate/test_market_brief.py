@@ -1,24 +1,14 @@
-"""市场行情简报测试（功能10，批次七）——联网段 mock，不依赖外网"""
+"""市场行情简报测试（功能10，批次七）——联网段 mock，不依赖外网
+
+（原本还测了 weekly_market_report：它的"本周重点"是写死的空话、已在 2026-09-23 删除，
+周报改由定时任务的 scripts/coco_cron_weekly.py 用真实统计生成。）
+"""
 import json
 from datetime import datetime, timedelta
 
 from conftest import make_customer, make_property
 
-from tools.real_estate_analytics import market_brief, weekly_market_report
-
-
-class TestWeeklyReportRealStats:
-    def test_new_listings_real_not_hardcoded(self, db, monkeypatch):
-        """周报新增房源数来自真实统计（修掉原来的硬编码 5）"""
-        monkeypatch.setattr("tools.real_estate_analytics._get_db", lambda: db)
-        make_property(db)  # 今天录入 → 计入本周
-        r = json.loads(weekly_market_report())
-        assert r["report"]["新增房源"] == "1套"
-
-    def test_empty_week_zero(self, db, monkeypatch):
-        monkeypatch.setattr("tools.real_estate_analytics._get_db", lambda: db)
-        r = json.loads(weekly_market_report())
-        assert r["report"]["新增房源"] == "0套"
+from tools.real_estate_analytics import market_brief
 
 
 class TestMarketBrief:

@@ -51,8 +51,6 @@ class TestReports:
         db.add_deal(customer_id=c["id"], property_id=p["id"], price=1_400_000)
         for name, args in (("generate_report", {"period": "week"}),
                            ("performance_dashboard", {"period": "week"}),
-                           ("conversion_funnel", {"period": "week"}),
-                           ("weekly_market_report", {"district": "美兰"}),
                            ("market_brief", {"district": "美兰"}),
                            ("channel_stats", {})):
             out = _dispatch(db, monkeypatch, name, args)
