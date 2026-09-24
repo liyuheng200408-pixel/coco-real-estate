@@ -1335,6 +1335,37 @@ class RealEstateDB:
         with self.get_session() as s:
             return [o.to_dict() for o in s.query(Owner).limit(limit).all()]
 
+    def find_duplicate_owner(self, phone=None, wechat=None):
+        """房东查重：手机号（归一后，主）> 微信号（次）。返回 (命中房东dict或None, 警告文本或None)。
+
+        **姓名不参与判重**：房东没有"客户类型"那样的维度，同名不同号的两个人必须各建一条
+        （2026-09-25）。给了手机号就只按手机号认人 —— 与客户侧同一套口径（F01/F42/F79）。
+
+        只取要比对的那一列（1.2 万条实测 0.30 秒；全字段 0.74 秒）。防御：疑似密文
+        （密钥不一致）不参与比对，避免把乱码当成同一个号而误合并。
+        """
+        with self.get_session() as s:
+            if phone:
+                probe = norm_phone(phone)
+                if probe:
+                    for oid, value in s.query(Owner.id, Owner.phone).all():
+                        if looks_like_ciphertext(value):
+                            return (None, "检测到房东电话疑为密文、密钥可能不一致，未强行判重。")
+                        if norm_phone(value) == probe:
+                            o = s.query(Owner).get(oid)
+                            return (o.to_dict() if o else None, None)
+                    return (None, None)
+            if wechat:
+                probe = str(wechat).strip()
+                if probe:
+                    for oid, value in s.query(Owner.id, Owner.wechat).all():
+                        if looks_like_ciphertext(value):
+                            return (None, "检测到房东微信号疑为密文、密钥可能不一致，未强行判重。")
+                        if str(value).strip() == probe:
+                            o = s.query(Owner).get(oid)
+                            return (o.to_dict() if o else None, None)
+        return (None, None)
+
     def owner_portfolio(self, owner_id):
         """房东名下房源列表 + 各房状态"""
         with self.get_session() as s:
@@ -1404,11 +1435,14 @@ class RealEstateDB:
         防重复（2026-09-24 改）：**给了手机号就只按手机号认人** —— 号码库里没有就新建房东，
         不再退回按姓名合并（同名不同人 / 同一房东两个号会被合成一条，后给的号还会被静默丢弃）。
         只有没给手机号时才按姓名认人。若读出的值疑似密文（密钥不一致），不参与匹配（避免误合）。
+        手机号按写法归一再比（2026-09-25 修：原先精确比字符串，"138 0013 8000" 与
+        "13800138000" 会被当成两个人、同一个房东被拆成两条）。
         return_info=True 时返回 (房东 dict, info)：info.created=是否新建、info.matched_by=靠什么认出来的、
         info.same_name_exists=库里是否已有同名房东（给工具层提示"要不要合并"用）。
         """
         name = (name or '').strip()
-        phone = str(phone).strip() if phone else None
+        phone = norm_phone(phone)
+        wechat = (str(wechat).strip() or None) if wechat else None
         if not name and not phone:
             return (None, {}) if return_info else None
         with self.get_session() as s:
@@ -1435,7 +1469,7 @@ class RealEstateDB:
                     v = o.get('phone')
                     if v is None or _fk(v, phone):
                         continue
-                    if v == phone:
+                    if norm_phone(v) == phone:
                         owner = s.query(Owner).get(o['id']); matched_by = 'phone'; break
             elif name:
                 for o in owners:

@@ -846,6 +846,13 @@ class ToolRegistry:
             return tool_error(
                 f"参数超出范围：{_pairs} 超过系统可识别的编号范围（最大 {2 ** 63 - 1}）。"
                 f"请核对编号后重新调用 {name}。")
+        # 文本参数收到数字 → 转成文本（COCO-PATCH 2026-09-25）：模型常把手机号、身份证号这类
+        # 长数字串当整数传下来，声明为 string 的参数拿到 int 会在 handler 里崩（'int' object has
+        # no attribute 'strip'）或崩在数据库类型上；模型看到英文异常会转去自己编答案
+        #（与必填 null、参数名写错、整数越界同一个病根）。数字转文本无损，正是经纪人原话的形态。
+        _as_text = self._text_params_from_numbers(entry, args)
+        if _as_text:
+            args = {**args, **_as_text}
         try:
             if entry.is_async:
                 from model_tools import _run_async
@@ -893,6 +900,30 @@ class ToolRegistry:
             if abs(value) > 2 ** 63 - 1:
                 overflow.append((key, value))
         return overflow
+
+    @staticmethod
+    def _text_params_from_numbers(entry, args):
+        """schema 声明为文本、这次却传了数字的参数 → {参数名: 文本}（无需转换返回 {}）。
+
+        COCO-PATCH 2026-09-25：只处理 int/float（bool 除外）—— 这类值当文本用是无损的
+        （13800001111 / 110101200001015678），正是经纪人原话里那串数字的形态；
+        数字转文本后交给 handler，避免它崩在 `'int' object has no attribute 'strip'` 或
+        数据库类型校验上。语义不明的形态（true 当姓名）不在这里猜。
+        """
+        if not isinstance(args, dict):
+            return {}
+        try:
+            props = ((entry.schema or {}).get("parameters") or {}).get("properties") or {}
+        except Exception:
+            return {}
+        converted = {}
+        for key, value in args.items():
+            if (props.get(key) or {}).get("type") != "string":
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            converted[key] = str(value)
+        return converted
 
     @staticmethod
     def _unexpected_param_hint(name, entry, exc):

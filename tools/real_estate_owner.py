@@ -6,6 +6,7 @@ Coco 房产工具 - 房东（业主）委托管理
 import json
 from datetime import datetime
 
+from agent.real_estate_input import norm_phone
 from tools.registry import registry
 
 
@@ -32,6 +33,83 @@ def _mask_id(id_number: str) -> str:
     if len(id_number) < 8:
         return '*' * len(id_number)
     return id_number[:4] + '*' * (len(id_number) - 8) + id_number[-4:]
+
+
+# re_owners 的列宽：PostgreSQL 上 varchar 超长会让整次登记失败（sqlite 不拦），入库前按列宽截断
+NAME_MAX = 100
+TRUST_NOTE_MAX = 200
+
+
+def _clip(value, max_len):
+    """按列宽截断文本 → (截断后的值, 提示或 None)。截断必须告知，不静默丢内容"""
+    if not isinstance(value, str) or len(value) <= max_len:
+        return value, None
+    return value[:max_len], f"超过 {max_len} 字，只保留了前 {max_len} 字"
+
+
+def _clean_text(value):
+    """文本参数去首尾空白；空串按"未填"（None），避免库里空串与未填两种形态并存"""
+    if value is None:
+        return None
+    return str(value).strip() or None
+
+
+def add_owner(name: str, phone: str = None, wechat: str = None,
+              id_number: str = None, trust_note: str = None,
+              notes: str = None, force: bool = False, task_id: str = None) -> str:
+    """登记房东（业主）。身份证号只存脱敏版本，原号不落库。
+
+    登记前按手机号查重（没给手机号时按微信号），命中给出已有房东、不重复建档；
+    确认是另一个人（或同一个人的另一个号）时用 force=True 跳过查重。
+    姓名不参与判重：同名不同号是两个人，都要能建。
+    """
+    name = (name or '').strip()
+    if not name:
+        return json.dumps({"success": False, "error": "房东姓名不能为空"}, ensure_ascii=False)
+    warnings = []
+    name, _clipped = _clip(name, NAME_MAX)
+    if _clipped:
+        warnings.append("房东姓名" + _clipped + "。")
+    trust_note, _clipped = _clip(_clean_text(trust_note), TRUST_NOTE_MAX)
+    if _clipped:
+        warnings.append("信任度备注" + _clipped + "（其余内容可放进备注里）。")
+    phone = norm_phone(phone)
+    wechat = _clean_text(wechat)
+    notes = _clean_text(notes)
+    db = _get_db()
+
+    if not force and (phone or wechat):
+        dup, warn = db.find_duplicate_owner(phone=phone, wechat=wechat)
+        if warn:
+            # 密钥不一致防御：不强行判重，提示先检查密钥
+            return json.dumps({
+                "success": False, "duplicate": False, "warning": warn,
+                "error": "检测到房东字段可能因密钥不一致无法安全判重，请先检查 COCO_ENC_KEY 再操作。",
+            }, ensure_ascii=False)
+        if dup:
+            identical = (dup.get('name') == name
+                         and all(_clean_text(dup.get(k)) == v for k, v in
+                                 (('phone', phone), ('wechat', wechat),
+                                  ('trust_note', trust_note), ('notes', notes)) if v is not None))
+            tail = ("同号同名，不用重复登记。" if identical else
+                    "如果其实是另一个人（或同一个人的另一个号），用 force=true 再登记一次。")
+            return json.dumps({
+                "success": False, "duplicate": True, "identical": identical,
+                "existing_owner": dup,
+                "error": (f"该房东已在库里（id={dup.get('id')} {dup.get('name')}，"
+                          f"电话 {_safe_contact(dup.get('phone')) or '未填'}）。" + tail),
+            }, ensure_ascii=False)
+
+    owner = db.add_owner(
+        name=name, phone=phone, wechat=wechat,
+        id_masked=_mask_id(id_number) if id_number else None,
+        trust_note=trust_note, notes=notes,
+    )
+    privacy = "（身份证已脱敏存储，原号未落库）" if id_number else ""
+    payload = {"success": True, "message": f"房东 {name} 已登记{privacy}", "owner": owner}
+    if warnings:
+        payload["warnings"] = warnings
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
@@ -121,27 +199,6 @@ def find_person_by_name(name: str = None, task_id: str = None) -> str:
     }, ensure_ascii=False)
 
 
-def add_owner(name: str, phone: str = None, wechat: str = None,
-              id_number: str = None, trust_note: str = None,
-              notes: str = None, task_id: str = None) -> str:
-    """登记房东（业主）。身份证号只存脱敏版本，原号不落库。"""
-    name = (name or '').strip()
-    if not name:
-        return json.dumps({"success": False, "error": "房东姓名不能为空"}, ensure_ascii=False)
-    db = _get_db()
-    owner = db.add_owner(
-        name=name, phone=phone, wechat=wechat,
-        id_masked=_mask_id(id_number) if id_number else None,
-        trust_note=trust_note, notes=notes,
-    )
-    privacy = "（身份证已脱敏存储，原号未落库）" if id_number else ""
-    return json.dumps({
-        "success": True,
-        "message": f"房东 {name} 已登记{privacy}",
-        "owner": owner,
-    }, ensure_ascii=False)
-
-
 def get_owner(owner_id: int, task_id: str = None) -> str:
     """查询房东信息"""
     db = _get_db()
@@ -199,16 +256,17 @@ def exclusive_expiring(days: int = 30, task_id: str = None) -> str:
 TOOLS = [
     {
         "name": "add_owner",
-        "description": "登记房东（业主）。身份证号自动脱敏存储，原号不落库",
+        "description": "登记房东（业主）。可登记姓名、手机号、微信号、身份证号（自动脱敏存储，原号不落库）、信任度备注、备注。登记前按手机号查重，号已在库里会提示已有房东、不重复建档（确认是另一个人时用 force=true）。手机号写法不限（138 0013 8000 / +86 138-0013-8000 都会归一）",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "房东姓名"},
-                "phone": {"type": "string", "description": "手机号（加密存储）"},
+                "phone": {"type": "string", "description": "手机号（加密存储，写法不限，会自动归一）"},
                 "wechat": {"type": "string", "description": "微信号（加密存储）"},
                 "id_number": {"type": "string", "description": "身份证号（只存脱敏版本，原号不落库）"},
-                "trust_note": {"type": "string", "description": "信任度备注（如 配合带看/价格坚挺）"},
+                "trust_note": {"type": "string", "description": "信任度备注（如 配合带看/价格坚挺，最多 200 字）"},
                 "notes": {"type": "string", "description": "备注"},
+                "force": {"type": "boolean", "description": "默认 false。true=跳过房东查重强制新增（同一个人的另一个号、或确认是另一个人时用）"},
             },
             "required": ["name"],
         },
