@@ -837,6 +837,15 @@ class ToolRegistry:
         if _missing:
             _req = ", ".join(_missing)
             return tool_error(f"缺少必填参数：{_req}。请补齐这些参数后重新调用 {name}。")
+        # 整数参数越界校验（COCO-PATCH 2026-09-24）：模型偶尔把一长串数字当编号（截图识别、
+        # 把手机号/金额当 id），超出 int64 会让 ORM/数据库抛 OverflowError。模型看到英文异常会
+        # 转去自己编答案（与必填 null、参数名写错同一个病根），这里先拦成中文提示。
+        _overflow = self._int_overflow_params(entry, args)
+        if _overflow:
+            _pairs = "；".join(f"{k} 的值 {v}" for k, v in _overflow)
+            return tool_error(
+                f"参数超出范围：{_pairs} 超过系统可识别的编号范围（最大 {2 ** 63 - 1}）。"
+                f"请核对编号后重新调用 {name}。")
         try:
             if entry.is_async:
                 from model_tools import _run_async
@@ -861,6 +870,29 @@ class ToolRegistry:
             except Exception:
                 sanitized = raw  # defensive: never let the sanitizer block error propagation
             return tool_error(sanitized)
+
+    @staticmethod
+    def _int_overflow_params(entry, args):
+        """schema 声明为整数/数值、但取值超出 int64 的参数，返回 [(参数名, 值), …]
+
+        COCO-PATCH 2026-09-24：这类值在系统里没有任何合法含义（编号、金额、面积都够不到），
+        但会让数据库驱动抛 OverflowError（实测 13 个工具全崩）。
+        """
+        if not isinstance(args, dict):
+            return []
+        try:
+            props = ((entry.schema or {}).get("parameters") or {}).get("properties") or {}
+        except Exception:
+            return []
+        overflow = []
+        for key, value in args.items():
+            if props.get(key, {}).get("type") not in ("integer", "number"):
+                continue
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            if abs(value) > 2 ** 63 - 1:
+                overflow.append((key, value))
+        return overflow
 
     @staticmethod
     def _unexpected_param_hint(name, entry, exc):
