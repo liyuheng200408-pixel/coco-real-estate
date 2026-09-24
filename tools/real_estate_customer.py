@@ -397,6 +397,47 @@ def update_customer(
     return json.dumps(_attach_key_warning(response, masked), ensure_ascii=False)
 
 
+# 变更历史展示口径（2026-09-24 加，F76）：历史里原本只有英文键与裸数字，
+# 模型/经纪人得自己翻 —— 每条补 field_label + old_display/new_display，原始三字段保留不动。
+_CHANGE_FIELD_LABELS = {
+    "name": "姓名", "phone": "手机号", "wechat": "微信", "tier": "客户等级",
+    "status": "客户状态", "stage": "生命周期阶段",
+    "budget_min": "预算下限", "budget_max": "预算上限",
+    "area_pref": "面积偏好", "layout_pref": "户型偏好", "location": "意向区域",
+    "renovation": "装修偏好", "notes": "备注", "source": "客户来源",
+    "customer_type": "客户类型", "birthday": "生日", "tags": "标签",
+}
+_CHANGE_STATUS_LABELS = {"active": "在跟", "paused": "暂缓", "closed": "已关闭"}
+_CHANGE_TYPE_LABELS = {"buy_new": "买一手房", "buy_second_hand": "买二手房", "rent": "租房",
+                       "unspecified": "未细分", "buy": "未细分"}
+
+_DISPLAY_MAX_LEN = 40
+
+
+def _display_change_value(field, value):
+    """把留痕里的原始值翻成人话（不改动原值，只用于展示）"""
+    if value is None or value == "":
+        return "（未填）"
+    text = str(value)
+    if field in ("budget_min", "budget_max"):
+        try:
+            yuan = float(text)
+        except ValueError:
+            return text
+        wan = yuan / 10000
+        wan_text = f"{wan:.2f}".rstrip("0").rstrip(".")
+        return f"{wan_text}万"
+    if field == "status":
+        return _CHANGE_STATUS_LABELS.get(text, text)
+    if field == "stage":
+        return STAGE_LABELS.get(text, text)
+    if field == "customer_type":
+        return _CHANGE_TYPE_LABELS.get(text, text)
+    if "****" in text:          # 联系方式留痕是掩码，原样展示
+        return text
+    return text if len(text) <= _DISPLAY_MAX_LEN else text[:_DISPLAY_MAX_LEN] + "…"
+
+
 def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT,
                             task_id: str = None) -> str:
     """查询客户需求变更历史（预算/区域/户型/等级/状态等字段的变更记录）
@@ -415,12 +456,21 @@ def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT
     if limit <= 0:
         limit = _CHANGE_LIMIT_DEFAULT
     limit = min(limit, _CHANGE_LIMIT_MAX)
-    changes = db.get_customer_changes(customer_id, limit=limit)
-    return json.dumps({
+    changes, total = db.get_customer_changes(customer_id, limit=limit, with_total=True)
+    for ch in changes:
+        ch["field_label"] = _CHANGE_FIELD_LABELS.get(ch.get("field"), ch.get("field"))
+        ch["old_display"] = _display_change_value(ch.get("field"), ch.get("old_value"))
+        ch["new_display"] = _display_change_value(ch.get("field"), ch.get("new_value"))
+    payload = {
         "success": True, "customer_id": customer_id,
         "customer_name": customer.get('name'),
-        "changes": changes, "count": len(changes),
-    }, ensure_ascii=False)
+        "changes": changes, "count": len(changes), "total": total,
+        "truncated": bool(total and total > len(changes)),
+    }
+    if payload["truncated"]:
+        payload["message"] = (f"共 {total} 条变更，本次返回最近 {len(changes)} 条（最新在前）。"
+                              f"要看更早的请把 limit 调大（最多 {_CHANGE_LIMIT_MAX}）")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def get_customer(customer_id: int, task_id: str = None) -> str:
@@ -603,7 +653,7 @@ registry.register(
 registry.register(
     name="customer_change_history",
     toolset="real_estate",
-    schema={"name": "customer_change_history", "description": "查询客户需求变更历史（预算/区域/户型/等级等字段的变更记录）", "parameters": {
+    schema={"name": "customer_change_history", "description": "查询客户需求变更历史（预算/区域/户型/等级/状态/阶段/标签等字段的变更记录，最新的在前）。每条含 field_label 中文名与 old_display/new_display 可读值；返回 total=变更总条数、count=本次返回条数、truncated", "parameters": {
         "type": "object",
         "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},

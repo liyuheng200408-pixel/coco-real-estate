@@ -806,13 +806,20 @@ class RealEstateDB:
             s.commit(); s.refresh(c)
             return c.to_dict()
     
-    def get_customer_changes(self, customer_id, limit=20):
-        """查询客户需求变更历史（预算/区域/户型等）"""
+    def get_customer_changes(self, customer_id, limit=20, with_total=False):
+        """查询客户需求变更历史（预算/区域/户型等）
+
+        2026-09-24 加 with_total=True 时返回 (rows, 变更总条数) —— 供上层区分"本次返回条数"
+        与"一共改过多少次"（与 search_properties / list_customers 同一形状）。
+        """
         with self.get_session() as s:
-            return [ch.to_dict() for ch in s.query(CustomerChange)
-                .filter(CustomerChange.customer_id == customer_id)
-                .order_by(CustomerChange.created_at.desc(), CustomerChange.id.desc())
-                .limit(limit).all()]
+            q = (s.query(CustomerChange)
+                 .filter(CustomerChange.customer_id == customer_id))
+            total = q.count() if with_total else None
+            rows = [ch.to_dict() for ch in q
+                    .order_by(CustomerChange.created_at.desc(), CustomerChange.id.desc())
+                    .limit(limit).all()]
+            return (rows, total) if with_total else rows
     
     def get_customer(self, cid):
         with self.get_session() as s:
