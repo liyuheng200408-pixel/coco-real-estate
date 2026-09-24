@@ -18,11 +18,11 @@ def run_migrate(db_url, *extra):
 
 @pytest.fixture
 def sqlite_db(tmp_path):
-    """预建迁移会用到的表（003 需要 re_properties、011 需要 re_customer_changes）"""
+    """预建迁移会用到的表与列（003 需要 re_properties、011 需要 re_customer_changes、012 需要 re_customers.tags）"""
     db_path = tmp_path / "mig_test.db"
     import sqlite3
     conn = sqlite3.connect(db_path)
-    conn.execute("CREATE TABLE re_customers (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("CREATE TABLE re_customers (id INTEGER PRIMARY KEY, name TEXT, tags TEXT)")
     conn.execute("CREATE TABLE re_properties (id INTEGER PRIMARY KEY, name TEXT)")
     conn.execute("CREATE TABLE re_deals (id INTEGER PRIMARY KEY, name TEXT)")
     conn.execute("CREATE TABLE re_customer_changes (id INTEGER PRIMARY KEY, customer_id INTEGER,"
@@ -198,3 +198,28 @@ class TestMigrate:
         assert rows["phone"] == ("139****0001", "139****0002"), rows
         assert rows["wechat"] == ("mm****", "mm****"), rows
         assert rows["budget_max"] == ("3000000", "5000000"), rows   # 非加密字段不被改
+
+    def test_012_normalizes_customer_tags(self, sqlite_db):
+        """012 迁移：存量标签串规范化（分隔符统一/去空元素/去首尾逗号），幂等"""
+        import sqlite3
+        db_path = sqlite_db.replace("sqlite:///", "")
+        conn = sqlite3.connect(db_path)
+        rows = [("甲", "学区房, 地铁房"), ("乙", "学区房，近地铁"), ("丙", "a,,b"),
+                ("丁", ",a"), ("戊", "a,"), ("己", "正常标签"), ("庚", ""), ("辛", None)]
+        for name, tags in rows:
+            conn.execute("INSERT INTO re_customers (name, tags) VALUES (?, ?)", (name, tags))
+        conn.commit()
+        conn.close()
+
+        assert run_migrate(sqlite_db).returncode == 0
+        assert run_migrate(sqlite_db).returncode == 0        # 再跑一遍：幂等
+
+        conn = sqlite3.connect(db_path)
+        got = dict(conn.execute("SELECT name, tags FROM re_customers"))
+        conn.close()
+        assert got["甲"] == "学区房,地铁房"
+        assert got["乙"] == "学区房,近地铁"
+        assert got["丙"] == "a,b"
+        assert got["丁"] == "a" and got["戊"] == "a"
+        assert got["己"] == "正常标签"                        # 干净的没被动
+        assert got["庚"] == "" and got["辛"] is None          # 空值没被动

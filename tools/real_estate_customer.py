@@ -3,9 +3,9 @@ Coco 房产工具 - 客户管理
 """
 import json
 
-from agent.real_estate_input import (STAGES, STAGE_LABELS, norm_birthday, norm_customer_type,
-                                     norm_money, norm_phone, norm_stage, norm_tier,
-                                     stage_options_text)
+from agent.real_estate_input import (STAGES, STAGE_LABELS, clean_tags, norm_birthday,
+                                     norm_customer_type, norm_money, norm_phone, norm_stage,
+                                     norm_tags, norm_tier, stage_options_text)
 from tools.registry import registry
 
 # "够不着"的硬冲突理由：匹配结果全是这些时，不能说"有 N 套可能符合需求"
@@ -632,23 +632,28 @@ def add_customer_tag(
     tag: str,
     task_id: str = None,
 ) -> str:
-    """添加客户标签"""
+    """添加客户标签（支持一次传多个；重复的不会重复添加，写法会归一）"""
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
-    
-    tags = customer.get('tags', '')
-    if tags:
-        tag_list = tags.split(',') if tags else []
+    new_tags, problem = norm_tags(tag)
+    if problem:
+        return _fail(f"标签没能识别：{problem}。请给一个具体的标签名（如 学区房、急售）")
+    tag_list = clean_tags(customer.get('tags'))
+    added = [t for t in new_tags if t not in tag_list]
+    already = [t for t in new_tags if t in tag_list]
+    if added:
+        db.update_customer(customer_id, tags=','.join(tag_list + added))
+        tag_list = tag_list + added
+    if added:
+        message = f"已添加标签：{'、'.join(added)}"
+        if already:
+            message += f"；{'、'.join(already)} 已有（未重复添加）"
     else:
-        tag_list = []
-    
-    if tag not in tag_list:
-        tag_list.append(tag)
-    
-    db.update_customer(customer_id, tags=','.join(tag_list))
-    return json.dumps({"success": True, "message": f"已添加标签: {tag}", "tags": tag_list}, ensure_ascii=False)
+        message = f"这些标签客户已经有了：{'、'.join(already)}（未重复添加）"
+    return json.dumps({"success": True, "message": message, "tags": tag_list,
+                       "added": added, "already": already}, ensure_ascii=False)
 
 
 def remove_customer_tag(
@@ -656,21 +661,27 @@ def remove_customer_tag(
     tag: str,
     task_id: str = None,
 ) -> str:
-    """移除客户标签"""
+    """移除客户标签（写法会归一：库里带空格的旧标签也能按规范写法删掉）"""
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
-    
-    tags = customer.get('tags', '')
-    tag_list = tags.split(',') if tags else []
-    
-    if tag in tag_list:
-        tag_list.remove(tag)
-        db.update_customer(customer_id, tags=','.join(tag_list))
-        return json.dumps({"success": True, "message": f"已移除标签: {tag}", "tags": tag_list}, ensure_ascii=False)
-    else:
-        return json.dumps({"success": False, "error": f"标签不存在: {tag}"}, ensure_ascii=False)
+    targets, problem = norm_tags(tag)
+    if problem:
+        return _fail(f"标签没能识别：{problem}。请给一个具体的标签名（如 学区房、急售）")
+    tag_list = clean_tags(customer.get('tags'))
+    removed = [t for t in targets if t in tag_list]
+    if not removed:
+        if not tag_list:
+            return json.dumps({"success": False, "message": "该客户还没有标签",
+                               "tags": [], "error": "该客户还没有标签"}, ensure_ascii=False)
+        return json.dumps({"success": False, "tags": tag_list,
+                           "error": f"客户没有这个标签（现有：{'、'.join(tag_list)}）"},
+                          ensure_ascii=False)
+    rest = [t for t in tag_list if t not in removed]
+    db.update_customer(customer_id, tags=','.join(rest))
+    return json.dumps({"success": True, "message": f"已移除标签：{'、'.join(removed)}",
+                       "tags": rest, "removed": removed}, ensure_ascii=False)
 
 
 def list_customer_tags(
@@ -682,16 +693,15 @@ def list_customer_tags(
     customer = db.get_customer(customer_id)
     if not customer:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
-    
-    tags = customer.get('tags', '')
-    tag_list = tags.split(',') if tags else []
-    return json.dumps({"success": True, "customer_id": customer_id, "tags": tag_list}, ensure_ascii=False)
+    tag_list = clean_tags(customer.get('tags'))
+    return json.dumps({"success": True, "customer_id": customer_id, "tags": tag_list,
+                       "count": len(tag_list)}, ensure_ascii=False)
 
 
 registry.register(
     name="add_customer_tag",
     toolset="real_estate",
-    schema={"name": "add_customer_tag", "description": "添加客户标签", "parameters": {
+    schema={"name": "add_customer_tag", "description": "给客户打标签（支持一次传多个，用逗号/顿号分隔；重复的标签不会重复添加）。标签用于按特征筛客户、批量跟进。", "parameters": {
         "type": "object",
         "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},
@@ -705,7 +715,7 @@ registry.register(
 registry.register(
     name="remove_customer_tag",
     toolset="real_estate",
-    schema={"name": "remove_customer_tag", "description": "移除客户标签", "parameters": {
+    schema={"name": "remove_customer_tag", "description": "移除客户某个标签（会归一写法：带空格/全角写法的同一个标签也能删掉）。", "parameters": {
         "type": "object",
         "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},
@@ -719,7 +729,7 @@ registry.register(
 registry.register(
     name="list_customer_tags",
     toolset="real_estate",
-    schema={"name": "list_customer_tags", "description": "查看客户标签", "parameters": {
+    schema={"name": "list_customer_tags", "description": "查看某位客户的全部标签。", "parameters": {
         "type": "object",
         "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},

@@ -230,3 +230,54 @@ def birthday_matches_month_day(stored, month=None, day=None):
     except ValueError:
         return False
     return False
+
+
+# ==================== 客户标签 ====================
+
+TAG_MAX_LEN = 20
+_TAG_SEPARATORS = re.compile(r"[,，、;；/／|｜]+")
+
+
+def norm_tags(value, max_len=TAG_MAX_LEN):
+    """标签写法归一 → (标签列表, 问题说明或 None)。
+
+    规则（2026-09-24 加，标签三件套共用）：
+    - 去首尾空白（含全角空格）；
+    - 按中英文逗号/顿号/分号/斜杠/竖线**拆成多个标签** —— 存储层用逗号分隔，含逗号的标签本身不合法；
+    - 丢掉空元素、按出现顺序去重；
+    - 单个标签超过 max_len 个字 → 拒绝（不截断，避免造出一个用户没说的标签）。
+    """
+    if value is None:
+        return [], "标签不能为空"
+    text = str(value).replace("\u3000", " ").strip()
+    if not text:
+        return [], "标签不能为空"
+    tags, seen = [], set()
+    for part in _TAG_SEPARATORS.split(text):
+        tag = part.strip()
+        if not tag:
+            continue
+        if len(tag) > max_len:
+            return [], f"标签「{tag[:12]}…」太长了（每个标签最多 {max_len} 个字）"
+        if tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    if not tags:
+        return [], "标签不能为空"
+    return tags, None
+
+
+def clean_tags(value):
+    """把库里存的标签串读成干净的列表（去空元素/去首尾空白/去重，不改动库存值）。
+
+    存量数据里可能有 "A, A"、"A,,"、带空格的写法 —— 读路径统一过滤，避免列表里冒出空标签。
+    """
+    if not value:
+        return []
+    out, seen = [], set()
+    for part in str(value).split(","):
+        tag = part.strip()
+        if tag and tag not in seen:
+            seen.add(tag)
+            out.append(tag)
+    return out
