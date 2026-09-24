@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 
 from agent.real_estate_input import norm_id, norm_phone
+from tools.real_estate_property import _STATUS_LABELS, _fmt_price
 from tools.registry import registry
 
 
@@ -73,6 +74,17 @@ TRUST_NOTE_MAX = 200
 # 列表分页口径（与客户侧 list_customers 同一套：默认 50、上限 200、≤0 与非数字按默认）
 _LIST_LIMIT_DEFAULT = 50
 _LIST_LIMIT_MAX = 200
+
+
+def _clamp_limit(value, default=_LIST_LIMIT_DEFAULT, maximum=_LIST_LIMIT_MAX):
+    """条数归一 → 正整数：非数字/≤0 按默认、超过上限按上限（与客户侧 list_customers 同一套口径）"""
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    if value <= 0:
+        return default
+    return min(value, maximum)
 
 
 def _clip(value, max_len):
@@ -256,13 +268,7 @@ def list_owners(limit: int = 50, task_id: str = None) -> str:
     limit: 返回条数（默认 50，最多 200；传 0/负数/非数字按默认 50 处理）。
     返回 count=本次条数、total=房东总数、truncated=是否被截断（被截断时给一句说明）。
     """
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        limit = _LIST_LIMIT_DEFAULT
-    if limit <= 0:
-        limit = _LIST_LIMIT_DEFAULT
-    limit = min(limit, _LIST_LIMIT_MAX)
+    limit = _clamp_limit(limit)
     db = _get_db()
     owners, total = db.list_owners(limit=limit, with_total=True)
     # 联系方式展示防御（2026-09-25 加，与 get_owner / 客户列表 F53 同口径）
@@ -278,24 +284,43 @@ def list_owners(limit: int = 50, task_id: str = None) -> str:
     return json.dumps(_attach_key_warning(payload, masked_fields), ensure_ascii=False)
 
 
-def owner_portfolio(owner_id: int, task_id: str = None) -> str:
-    """房东名下房源组合：房源列表 + 在售/成交统计"""
+def owner_portfolio(owner_id: int, limit: int = None, task_id: str = None) -> str:
+    """房东名下房源组合：房源明细（默认最新登记优先）+ 在售/成交统计（统计按名下全部房源算）
+
+    limit: 返回条数（默认 50，最多 200；传 0/负数/非数字按默认 50）。
+    """
+    oid, problem = norm_id(owner_id, '房东编号', '，可在房东列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem + "。"}, ensure_ascii=False)
+    limit = _clamp_limit(limit)
     db = _get_db()
-    result = db.owner_portfolio(owner_id)
+    result = db.owner_portfolio(oid, limit=limit)
     if not result:
         return json.dumps({"success": False, "error": "房东不存在"}, ensure_ascii=False)
-    stats = result["stats"]
-    lines = [
-        f"房东 {result['owner']['name']} 名下 {stats['total']} 套房"
-        f"（在售 {stats['available']} / 已成交 {stats['dealed']}）"
-    ]
-    for p in result["properties"]:
+    # 联系方式展示防御（2026-09-25 加，与 get_owner / list_owners 同口径）
+    result['owner'], masked = _mask_owner_contacts(result['owner'])
+    stats = result['stats']
+    shown = result['properties']
+    truncated = stats['total'] > len(shown)
+    if stats['total']:
+        lines = [f"房东 {result['owner']['name']} 名下 {stats['total']} 套房"
+                 f"（在售 {stats['available']} / 已成交 {stats['dealed']}）"]
+    else:
+        lines = [f"房东 {result['owner']['name']} 名下暂无房源"]
+    if truncated:
+        lines.append(f"共 {stats['total']} 套房源，这里列出最新登记的 {len(shown)} 套（最新登记优先）。"
+                     f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+    for p in shown:
+        # 展示口径复用房源侧：_fmt_price（出租 → 元/月）/ _STATUS_LABELS（在售/已售/已租）
         viewing = f"，看房方式: {p['viewing_note']}" if p.get("viewing_note") else ""
-        lines.append(f"\n· {p['title']}（ID:{p['id']}）{p['price']/10000:.0f}万 [{p['status']}]{viewing}")
-    return json.dumps({
+        status = _STATUS_LABELS.get(p.get('status'), p.get('status') or '未录入')
+        lines.append(f"\n· {p['title']}（ID:{p['id']}）{_fmt_price(p)} [{status}]{viewing}")
+    payload = {
         "success": True, **result,
+        "count": len(shown), "truncated": truncated,
         "message": "\n".join(lines),
-    }, ensure_ascii=False)
+    }
+    return json.dumps(_attach_key_warning(payload, masked), ensure_ascii=False)
 
 
 def exclusive_expiring(days: int = 30, task_id: str = None) -> str:
@@ -356,10 +381,13 @@ TOOLS = [
     },
     {
         "name": "owner_portfolio",
-        "description": "房东名下房源组合：房源列表 + 在售/成交统计 + 看房方式",
+        "description": "房东名下房源组合（默认最新登记优先）：名下房源明细（标题/价格/状态/看房方式，出租按月租说）+ 在售·成交统计（统计按名下全部房源算）。房东不存在或编号写错会如实说明。用于经纪人问\"这位房东名下有哪些房/在售几套\"",
         "parameters": {
             "type": "object",
-            "properties": {"owner_id": {"type": "integer", "description": "房东ID"}},
+            "properties": {
+                "owner_id": {"type": "integer", "description": "房东ID（数字，如 12；不确定就先列房东列表查）"},
+                "limit": {"type": "integer", "description": "返回条数（默认 50，最多 200；传 0/负数/非数字按默认 50）—— 统计数字始终按名下全部房源计算"},
+            },
             "required": ["owner_id"],
         },
         "handler": lambda args, **kw: owner_portfolio(**args),

@@ -1378,21 +1378,29 @@ class RealEstateDB:
                             return (o.to_dict() if o else None, None)
         return (None, None)
 
-    def owner_portfolio(self, owner_id):
-        """房东名下房源列表 + 各房状态"""
+    def owner_portfolio(self, owner_id, limit=None, newest_first=True):
+        """房东名下房源组合：房源明细 + 全量统计
+
+        - `stats` 永远按名下**全部**房源算（SQL 聚合，不受明细条数影响）；
+        - `limit=None` 表示不限条数（内部调用保持原样）；分页边界（≤0/非数字按默认、上限）
+          留在工具层，与其它列表工具同一口径；
+        - 明细默认**最新登记优先**（原先按主键升序 = 最早优先，刚挂的房要翻到最后才看得见）。
+        """
         with self.get_session() as s:
             o = s.query(Owner).get(owner_id)
             if not o:
                 return None
-            props = s.query(Property).filter(Property.owner_id == owner_id).all()
+            named = s.query(Property).filter(Property.owner_id == owner_id)
+            total = named.count()
+            available = named.filter(Property.status == 'available').count()
+            dealed = named.filter(Property.status.in_(('sold', 'rented'))).count()
+            q = named.order_by(Property.id.desc()) if newest_first else named
+            if limit is not None:
+                q = q.limit(limit)
             return {
                 'owner': o.to_dict(),
-                'properties': [p.to_dict() for p in props],
-                'stats': {
-                    'total': len(props),
-                    'available': sum(1 for p in props if p.status == 'available'),
-                    'dealed': sum(1 for p in props if p.status in ('sold', 'rented')),
-                },
+                'properties': [p.to_dict() for p in q.all()],
+                'stats': {'total': total, 'available': available, 'dealed': dealed},
             }
 
     def get_property_owners(self, property_ids):
