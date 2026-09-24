@@ -437,7 +437,7 @@ def get_customer(customer_id: int, task_id: str = None) -> str:
 
 
 def list_customers(tier: str = None, status: str = None, customer_type: str = None, limit: int = 20,
-                   include_closed: bool = False, task_id: str = None) -> str:
+                   include_closed: bool = False, tag: str = None, task_id: str = None) -> str:
     """列出客户列表（默认只列在跟客户：活跃 + 暂缓，按最新录入优先）
 
     customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)；
@@ -446,6 +446,7 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
     include_closed=True 才把已关闭客户一并列出（默认不列：关掉的客户不再跟进，
     混在列表与数量里会让数字越用越虚）。
     limit: 本次返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20 处理）。
+    tag: 按标签筛（精确匹配单个标签；多个标签用逗号分隔表示"同时包含"；写法会归一）。
     返回 total=符合条件的总数、count=本次返回条数、truncated=是否被截断。
     """
     db = _get_db()
@@ -474,14 +475,24 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
         limit = _LIST_LIMIT_DEFAULT
     limit = min(limit, _LIST_LIMIT_MAX)
 
+    tag_values = []
+    if tag is not None:
+        # 与 status/customer_type/tier 三个筛选参数同一口径：给了就校验，空值/超长给中文提示，
+        # 不静默当成"没筛"（否则上层以为筛过了，实际拿到了全量）
+        tag_values, problem = norm_tags(tag)
+        if problem:
+            return _fail(f"标签没能识别：{problem}。请给一个具体的标签名（如 学区房、急售）")
     result, total = db.list_customers(tier=tier, status=status, customer_type=customer_type,
-                                      limit=limit, include_closed=include_closed, with_total=True)
+                                      limit=limit, include_closed=include_closed, with_total=True,
+                                      tag=tag if tag_values else None)
     # 联系方式展示防御（2026-09-24 加，与 get_customer / 房源详情 F16 同口径）
     masked_fields = []
     for row in result:
         _, row_masked = _mask_customer_contacts(row)
         masked_fields.extend(row_masked)
     scope = "按指定状态" if status else ("含已关闭" if include_closed else "在跟客户（活跃+暂缓）")
+    if tag_values:
+        scope += f"，含标签：{'、'.join(tag_values)}"
     total = total if total is not None else len(result)
     response = {"success": True, "customers": result, "count": len(result), "total": total,
                 "truncated": bool(total > len(result)), "count_scope": scope}
@@ -554,12 +565,13 @@ TOOLS = [
     {"name": "get_customer", "description": "获取某位客户的完整资料（联系方式、等级、预算区间、面积/户型偏好、意向区域、装修偏好、来源、标签、生命周期阶段、在跟/已关闭状态、生日、备注、建档与更新时间）。按客户编号查，编号来自建档或客户列表。", "parameters": {
         "type": "object", "properties": {"customer_id": {"type": "integer"}}, "required": ["customer_id"],
     }, "handler": lambda args, **kw: get_customer(**args)},
-    {"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓，按最新录入优先；可按等级/客户类型/状态筛选；已关闭客户默认不列，要看需传 include_closed=true 或 status=\"closed\"）。返回 total=符合条件的总数、count=本次返回条数、truncated", "parameters": {
+    {"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓，按最新录入优先；可按等级/客户类型/状态/**标签**筛选；已关闭客户默认不列，要看需传 include_closed=true 或 status=\"closed\"）。返回 total=符合条件的总数、count=本次返回条数、truncated", "parameters": {
         "type": "object", "properties": {
             "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
             "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent", "unspecified"], "description": "客户类型筛选：buy_new买一手房/buy_second_hand买二手房/rent租房/unspecified未细分（经纪人没确认买新房还是买二手房的客户）"},
             "status": {"type": "string", "enum": ["active", "paused", "closed"], "description": "按状态筛选（不传默认不列已关闭客户）"},
             "include_closed": {"type": "boolean", "description": "是否把已关闭客户一起列出（默认 false）"},
+            "tag": {"type": "string", "description": "按标签筛：精确匹配单个标签；多个标签用逗号分隔表示同时包含（写法会归一，如 学区房、急售）"},
             "limit": {"type": "integer", "description": "本次返回条数，默认20，最多200（传0/负数按默认20）"},
         },
     }, "handler": lambda args, **kw: list_customers(**args)},
@@ -610,7 +622,7 @@ registry.register(
 registry.register(
     name="list_customers",
     toolset="real_estate",
-    schema={"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓，按最新录入优先；可按等级/客户类型/状态筛选；已关闭客户默认不列，要看需传 include_closed=true 或 status=\"closed\"）。返回 total=符合条件的总数、count=本次返回条数、truncated", "parameters": TOOLS[3]["parameters"]},
+    schema={"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓，按最新录入优先；可按等级/客户类型/状态/**标签**筛选；已关闭客户默认不列，要看需传 include_closed=true 或 status=\"closed\"）。返回 total=符合条件的总数、count=本次返回条数、truncated", "parameters": TOOLS[3]["parameters"]},
     handler=TOOLS[3]["handler"],
 )
 registry.register(

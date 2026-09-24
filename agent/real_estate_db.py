@@ -8,8 +8,8 @@ import re
 import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
-from agent.real_estate_input import (birthday_matches_month_day, customer_type_filter,
-                                     norm_money, norm_phone)
+from agent.real_estate_input import (birthday_matches_month_day, clean_tags, customer_type_filter,
+                                     norm_money, norm_phone, norm_tags)
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Float, Numeric, BigInteger,
     DateTime, ForeignKey, CheckConstraint, Index, or_
@@ -820,7 +820,7 @@ class RealEstateDB:
             return c.to_dict() if c else None
     
     def list_customers(self, tier=None, status=None, customer_type=None, limit=50, include_closed=False,
-                       with_total=False):
+                       with_total=False, tag=None):
         """列客户。默认只列在跟的（active 活跃 / paused 暂缓），**按最新录入优先**。
 
         2026-09-23 改：此前不传 status 会把已关闭(closed)的客户也列出来，导致"列客户"
@@ -843,9 +843,21 @@ class RealEstateDB:
                 if None in values:
                     cond = or_(cond, Customer.customer_type.is_(None))
                 q = q.filter(cond)
+            ordered = lambda query: query.order_by(Customer.created_at.desc(), Customer.id.desc())
+            if tag:
+                # 按标签筛（2026-09-24 加，F75）：多个标签=同时包含；LIKE 只是粗筛
+                #（'地铁房' 会命中 '近地铁房'），取出后按同一套分隔符精确比对
+                wanted = [t for t in norm_tags(tag)[0]]
+                if not wanted:
+                    return ([], 0) if with_total else []
+                for t in wanted:
+                    q = q.filter(Customer.tags.contains(t, autoescape=True))
+                candidates = [c.to_dict() for c in ordered(q).all()]
+                matched = [c for c in candidates
+                           if all(t in clean_tags(c.get('tags')) for t in wanted)]
+                return (matched[:limit], len(matched)) if with_total else matched[:limit]
             total = q.count() if with_total else None
-            rows = [c.to_dict() for c in q.order_by(Customer.created_at.desc(),
-                                                   Customer.id.desc()).limit(limit).all()]
+            rows = [c.to_dict() for c in ordered(q).limit(limit).all()]
             return (rows, total) if with_total else rows
 
     def get_birthday_customers(self, month=None, day=None):
