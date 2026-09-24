@@ -2,7 +2,43 @@
 Coco 房产工具 - 客户管理
 """
 import json
+
+from agent.real_estate_input import (norm_birthday, norm_customer_type, norm_money,
+                                     norm_phone, norm_tier)
 from tools.registry import registry
+
+# "够不着"的硬冲突理由：匹配结果全是这些时，不能说"有 N 套可能符合需求"
+_HARD_CONFLICT_REASONS = ("超预算", "区域不符", "类型不符")
+
+
+def _fail(message: str) -> str:
+    return json.dumps({"success": False, "error": message}, ensure_ascii=False)
+
+
+def _match_message(matches, budget_max):
+    """给自动匹配配一句可读的话：
+
+    有"够得着"的（无硬冲突）就报数量；一套都够不着时改口径如实说"暂无符合需求的房源"，
+    不能把 30 倍超预算的房子说成"可能符合需求"。
+    """
+    qualified = [m for m in matches
+                 if not any(r in _HARD_CONFLICT_REASONS for r in (m.get('match_reasons') or []))]
+    if qualified:
+        return f"客户已添加，有 {len(qualified)} 套房源符合需求"
+    parts = []
+    for m in matches[:2]:
+        price = m.get('price')
+        price_txt = f"{price/10000:.0f}万" if isinstance(price, (int, float)) and price else "价格未知"
+        reasons = [r for r in (m.get('match_reasons') or []) if r in _HARD_CONFLICT_REASONS]
+        if '超预算' in reasons and isinstance(price, (int, float)) and isinstance(budget_max, (int, float)) \
+                and price > budget_max:
+            extra = f"，超出预算 {(price - budget_max)/10000:.0f}万"
+        elif reasons:
+            extra = "，" + "、".join(reasons)
+        else:
+            extra = ""
+        parts.append(f"{m.get('title') or '房源'} {price_txt}{extra}")
+    return f"客户已添加。库里暂无符合需求的房源，最接近的 {len(matches)} 套仅供参考（{'；'.join(parts)}）"
 
 
 def _safe_contact(value):
@@ -31,20 +67,63 @@ def add_customer(
     renovation: str = None,
     notes: str = None,
     source: str = None,
-    customer_type: str = "buy",
+    customer_type: str = None,
     birthday: str = None,
     force: bool = False,
     task_id: str = None,
 ) -> str:
     """添加新客户到系统
-    
-    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)
+
+    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)；
+                   没确认是买新房还是买二手房时不传（按"未细分"登记，匹配时不限类型）。
     force=True 跳过客户查重强制新增（仅当老板确认要新增重复客户时才用，默认 False）。
     """
     db = _get_db()
+
+    # 入参归一与基础校验（2026-09-24 加，与房源录入同一套口径）：模型会把经纪人的原话
+    # 直接传下来（预算"300万"、生日"5月20日"），能认就换算，认不出给中文提示，绝不静默
+    # 把文本存进库——文本预算会让这套客户的匹配直接崩，批量匹配整批跟着崩。
+    name = name.strip() if isinstance(name, str) else name
+    if not name:
+        return _fail("客户姓名不能为空，请告诉我这位客户怎么称呼")
+
+    ctype, ok = norm_customer_type(customer_type)
+    if not ok:
+        return _fail(f"客户类型没能识别：收到的是「{customer_type}」。请用 buy_new(买一手房) / "
+                     f"buy_second_hand(买二手房) / rent(租房)；不确定是买新房还是买二手房就先不传")
+
+    tier_value, ok = norm_tier(tier)
+    if not ok:
+        return _fail(f"客户等级没能识别：收到的是「{tier}」。等级只能是 S / A / B / C")
+
+    warnings = []
+    for field_name, label in (('budget_min', '预算下限'), ('budget_max', '预算上限')):
+        raw = budget_min if field_name == 'budget_min' else budget_max
+        if raw is None:
+            continue
+        value = norm_money(raw)
+        if value is None:
+            return _fail(f"{label}没能识别：收到的是「{raw}」。请按元给数字（300万 记作 3000000）")
+        if value < 0:
+            return _fail(f"{label}不能是负数：收到的是「{raw}」")
+        if field_name == 'budget_min':
+            budget_min = value
+        else:
+            budget_max = value
+    if budget_min is not None and budget_max is not None and budget_min > budget_max:
+        warnings.append(f"预算下限 {budget_min/10000:.0f}万 大于上限 {budget_max/10000:.0f}万，"
+                        f"已按原样登记，请核对哪个写反了")
+
+    raw_birthday = birthday
+    birthday, ok = norm_birthday(birthday)
+    if not ok:
+        return _fail(f"生日没能识别：收到的是「{raw_birthday}」。请用 1990-05-20 或 05-20 这类写法")
+
+    phone = norm_phone(phone)
+
     if not force:
         dup, warn = db.find_duplicate_customer(
-            phone=phone, wechat=wechat, name=name, customer_type=customer_type)
+            phone=phone, wechat=wechat, name=name, customer_type=ctype)
         if warn:
             # 密钥不一致防御：不强行判重，提示先检查 COCO_ENC_KEY
             return json.dumps({
@@ -72,11 +151,11 @@ def add_customer(
                           f"手机 {_safe_contact(dup.get('phone')) or '未填'}）。" + msg),
             }, ensure_ascii=False)
     result = db.add_customer(
-        name=name, phone=phone, wechat=wechat, tier=tier,
+        name=name, phone=phone, wechat=wechat, tier=tier_value,
         budget_min=budget_min, budget_max=budget_max,
         area_pref=area_pref, layout_pref=layout_pref,
         location=location, renovation=renovation,
-        notes=notes, source=source, customer_type=customer_type,
+        notes=notes, source=source, customer_type=ctype,
         birthday=birthday,
     )
     # 录入后自动匹配（2026-08-29 加）：新客户 → 自动找匹配房源，随返回主动报告
@@ -91,7 +170,9 @@ def add_customer(
     response = {"success": True, "customer": result}
     if matched_properties:
         response["matched_properties"] = matched_properties
-        response["message"] = f"客户已添加，有 {len(matched_properties)} 套房源可能符合需求"
+        response["message"] = _match_message(matched_properties, budget_max)
+    if warnings:
+        response["warnings"] = warnings
     if match_warning:
         response["warning_match"] = match_warning
     return json.dumps(response, ensure_ascii=False)
@@ -120,6 +201,44 @@ def update_customer(
     old = db.get_customer(customer_id)
     if old is None:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+
+    # 与 add_customer 同一套入参归一与校验（2026-09-24 加）：文本预算存进库会让匹配崩，
+    # 乱写的等级会撞数据库约束崩，生日乱写会让生日提醒静默漏人。
+    warnings = []
+    if name is not None:
+        name = name.strip() if isinstance(name, str) else name
+        if not name:
+            return _fail("客户姓名不能为空")
+    if tier is not None:
+        raw_tier = tier
+        tier, ok = norm_tier(tier)
+        if not ok:
+            return _fail(f"客户等级没能识别：收到的是「{raw_tier}」。等级只能是 S / A / B / C")
+    for field_name, label in (('budget_min', '预算下限'), ('budget_max', '预算上限')):
+        raw = budget_min if field_name == 'budget_min' else budget_max
+        if raw is None:
+            continue
+        value = norm_money(raw)
+        if value is None:
+            return _fail(f"{label}没能识别：收到的是「{raw}」。请按元给数字（300万 记作 3000000）")
+        if value < 0:
+            return _fail(f"{label}不能是负数：收到的是「{raw}」")
+        if field_name == 'budget_min':
+            budget_min = value
+        else:
+            budget_max = value
+    eff_min = budget_min if budget_min is not None else norm_money(old.get('budget_min'))
+    eff_max = budget_max if budget_max is not None else norm_money(old.get('budget_max'))
+    if eff_min is not None and eff_max is not None and eff_min > eff_max:
+        warnings.append(f"预算下限 {eff_min/10000:.0f}万 大于上限 {eff_max/10000:.0f}万，"
+                        f"已按原样登记，请核对哪个写反了")
+    if birthday is not None:
+        raw_birthday = birthday
+        birthday, ok = norm_birthday(birthday)
+        if not ok:
+            return _fail(f"生日没能识别：收到的是「{raw_birthday}」。请用 1990-05-20 或 05-20 这类写法")
+    phone = norm_phone(phone)
+
     kwargs = {k: v for k, v in {
         'name': name, 'phone': phone, 'wechat': wechat, 'tier': tier,
         'budget_min': budget_min, 'budget_max': budget_max,
@@ -132,9 +251,9 @@ def update_customer(
     # 需求漂移预警：预算上限下调 >=30% → 客户可能转向更便宜的房子
     alerts = []
     if 'budget_max' in kwargs and old.get('budget_max'):
-        old_max = float(old['budget_max'])
-        new_max = float(kwargs['budget_max'])
-        if old_max > 0 and new_max < old_max * 0.7:
+        old_max = norm_money(old.get('budget_max'))
+        new_max = norm_money(kwargs.get('budget_max'))
+        if old_max and new_max and old_max > 0 and new_max < old_max * 0.7:
             drop_pct = round((old_max - new_max) / old_max * 100)
             alerts.append({
                 'type': 'budget_drift',
@@ -150,6 +269,8 @@ def update_customer(
         })
 
     response = {"success": True, "customer": result}
+    if warnings:
+        response['warnings'] = warnings
     if alerts:
         response['alerts'] = alerts
     return json.dumps(response, ensure_ascii=False)
@@ -182,11 +303,23 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
                    include_closed: bool = False, task_id: str = None) -> str:
     """列出客户列表（默认只列在跟客户：活跃 + 暂缓）
 
-    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)
+    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)；
+                   unspecified=未细分（经纪人没说买新房还是买二手房的客户）。
     include_closed=True 才把已关闭客户一并列出（默认不列：关掉的客户不再跟进，
     混在列表与数量里会让数字越用越虚）。
     """
     db = _get_db()
+    if customer_type:
+        ctype, ok = norm_customer_type(customer_type)
+        if not ok:
+            return _fail(f"客户类型筛选没能识别：收到的是「{customer_type}」。请用 buy_new(买一手房) / "
+                         f"buy_second_hand(买二手房) / rent(租房) / unspecified(未细分)")
+        customer_type = ctype
+    if tier:
+        tier_value, ok = norm_tier(tier)
+        if not ok:
+            return _fail(f"客户等级筛选没能识别：收到的是「{tier}」。等级只能是 S / A / B / C")
+        tier = tier_value
     result = db.list_customers(tier=tier, status=status, customer_type=customer_type,
                                limit=limit, include_closed=include_closed)
     scope = "按指定状态" if status else ("含已关闭" if include_closed else "在跟客户（活跃+暂缓）")
@@ -213,7 +346,7 @@ def customer_stats(task_id: str = None) -> str:
 
 
 TOOLS = [
-    {"name": "add_customer", "description": "添加新客户到系统", "parameters": {
+    {"name": "add_customer", "description": "添加新客户到系统（自动查重：手机号>微信>姓名+客户类型；建档后自动匹配房源并随返回报告）", "parameters": {
         "type": "object",
         "properties": {
             "name": {"type": "string", "description": "客户姓名"},
@@ -228,7 +361,7 @@ TOOLS = [
             "renovation": {"type": "string", "description": "装修偏好"},
             "notes": {"type": "string", "description": "备注"},
             "source": {"type": "string", "description": "客户来源"},
-            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型：buy_new(买一手房)/buy_second_hand(买二手房)/rent(租房)"},
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型：buy_new(买一手房)/buy_second_hand(买二手房)/rent(租房)。经纪人没说清买新房还是买二手房就不要传，按未细分登记（匹配时不限类型）"},
             "birthday": {"type": "string", "description": "客户生日 YYYY-MM-DD"},
             "force": {"type": "boolean", "description": "默认 false。true=跳过客户查重强制新增（仅当老板确认要新增重复客户时才用）"},
         },
@@ -253,10 +386,10 @@ TOOLS = [
     {"name": "get_customer", "description": "获取客户详情", "parameters": {
         "type": "object", "properties": {"customer_id": {"type": "integer"}}, "required": ["customer_id"],
     }, "handler": lambda args, **kw: get_customer(**args)},
-    {"name": "list_customers", "description": "列出客户列表", "parameters": {
+    {"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓；可按等级/客户类型/状态筛选，已关闭客户需显式要求）", "parameters": {
         "type": "object", "properties": {
             "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
-            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型筛选：buy_new买一手房/buy_second_hand买二手房/rent租房"},
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent", "unspecified"], "description": "客户类型筛选：buy_new买一手房/buy_second_hand买二手房/rent租房/unspecified未细分（经纪人没确认买新房还是买二手房的客户）"},
             "status": {"type": "string", "enum": ["active", "paused", "closed"], "description": "按状态筛选（不传默认不列已关闭客户）"},
             "include_closed": {"type": "boolean", "description": "是否把已关闭客户一起列出（默认 false）"},
             "limit": {"type": "integer"},

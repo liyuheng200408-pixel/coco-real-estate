@@ -1,0 +1,202 @@
+"""
+房产助理 - 录入写法归一
+
+模型常把经纪人的原话直接传下来（价格「185万」「一百五十万」、手机号「139 1111 2222」、
+客户类型「买二手房」），统一在这里换算成系统口径；认不出返回 None，由调用方给中文提示，
+**绝不静默存错**。
+"""
+import re
+from datetime import datetime
+
+# ==================== 金额 ====================
+
+_CN_DIGITS = {'零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
+              '六': 6, '七': 7, '八': 8, '九': 9}
+_CN_UNITS = {'十': 10, '百': 100, '千': 1000, '万': 10000, '亿': 100000000}
+
+
+def cn_number(text):
+    """把「一百五十」「三千二」这类中文数字转成数值；认不出返回 None"""
+    total = section = number = 0
+    seen = False
+    for ch in text:
+        if ch in _CN_DIGITS:
+            number = _CN_DIGITS[ch]
+            seen = True
+        elif ch in _CN_UNITS:
+            unit = _CN_UNITS[ch]
+            seen = True
+            if unit >= 10000:
+                section = (section + number) * unit
+                total += section
+                section = number = 0
+            else:
+                section += (number or 1) * unit
+                number = 0
+        else:
+            return None
+    return (total + section + number) if seen else None
+
+
+def norm_money(value):
+    """把「185万 / 一百五十万 / 1,850,000 元 / 2200」这类写法换算成元（int）；认不出返回 None。
+
+    只清"价格尾巴"；单价类写法（3000/平米）不允许被当成总价，宁可认不出让模型回头问。
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip().replace(',', '').replace('，', '').replace(' ', '')
+    for junk in ('人民币', '元整', '元', '万整', '块', '¥', '￥', '/月', '／月', '每月', '/套'):
+        text = text.replace(junk, '')
+    if not text:
+        return None
+    multiplier = 1
+    if '亿' in text:
+        multiplier, text = 100000000, text.replace('亿', '')
+    elif '万' in text:
+        multiplier, text = 10000, text.replace('万', '')
+    try:
+        num = float(text)
+    except ValueError:
+        num = cn_number(text)
+        if num is None:
+            return None
+    return int(round(num * multiplier))
+
+
+# ==================== 手机号 ====================
+
+def norm_phone(value):
+    """手机号写法归一：去空格/横线/括号/点、去 +86 与 0086 前缀。
+
+    归一只为"认出同一个人"，改不了写法时退回去掉首尾空白的原值（手机号不是必填，
+    认不出也不该拦住建档）。
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace('＋', '+').replace('－', '-').replace('　', '')
+    text = re.sub(r'[\s\-()（）\.]', '', text)
+    if text.startswith('+86'):
+        text = text[3:]
+    elif text.startswith('0086'):
+        text = text[4:]
+    elif len(text) == 13 and text.startswith('86'):
+        text = text[2:]
+    return text
+
+
+# ==================== 客户类型 / 等级 ====================
+
+CUSTOMER_TYPES = ("buy_new", "buy_second_hand", "rent")
+# 未细分（经纪人没说买新房还是买二手房）：匹配时不限类型，但必须能在筛选中被找到
+CUSTOMER_TYPE_UNSPECIFIED = "unspecified"
+
+_CUSTOMER_TYPE_ALIASES = {
+    "buy_new": "buy_new", "buynew": "buy_new", "new": "buy_new",
+    "一手房": "buy_new", "新房": "buy_new", "买一手": "buy_new", "买一手房": "buy_new", "买新房": "buy_new",
+    "buy_second_hand": "buy_second_hand", "buysecondhand": "buy_second_hand",
+    "buy_secondhand": "buy_second_hand", "second_hand": "buy_second_hand", "secondhand": "buy_second_hand",
+    "二手房": "buy_second_hand", "买二手": "buy_second_hand", "买二手房": "buy_second_hand",
+    "rent": "rent", "rental": "rent", "租房": "rent", "租": "rent", "出租": "rent",
+    "unspecified": CUSTOMER_TYPE_UNSPECIFIED, "unknown": CUSTOMER_TYPE_UNSPECIFIED,
+    "buy": CUSTOMER_TYPE_UNSPECIFIED, "未细分": CUSTOMER_TYPE_UNSPECIFIED, "不限": CUSTOMER_TYPE_UNSPECIFIED,
+}
+
+
+def norm_customer_type(value):
+    """客户类型归一 → (规范值或 None, 是否认得)。
+
+    未传/未细分 → CUSTOMER_TYPE_UNSPECIFIED（不猜成"买二手房"，也不留空字符串）。
+    """
+    if value is None:
+        return CUSTOMER_TYPE_UNSPECIFIED, True
+    if not isinstance(value, str):
+        return None, False
+    key = value.strip().lower().replace('-', '_').replace(' ', '')
+    if key in _CUSTOMER_TYPE_ALIASES:
+        return _CUSTOMER_TYPE_ALIASES[key], True
+    return None, False
+
+
+def customer_type_filter(value):
+    """筛选口径 → 库内应匹配的取值集合（含历史值）；值非法返回 None。
+
+    历史遗留：早期默认值是 'buy'、空字符串也有落库过，都归到"未细分"这一档，
+    否则这些客户按类型筛就永远找不到（等于凭空消失）。
+    """
+    canonical, ok = norm_customer_type(value)
+    if not ok:
+        return None
+    if canonical == CUSTOMER_TYPE_UNSPECIFIED:
+        return (CUSTOMER_TYPE_UNSPECIFIED, "buy", "", None)
+    return (canonical,)
+
+
+TIERS = ("S", "A", "B", "C")
+
+
+def norm_tier(value):
+    """客户等级归一 → (规范值或 None, 是否认得)"""
+    if value is None:
+        return None, True
+    if not isinstance(value, str):
+        return None, False
+    key = value.strip().upper()
+    return (key, True) if key in TIERS else (None, False)
+
+
+# ==================== 生日 ====================
+
+def norm_birthday(value):
+    """生日归一 → (规范值或 None, 是否认得)。
+
+    接受 YYYY-MM-DD / YYYY/M/D / MM-DD / M-D / M月D日；统一存成 YYYY-MM-DD 或 MM-DD。
+    认不出返回 (None, False) —— 生日提醒只认这两种写法，乱值入库会让提醒静默漏人。
+    """
+    if value is None:
+        return None, True
+    if not isinstance(value, str):
+        return None, False
+    text = value.strip().replace('/', '-').replace('.', '-').replace('年', '-').replace('月', '-').replace('日', '')
+    text = re.sub(r'\s', '', text)
+    parts = [p for p in text.split('-') if p != '']
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return None, False
+    if len(nums) == 3:
+        year, month, day = nums
+        if not (1900 <= year <= 2100):
+            return None, False
+    elif len(nums) == 2:
+        month, day = nums
+        year = None
+    else:
+        return None, False
+    try:
+        datetime(year or 2000, month, day)
+    except ValueError:
+        return None, False
+    return (f"{year:04d}-{month:02d}-{day:02d}" if year else f"{month:02d}-{day:02d}"), True
+
+
+def birthday_matches_month_day(stored, month=None, day=None):
+    """判断库里存的生日（YYYY-MM-DD 或 MM-DD）是否落在给定月/日上"""
+    if not isinstance(stored, str):
+        return False
+    parts = stored.strip().split('-')
+    try:
+        if len(parts) == 3:
+            return (month is None or int(parts[1]) == month) and (day is None or int(parts[2]) == day)
+        if len(parts) == 2:
+            return (month is None or int(parts[0]) == month) and (day is None or int(parts[1]) == day)
+    except ValueError:
+        return False
+    return False

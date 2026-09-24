@@ -4,6 +4,7 @@ Coco 房产工具 - 房源管理
 import json
 import re
 
+from agent.real_estate_input import cn_number, norm_customer_type, norm_money
 from tools.registry import registry
 
 
@@ -41,7 +42,7 @@ def add_property(
         return json.dumps({"success": False, "error": (
             "房源标题是空的：请给一个能认出是哪套房的标题（小区名 + 楼栋/房号）")}, ensure_ascii=False)
     normalized = {}
-    price_value = _norm_money(price)
+    price_value = norm_money(price)
     if price_value is None:
         return json.dumps({"success": False, "error": (
             f"价格没能识别：收到的是「{price}」。请按元给数字（如 185万 记作 1850000；出租月租 2200 就写 2200）")},
@@ -174,65 +175,6 @@ def add_property(
     return json.dumps(response, ensure_ascii=False)
 
 
-_CN_DIGITS = {'零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
-              '六': 6, '七': 7, '八': 8, '九': 9}
-_CN_UNITS = {'十': 10, '百': 100, '千': 1000, '万': 10000, '亿': 100000000}
-
-
-def _cn_number(text):
-    """把「一百五十」「三千二」这类中文数字转成数值；认不出返回 None"""
-    total = section = number = 0
-    seen = False
-    for ch in text:
-        if ch in _CN_DIGITS:
-            number = _CN_DIGITS[ch]
-            seen = True
-        elif ch in _CN_UNITS:
-            unit = _CN_UNITS[ch]
-            seen = True
-            if unit >= 10000:
-                section = (section + number) * unit
-                total += section
-                section = number = 0
-            else:
-                section += (number or 1) * unit
-                number = 0
-        else:
-            return None
-    return (total + section + number) if seen else None
-
-
-def _norm_money(value):
-    """把「185万 / 一百五十万 / 1,850,000 元 / 2200」这类写法换算成元（int）；认不出返回 None。
-
-    模型偶尔会把经纪人原话里的说法直接传下来，这里兜住；认不出就由调用方给中文提示，绝不静默存错。
-    """
-    if isinstance(value, bool) or value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return int(value)
-    if not isinstance(value, str):
-        return None
-    text = value.strip().replace(',', '').replace('，', '').replace(' ', '')
-    # 只清"价格尾巴"；单价类写法（3000/平米）不允许被当成总价，宁可认不出让模型回头问
-    for junk in ('人民币', '元整', '元', '万整', '块', '¥', '￥', '/月', '／月', '每月', '/套'):
-        text = text.replace(junk, '')
-    if not text:
-        return None
-    multiplier = 1
-    if '亿' in text:
-        multiplier, text = 100000000, text.replace('亿', '')
-    elif '万' in text:
-        multiplier, text = 10000, text.replace('万', '')
-    try:
-        num = float(text)
-    except ValueError:
-        num = _cn_number(text)
-        if num is None:
-            return None
-    return int(round(num * multiplier))
-
-
 def _norm_area_value(value):
     """把「128.5㎡ / 一百二十平 / 约128平 / 128」这类写法换算成平方米（float）；认不出返回 None"""
     if isinstance(value, bool) or value is None:
@@ -249,7 +191,7 @@ def _norm_area_value(value):
     try:
         return float(text)
     except ValueError:
-        num = _cn_number(text)
+        num = cn_number(text)
         return float(num) if num is not None else None
 
 
@@ -322,7 +264,7 @@ def update_property(
     # 入参归一与校验（2026-09-24 加，与 add_property 同一套）：经纪人原话（"185万"）先换算成元/㎡，
     # 认不出的、非正面积的、非法状态/类型都挡在写库之前 —— 避免把库里已有数据改成坏值。
     if price is not None:
-        _price = _norm_money(price)
+        _price = norm_money(price)
         if _price is None:
             return json.dumps({"success": False, "error": (
                 f"价格没能识别：收到的是「{price}」。请按元给数字（如 185万 记作 1850000；出租月租 2200 就写 2200）")},
@@ -760,12 +702,20 @@ def batch_match_report(
     """批量匹配汇报：为全部客户（或按类型/等级/区域筛选）生成逐客户匹配明细与汇总
 
     每个客户必有一行（无匹配显式标注"无匹配"），汇总统计由代码生成，禁止自行口算。
-    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)
+    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)；
+                   unspecified=未细分（经纪人没说买新房还是买二手房的客户）
     tier: S/A/B/C
     district: 区域筛选（如"美兰区"或"美兰"）
     top_n: 每个客户展示的最佳房源数（默认 1）
     """
     db = _get_db()
+    if customer_type:
+        ctype, ok = norm_customer_type(customer_type)
+        if not ok:
+            return json.dumps({"success": False, "error": (
+                f"客户类型筛选没能识别：收到的是「{customer_type}」。请用 buy_new(买一手房) / "
+                f"buy_second_hand(买二手房) / rent(租房) / unspecified(未细分)")}, ensure_ascii=False)
+        customer_type = ctype
     result = db.match_all_customers(top_n=top_n, customer_type=customer_type,
                                     tier=tier, district=district)
     return json.dumps({
@@ -860,7 +810,7 @@ TOOLS = [
     }, "handler": lambda args, **kw: property_stats()},
     {"name": "batch_match_report", "description": "批量匹配汇报：为全部客户（或按类型/等级/区域筛选）生成逐客户匹配明细与汇总，每个客户一行（无匹配显式标注），完全匹配/接近匹配/无匹配由代码判定，汇总数字由代码统计，禁止自行口算", "parameters": {
         "type": "object", "properties": {
-            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent"], "description": "客户类型筛选：buy_new买一手房/buy_second_hand买二手房/rent租房"},
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent", "unspecified"], "description": "客户类型筛选：buy_new买一手房/buy_second_hand买二手房/rent租房/unspecified未细分"},
             "tier": {"type": "string", "enum": ["S", "A", "B", "C"], "description": "客户等级筛选"},
             "district": {"type": "string", "description": "区域筛选，如 美兰区 或 美兰"},
             "top_n": {"type": "integer", "description": "每个客户展示的最佳房源数，默认1"},

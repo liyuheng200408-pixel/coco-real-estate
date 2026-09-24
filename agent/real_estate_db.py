@@ -8,6 +8,8 @@ import re
 import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
+from agent.real_estate_input import (birthday_matches_month_day, customer_type_filter,
+                                     norm_money, norm_phone)
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Float, Numeric, BigInteger,
     DateTime, ForeignKey, CheckConstraint, Index, or_
@@ -107,6 +109,18 @@ def looks_like_ciphertext(value) -> bool:
         return False
     v = value.strip()
     return len(v) >= 40 and v.startswith("gAAAA") and all(ch.isalnum() or ch in "-_=" for ch in v)
+
+
+def _as_money(value, default):
+    """把库里的金额读成数字。
+
+    历史脏数据（预算存成「300万」这类文本）也要能读出来 —— 老数据里就可能有，
+    读不出就按默认值：绝不让一条脏数据把整批匹配打崩。
+    """
+    if value is None:
+        return default
+    n = norm_money(value)
+    return default if n is None else n
 
 
 def _deal_kind(property_type):
@@ -278,7 +292,7 @@ class Customer(Base):
     notes = Column(Text)
     tags = Column(Text)
     source = Column(String(100))
-    customer_type = Column(String(20), default="buy")  # buy_new/buy_second_hand/rent
+    customer_type = Column(String(20), default="unspecified")  # buy_new/buy_second_hand/rent；unspecified=未细分（历史值 'buy' 同属这一档）
     birthday = Column(String(10))  # YYYY-MM-DD
     stage = Column(String(20), default='lead')  # 生命周期阶段（2026-08-28 功能5）
     status = Column(String(20), default='active')
@@ -700,6 +714,7 @@ class RealEstateDB:
         """客户查重：手机号(解密后,主) > 微信(次) > 姓名+客户类型(兜底)。返回 (命中客户dict或None, 警告文本或None)。
 
         手机号/微信是 EncryptedString，读取时自动解密，此处比较的是明文。
+        手机号按写法归一再比（带空格、带横线、加国际区号前缀的写法都算同一个号）。
         防御：若读出的值疑似密文（密钥不一致/错配），不强行判重（避免误报/误合并），
         返回 warning 提示先检查 COCO_ENC_KEY。
         """
@@ -707,28 +722,19 @@ class RealEstateDB:
             cands = [c.to_dict() for c in s.query(Customer).all()]
         warning = None
 
-        def _fk(v, probe):
-            # 疑似密文（密钥不一致/错配）：解密失败返回的是 Fernet base64 串，必含字母且不是正常号码形态
-            if not isinstance(v, str):
-                return False
-            v = v.strip()
-            if not v or v == probe:
-                return False
-            phone_chars = set('0123456789 +-()')
-            if all(ch in phone_chars for ch in v) and len(v) <= 24:
-                return False  # 正常号码形态
-            return True        # 含字母/超长/特殊字符 → 视为疑似密文，不强行匹配
-
         if phone:
-            probe = str(phone).strip()
+            probe = norm_phone(phone)
             for c in cands:
                 v = c.get('phone')
                 if v is None:
                     continue
-                if _fk(v, probe):
+                # 疑似密文（密钥不一致）：绝不当成联系方式比较，也不强行判重
+                #（2026-09-24 修：原来的"含字母就当密文"启发式会把正常微信号/含字母的联系方式误判成密文，
+                #  导致库里一旦有微信客户，后续带微信的建档全被拦死）
+                if looks_like_ciphertext(v):
                     warning = "检测到 phone 字段疑为密文、密钥可能不一致，未强行判重，请检查 COCO_ENC_KEY。"
                     continue
-                if str(v).strip() == probe:
+                if norm_phone(v) == probe:
                     if exclude_id is None or c['id'] != exclude_id:
                         return (c, warning)
             return (None, warning)
@@ -739,7 +745,7 @@ class RealEstateDB:
                 v = c.get('wechat')
                 if v is None:
                     continue
-                if _fk(v, probe):
+                if looks_like_ciphertext(v):
                     warning = warning or "检测到 wechat 字段疑为密文、密钥可能不一致，未强行判重，请检查 COCO_ENC_KEY。"
                     continue
                 if str(v).strip() == probe:
@@ -748,8 +754,10 @@ class RealEstateDB:
             return (None, warning)
 
         if name:
+            values = customer_type_filter(customer_type)
             for c in cands:
-                if c.get('name') == name and c.get('customer_type') == customer_type:
+                # 类型兜底判重按"筛选口径"比：未细分（不传类型/历史 'buy'）算同一档
+                if c.get('name') == name and (values is None or (c.get('customer_type') or None) in values):
                     if exclude_id is None or c['id'] != exclude_id:
                         return (c, warning)
         return (None, warning)
@@ -801,28 +809,30 @@ class RealEstateDB:
             if tier: q = q.filter(Customer.tier == tier)
             if status: q = q.filter(Customer.status == status)
             elif not include_closed: q = q.filter(Customer.status != 'closed')
-            if customer_type: q = q.filter(Customer.customer_type == customer_type)
+            if customer_type:
+                values = customer_type_filter(customer_type)
+                if values is None:
+                    return []
+                cols = [v for v in values if v]
+                cond = Customer.customer_type.in_(cols)
+                if None in values:
+                    cond = or_(cond, Customer.customer_type.is_(None))
+                q = q.filter(cond)
             return [c.to_dict() for c in q.limit(limit).all()]
 
     def get_birthday_customers(self, month=None, day=None):
-        """查询指定月/日过生日的客户（用于生日提醒）"""
+        """查询指定月/日过生日的客户（用于生日提醒）
+
+        生日库内有两种写法：YYYY-MM-DD 与 MM-DD（经纪人只记得月日），两种都要认，
+        否则提醒会静默漏人。
+        """
         with self.get_session() as s:
             q = s.query(Customer).filter(Customer.birthday.isnot(None), Customer.status == 'active')
             customers = [c.to_dict() for c in q.all()]
             if month is None and day is None:
                 return customers
-            result = []
-            for c in customers:
-                b = c.get('birthday') or ''
-                parts = b.split('-')
-                if len(parts) == 3:
-                    try:
-                        if month is None or int(parts[1]) == month:
-                            if day is None or int(parts[2]) == day:
-                                result.append(c)
-                    except ValueError:
-                        continue
-            return result
+            return [c for c in customers
+                    if birthday_matches_month_day(c.get('birthday'), month, day)]
     
     # ---------- 房源 ----------
     def add_property(self, **kwargs):
@@ -891,9 +901,17 @@ class RealEstateDB:
             rows = s.query(Customer).filter(Customer.status == 'active',
                                             Customer.budget_max.isnot(None)).all()
             deal_ids = {row[0] for row in s.query(Deal.customer_id).distinct().all()}
-            return [{'customer_id': c.id, 'name': c.name, 'tier': c.tier,
-                     'budget_min': c.budget_min, 'budget_max': c.budget_max,
-                     'phone': c.phone} for c in rows if c.id not in deal_ids]
+            pool = []
+            for c in rows:
+                if c.id in deal_ids:
+                    continue
+                bmax = norm_money(c.budget_max)
+                if bmax is None:
+                    continue    # 预算上限读不出（历史脏数据）：不参与降价反匹配，也不打崩整批
+                pool.append({'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                             'budget_min': norm_money(c.budget_min) or 0, 'budget_max': bmax,
+                             'phone': c.phone})
+            return pool
 
     def find_customers_for_price_drop(self, property_id, days=7, pool=None, limit=None):
         """降价反匹配：找"预算差一点够得着"的客户
@@ -935,7 +953,7 @@ class RealEstateDB:
                          'phone': c.phone} for c in rows if not self.customer_has_deal(c.id)]
             result = []
             for c in rows:
-                bmax = c.get('budget_max') or 0
+                bmax = _as_money(c.get('budget_max'), 0)
                 result.append({
                     'customer_id': c.get('customer_id'), 'name': c.get('name'), 'tier': c.get('tier'),
                     'budget_min': c.get('budget_min'), 'budget_max': bmax,
@@ -1697,8 +1715,8 @@ class RealEstateDB:
                 reasons = []
 
                 # 预算匹配（权重 30）
-                budget_min = c.budget_min or 0
-                budget_max = c.budget_max or 999999999  # 无预算上限（元制）
+                budget_min = _as_money(c.budget_min, 0)
+                budget_max = _as_money(c.budget_max, 999999999)  # 无预算上限（元制）
                 if budget_min <= prop.price <= budget_max:
                     score += 30
                     reasons.append("预算匹配")
@@ -1998,8 +2016,8 @@ class RealEstateDB:
         
         
         min_area, max_area = self._parse_area(customer.get('area_pref'))
-        budget_min = customer.get('budget_min') or 0
-        budget_max = customer.get('budget_max') or 999999999  # 无预算上限（元制）
+        budget_min = _as_money(customer.get('budget_min'), 0)
+        budget_max = _as_money(customer.get('budget_max'), 999999999)  # 无预算上限（元制）
         loc = customer.get('location') or ''
         layout_pref = customer.get('layout_pref')
         layout_plan = self._parse_layout_pref(layout_pref)   # 每客户解析一次（循环里只做整数比较）
@@ -2129,7 +2147,8 @@ class RealEstateDB:
         if tier:
             customers = [c for c in customers if c.tier == tier]
         if customer_type:
-            customers = [c for c in customers if c.customer_type == customer_type]
+            values = customer_type_filter(customer_type)
+            customers = [c for c in customers if values is not None and (c.customer_type or None) in values]
         customers = [c for c in customers if not self.customer_has_deal(c.id)]
         if district:
             dnorm = self._norm_district(district)
