@@ -42,6 +42,45 @@ def _fail(message: str) -> str:
     return json.dumps({"success": False, "error": message}, ensure_ascii=False)
 
 
+# 联系方式读不出来时的口径（读路径与写入路径共用，避免各写一套）
+KEY_MISMATCH_WARNING = (
+    "客户联系方式读不出来：库里的加密内容用当前密钥解不开"
+    "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
+    "在此之前不要把这条联系方式给客户。")
+
+
+def _mask_customer_contacts(row):
+    """把客户行里的联系方式做展示防御，返回 (row, 被掩码的字段列表)。
+
+    密钥不一致时 EncryptedString 会把密文原样返回 —— 读详情、列客户、改等级/改阶段等
+    **所有会把客户数据交给上层的路径**都必须过这里（2026-09-24 收口：原先只有建判重的
+    提示做过，读/写路径都直接把 gAAAA… 交出去了）。
+    """
+    masked = []
+    for key in ("phone", "wechat"):
+        before = row.get(key)
+        if before is None:
+            continue
+        after = _safe_contact(before)
+        if after != before:
+            masked.append(key)
+        row[key] = after
+    return row, masked
+
+
+def _attach_key_warning(payload, masked):
+    """命中密文时给返回体补 warning 与 cipher_fields（让 Coco 如实转述，不静默）"""
+    if masked:
+        payload["warning_key_mismatch"] = KEY_MISMATCH_WARNING
+        payload["cipher_fields"] = sorted(set(masked))
+    return payload
+
+
+def _tier_error(raw_tier):
+    """等级非法时的同一句提示（add_customer / update_customer / update_tier / 列表筛选共用）"""
+    return f"客户等级没能识别：收到的是「{raw_tier}」。等级只能是 S / A / B / C"
+
+
 def _contact_conflict(label, dup, warn):
     """改联系方式前的查重：命中别人已在用的号/微信就给两条可执行路径（与建档同口径）"""
     if warn:
@@ -135,7 +174,7 @@ def add_customer(
 
     tier_value, ok = norm_tier(tier)
     if not ok:
-        return _fail(f"客户等级没能识别：收到的是「{tier}」。等级只能是 S / A / B / C")
+        return _fail(_tier_error(tier))
 
     warnings = []
     for field_name, label in (('budget_min', '预算下限'), ('budget_max', '预算上限')):
@@ -260,7 +299,7 @@ def update_customer(
         raw_tier = tier
         tier, ok = norm_tier(tier)
         if not ok:
-            return _fail(f"客户等级没能识别：收到的是「{raw_tier}」。等级只能是 S / A / B / C")
+            return _fail(_tier_error(raw_tier))
     if status is not None:
         raw_status = status
         status, ok = _norm_status(status)
@@ -341,12 +380,13 @@ def update_customer(
             'message': f"意向区域从「{old['location']}」变更为「{kwargs['location']}」，留意需求方向变化。",
         })
 
+    result, masked = _mask_customer_contacts(result)
     response = {"success": True, "customer": result}
     if warnings:
         response['warnings'] = warnings
     if alerts:
         response['alerts'] = alerts
-    return json.dumps(response, ensure_ascii=False)
+    return json.dumps(_attach_key_warning(response, masked), ensure_ascii=False)
 
 
 def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT,
@@ -383,18 +423,9 @@ def get_customer(customer_id: int, task_id: str = None) -> str:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
     # 联系方式展示防御（2026-09-24 加，与房源详情 F16 同口径）：密钥不一致时读出来是密文，
     # 绝不能把 gAAAA… 当客户手机号说给经纪人，也不能默默咽掉（要给 warning 让 Coco 如实转述）。
-    raw_contacts = {k: result.get(k) for k in ("phone", "wechat")}
-    result["phone"] = _safe_contact(result.get("phone"))
-    result["wechat"] = _safe_contact(result.get("wechat"))
-    masked = [k for k, v in raw_contacts.items() if v and result.get(k) != v]
-    payload = {"success": True, "customer": result}
-    if masked:
-        payload["warning_key_mismatch"] = (
-            "客户联系方式读不出来：库里的加密内容用当前密钥解不开"
-            "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
-            "在此之前不要把这条联系方式给客户。")
-        payload["cipher_fields"] = masked
-    return json.dumps(payload, ensure_ascii=False)
+    result, masked = _mask_customer_contacts(result)
+    return json.dumps(_attach_key_warning({"success": True, "customer": result}, masked),
+                      ensure_ascii=False)
 
 
 def list_customers(tier: str = None, status: str = None, customer_type: str = None, limit: int = 20,
@@ -438,13 +469,10 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
     result, total = db.list_customers(tier=tier, status=status, customer_type=customer_type,
                                       limit=limit, include_closed=include_closed, with_total=True)
     # 联系方式展示防御（2026-09-24 加，与 get_customer / 房源详情 F16 同口径）
-    masked_fields = set()
+    masked_fields = []
     for row in result:
-        for key in ("phone", "wechat"):
-            before = row.get(key)
-            row[key] = _safe_contact(before)
-            if before and row[key] != before:
-                masked_fields.add(key)
+        _, row_masked = _mask_customer_contacts(row)
+        masked_fields.extend(row_masked)
     scope = "按指定状态" if status else ("含已关闭" if include_closed else "在跟客户（活跃+暂缓）")
     total = total if total is not None else len(result)
     response = {"success": True, "customers": result, "count": len(result), "total": total,
@@ -452,24 +480,21 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
     if response["truncated"]:
         response["message"] = (f"共 {total} 位{scope}，本次返回 {len(result)} 位（最新录入优先）。"
                                f"要看得更全就缩小条件，或把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
-    if masked_fields:
-        response["warning_key_mismatch"] = (
-            "部分客户联系方式读不出来：库里的加密内容用当前密钥解不开"
-            "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
-            "在此之前不要把这些联系方式给客户。")
-        response["cipher_fields"] = sorted(masked_fields)
-    return json.dumps(response, ensure_ascii=False)
+    return json.dumps(_attach_key_warning(response, masked_fields), ensure_ascii=False)
 
 
 def update_tier(customer_id: int, tier: str, task_id: str = None) -> str:
-    """调整客户等级（S高意向/A有需求/B培养/C初步接触）"""
-    if tier not in ['S', 'A', 'B', 'C']:
-        return json.dumps({"success": False, "error": "等级必须是 S/A/B/C"}, ensure_ascii=False)
+    """调整客户等级（S高意向/A有需求/B培养/C初步接触）；每次调整记入变更历史"""
+    tier_value, ok = norm_tier(tier)
+    if not ok:
+        return _fail(_tier_error(tier))
     db = _get_db()
-    result = db.update_customer(customer_id, tier=tier)
-    if result:
-        return json.dumps({"success": True, "customer": result, "message": f"已将客户等级调整为 {tier}"}, ensure_ascii=False)
-    return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    result = db.update_customer(customer_id, tier=tier_value)
+    if not result:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    result, masked = _mask_customer_contacts(result)
+    payload = {"success": True, "customer": result, "message": f"已将客户等级调整为 {tier_value}"}
+    return json.dumps(_attach_key_warning(payload, masked), ensure_ascii=False)
 
 
 def customer_stats(task_id: str = None) -> str:
@@ -530,7 +555,7 @@ TOOLS = [
             "limit": {"type": "integer", "description": "本次返回条数，默认20，最多200（传0/负数按默认20）"},
         },
     }, "handler": lambda args, **kw: list_customers(**args)},
-    {"name": "update_tier", "description": "调整客户等级", "parameters": {
+    {"name": "update_tier", "description": "调整客户等级（S=高意向 2 天内跟进 / A=有需求 5 天内 / B=培养 / C=初步接触）。只在经纪人明确要求调级时使用；每次调整都会记入变更历史。", "parameters": {
         "type": "object",
         "properties": {
             "customer_id": {"type": "integer"},
@@ -583,7 +608,7 @@ registry.register(
 registry.register(
     name="update_tier",
     toolset="real_estate",
-    schema={"name": "update_tier", "description": "调整客户等级", "parameters": TOOLS[4]["parameters"]},
+    schema={"name": "update_tier", "description": "调整客户等级（S=高意向 2 天内跟进 / A=有需求 5 天内 / B=培养 / C=初步接触）。只在经纪人明确要求调级时使用；每次调整都会记入变更历史。", "parameters": TOOLS[4]["parameters"]},
     handler=TOOLS[4]["handler"],
 )
 registry.register(
@@ -747,11 +772,12 @@ def update_customer_stage(customer_id: int, stage: str, task_id: str = None) -> 
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
     if not updated:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
-    return json.dumps({
+    updated, masked = _mask_customer_contacts(updated)
+    return json.dumps(_attach_key_warning({
         "success": True,
         "message": f"{updated['name']} 生命周期阶段已更新为: {STAGE_NAMES[stage]}",
         "customer": updated,
-    }, ensure_ascii=False)
+    }, masked), ensure_ascii=False)
 
 
 registry.register(
