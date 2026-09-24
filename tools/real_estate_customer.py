@@ -895,7 +895,11 @@ registry.register(
 def add_referral(referrer_customer_id: int, referred_name: str,
                  referred_phone: str = None, reward_note: str = None,
                  task_id: str = None) -> str:
-    """登记转介绍：老客户介绍新客，自动建新客户档案并标记来源为转介绍"""
+    """登记转介绍：老客户介绍新客，自动建新客户档案并标记来源为转介绍
+
+    登记前会认人（2026-09-24 加）：被介绍人若已在库里 → 复用他的档案，不新建重复客户；
+    被介绍人手机号等于介绍人自己 → 拦下；同一介绍人已登记过同一位被介绍人 → 提示，不重复登记。
+    """
     db = _get_db()
     referred_name = (referred_name or '').strip()
     if not referred_name:
@@ -903,15 +907,45 @@ def add_referral(referrer_customer_id: int, referred_name: str,
     referrer = db.get_customer(referrer_customer_id)
     if not referrer:
         return json.dumps({"success": False, "error": "介绍人客户不存在"}, ensure_ascii=False)
+
+    phone = norm_phone(referred_phone)
+    if phone and norm_phone(referrer.get('phone')) == phone:
+        return _fail("被介绍人不能是介绍人自己（手机号与介绍人相同），请核对是谁介绍的")
+
+    # 认人：给了手机号就只按手机号认（与建档/改号同口径，不退回按姓名合并）；
+    # 没给手机号才按姓名找（同名不同人时只提示、不合并）
+    existing, match_note = None, None
+    if phone:
+        existing, _warn = db.find_duplicate_customer(phone=phone)
+        if existing:
+            match_note = f"这位客户已在库里（id={existing['id']} {existing['name']}，手机号相同），已挂到该档案，未新建重复客户"
+    else:
+        existing = db.find_customer_by_name(referred_name)
+        if existing:
+            match_note = (f"库里已有同名客户（id={existing['id']}），已挂到该档案；"
+                          f"如果其实是两个人，请带上手机号重新登记")
+
+    referred_customer_id = existing['id'] if existing else None
+    if referred_customer_id and db.has_referral(referrer_customer_id, referred_customer_id):
+        return json.dumps({
+            "success": False, "duplicate": True,
+            "referred_customer_id": referred_customer_id,
+            "error": (f"{referrer['name']} 已经把这位客户（id={referred_customer_id}）登记为转介绍了，"
+                      f"本次未重复登记，避免贡献榜重复计数"),
+        }, ensure_ascii=False)
+
     r = db.add_referral(referrer_customer_id=referrer_customer_id,
-                        referred_name=referred_name, referred_phone=referred_phone,
+                        referred_name=referred_name, referred_phone=phone,
+                        referred_customer_id=referred_customer_id,
                         reward_note=reward_note)
-    return json.dumps({
-        "success": True,
-        "message": (f"转介绍已登记：{referrer['name']} 介绍了 {referred_name}，"
-                    f"新客户档案已建（来源: 转介绍）。成交后别忘了答谢 {referrer['name']}"),
-        "referral": r,
-    }, ensure_ascii=False)
+    message = (f"转介绍已登记：{referrer['name']} 介绍了 {referred_name}，"
+               f"{'已挂到库里已有档案' if existing else '新客户档案已建（来源: 转介绍）'}。"
+               f"成交后别忘了答谢 {referrer['name']}")
+    payload = {"success": True, "message": message, "referral": r}
+    if match_note:
+        payload["note"] = match_note
+        payload["reused_existing_customer"] = bool(existing)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def referral_stats(task_id: str = None) -> str:

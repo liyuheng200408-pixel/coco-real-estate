@@ -1242,6 +1242,24 @@ class RealEstateDB:
             return True
 
     # ---------- 转介绍经营（2026-08-28 功能6） ----------
+    def find_customer_by_name(self, name):
+        """按姓名精确查客户（转介绍登记时判断"这个人是否已在库里"用；不带手机号时才用得上）"""
+        if not name:
+            return None
+        with self.get_session() as s:
+            c = (s.query(Customer).filter(Customer.name == name)
+                 .order_by(Customer.id.asc()).first())
+            return c.to_dict() if c else None
+
+    def has_referral(self, referrer_customer_id, referred_customer_id):
+        """同一介绍人是否已经登记过把这位客户介绍进来（避免贡献榜把一个人算两次）"""
+        if not referrer_customer_id or not referred_customer_id:
+            return False
+        with self.get_session() as s:
+            return s.query(Referral).filter(
+                Referral.referrer_customer_id == referrer_customer_id,
+                Referral.referred_customer_id == referred_customer_id).count() > 0
+
     def add_referral(self, referrer_customer_id, referred_name, referred_phone=None,
                      referred_customer_id=None, reward_note=None):
         """登记转介绍：自动建新客户档案并标记来源"""
