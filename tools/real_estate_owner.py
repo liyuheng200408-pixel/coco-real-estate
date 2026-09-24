@@ -70,6 +70,9 @@ def _mask_id(id_number: str) -> str:
 # re_owners 的列宽：PostgreSQL 上 varchar 超长会让整次登记失败（sqlite 不拦），入库前按列宽截断
 NAME_MAX = 100
 TRUST_NOTE_MAX = 200
+# 列表分页口径（与客户侧 list_customers 同一套：默认 50、上限 200、≤0 与非数字按默认）
+_LIST_LIMIT_DEFAULT = 50
+_LIST_LIMIT_MAX = 200
 
 
 def _clip(value, max_len):
@@ -248,10 +251,31 @@ def get_owner(owner_id: int, task_id: str = None) -> str:
 
 
 def list_owners(limit: int = 50, task_id: str = None) -> str:
-    """房东列表"""
+    """房东列表（默认最新登记优先）
+
+    limit: 返回条数（默认 50，最多 200；传 0/负数/非数字按默认 50 处理）。
+    返回 count=本次条数、total=房东总数、truncated=是否被截断（被截断时给一句说明）。
+    """
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _LIST_LIMIT_DEFAULT
+    if limit <= 0:
+        limit = _LIST_LIMIT_DEFAULT
+    limit = min(limit, _LIST_LIMIT_MAX)
     db = _get_db()
-    owners = db.list_owners(limit)
-    return json.dumps({"success": True, "total": len(owners), "owners": owners}, ensure_ascii=False)
+    owners, total = db.list_owners(limit=limit, with_total=True)
+    # 联系方式展示防御（2026-09-25 加，与 get_owner / 客户列表 F53 同口径）
+    masked_fields = []
+    for row in owners:
+        _, row_masked = _mask_owner_contacts(row)
+        masked_fields.extend(row_masked)
+    payload = {"success": True, "owners": owners, "count": len(owners), "total": total,
+               "truncated": bool(total > len(owners))}
+    if payload["truncated"]:
+        payload["message"] = (f"共 {total} 位房东，本次返回 {len(owners)} 位（最新登记优先）。"
+                              f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+    return json.dumps(_attach_key_warning(payload, masked_fields), ensure_ascii=False)
 
 
 def owner_portfolio(owner_id: int, task_id: str = None) -> str:
@@ -323,10 +347,10 @@ TOOLS = [
     },
     {
         "name": "list_owners",
-        "description": "房东列表",
+        "description": "房东列表（默认最新登记优先）：姓名、手机号、微信号、脱敏身份证号、信任度备注、备注、登记时间；联系方式给完整号码。返回 count=本次条数、total=房东总数、truncated=是否被截断。用于经纪人问\"有哪些房东/给我房东名单\"",
         "parameters": {
             "type": "object",
-            "properties": {"limit": {"type": "integer", "description": "返回条数（默认50）"}},
+            "properties": {"limit": {"type": "integer", "description": "返回条数（默认 50，最多 200；传 0/负数/非数字按默认 50）"}},
         },
         "handler": lambda args, **kw: list_owners(**args),
     },

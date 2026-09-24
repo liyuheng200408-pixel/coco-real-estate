@@ -1331,9 +1331,21 @@ class RealEstateDB:
             o = s.query(Owner).get(oid)
             return o.to_dict() if o else None
 
-    def list_owners(self, limit=50):
+    def list_owners(self, limit=50, with_total=False, newest_first=True):
+        """房东列表（默认最新登记优先，与客户列表口径一致）
+
+        with_total=True 时返回 (rows, total) —— total 用 SQL 聚合求**符合条件的总数**，
+        不是本页条数（列表类返回要 count/total/truncated 三件齐，契约见 FINDINGS F94）。
+        分页边界（≤0/非数字按默认、上限）留在工具层，这个方法只按给定条数执行。
+        """
         with self.get_session() as s:
-            return [o.to_dict() for o in s.query(Owner).limit(limit).all()]
+            q = s.query(Owner)
+            if newest_first:
+                q = q.order_by(Owner.id.desc())
+            rows = [o.to_dict() for o in q.limit(limit).all()]
+            if with_total:
+                return rows, s.query(Owner).count()
+            return rows
 
     def find_duplicate_owner(self, phone=None, wechat=None):
         """房东查重：手机号（归一后，主）> 微信号（次）。返回 (命中房东dict或None, 警告文本或None)。
