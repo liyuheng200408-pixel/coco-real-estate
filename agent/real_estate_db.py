@@ -1282,33 +1282,42 @@ class RealEstateDB:
             return r.to_dict()
 
     def referral_stats(self, limit=20):
-        """转介绍贡献榜：谁介绍了几个、几个成交"""
+        """转介绍贡献榜：谁介绍了几个、其中几个（人）成交
+
+        2026-09-24 改：`deals_from_referrals` 原先数的是**成交单笔数**（一位被介绍人两笔成交会被算成
+        2），文案却说"N 人成交" —— 现在按 `distinct` 客户数计**人数**，与"介绍 N 人"对称。
+        介绍人客户已被删除时，不再回 None，而是标注"已删除客户（id=N）" + referrer_missing=True，
+        历史贡献保留、文案也不会出现 None。
+        """
         with self.get_session() as s:
             from sqlalchemy import func
             rows = s.query(
                 Referral.referrer_customer_id,
                 func.count(Referral.id).label('total'),
             ).group_by(Referral.referrer_customer_id).order_by(
-                func.count(Referral.id).desc()).limit(limit).all()
+                func.count(Referral.id).desc(), Referral.referrer_customer_id.asc()).limit(limit).all()
             leaderboard = []
             for cid, total in rows:
                 c = s.query(Customer).get(cid)
-                dealed = s.query(Deal).filter(
-                    Deal.customer_id.in_(
-                        s.query(Referral.referred_customer_id).filter(
-                            Referral.referrer_customer_id == cid,
-                            Referral.referred_customer_id.isnot(None),
-                        ).subquery()
-                    )
-                ).count()
+                referred_ids = s.query(Referral.referred_customer_id).filter(
+                    Referral.referrer_customer_id == cid,
+                    Referral.referred_customer_id.isnot(None))
+                dealed = s.query(Deal.customer_id).filter(
+                    Deal.customer_id.in_(referred_ids.subquery())).distinct().count()
                 leaderboard.append({
                     'referrer_customer_id': cid,
-                    'referrer_name': c.name if c else None,
+                    'referrer_name': c.name if c else f"已删除客户（id={cid}）",
                     'tier': c.tier if c else None,
+                    'referrer_missing': c is None,
                     'referrals': total,
                     'deals_from_referrals': dealed,
                 })
             return leaderboard
+
+    def count_referrers(self):
+        """介绍人总数（用于说明榜单是否被截断）"""
+        with self.get_session() as s:
+            return s.query(Referral.referrer_customer_id).distinct().count()
 
     # ---------- 房东委托管理（2026-08-28 功能7） ----------
     def add_owner(self, **kwargs):

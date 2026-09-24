@@ -948,17 +948,37 @@ def add_referral(referrer_customer_id: int, referred_name: str,
     return json.dumps(payload, ensure_ascii=False)
 
 
-def referral_stats(task_id: str = None) -> str:
-    """转介绍贡献榜：谁介绍了几个客户、几个已成交"""
+def referral_stats(limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
+    """转介绍贡献榜：谁介绍了几个客户、其中几个（人）已成交
+
+    limit: 榜单条数（默认 20，最多 200；传 0/负数/非数字按默认 20 处理）。
+    返回 total=介绍人总数、count=本次返回条数、truncated=是否被截断。
+    """
     db = _get_db()
-    board = db.referral_stats()
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _LIST_LIMIT_DEFAULT
+    if limit <= 0:
+        limit = _LIST_LIMIT_DEFAULT
+    limit = min(limit, _LIST_LIMIT_MAX)
+    board = db.referral_stats(limit=limit)
+    total = db.count_referrers()
+    payload = {"success": True, "leaderboard": board, "count": len(board), "total": total,
+               "truncated": bool(total > len(board))}
     if not board:
-        return json.dumps({"success": True, "message": "暂无转介绍记录", "leaderboard": []}, ensure_ascii=False)
-    lines = ["🏆 转介绍贡献榜"]
+        payload["message"] = "暂无转介绍记录"
+        return json.dumps(payload, ensure_ascii=False)
+    lines = ["转介绍贡献榜"]
     for i, row in enumerate(board, 1):
-        lines.append(f"{i}. {row['referrer_name']}（{row['tier']}级）: "
+        tier_txt = f"（{row['tier']}级）" if row.get('tier') else ""
+        lines.append(f"{i}. {row['referrer_name']}{tier_txt}："
                      f"介绍 {row['referrals']} 人，其中 {row['deals_from_referrals']} 人成交")
-    return json.dumps({"success": True, "leaderboard": board, "message": "\n".join(lines)}, ensure_ascii=False)
+    payload["message"] = "\n".join(lines)
+    if payload["truncated"]:
+        payload["message"] += (f"\n共 {total} 位介绍人，这里列前 {len(board)} 位"
+                               f"（要看更多请把 limit 调大，最多 {_LIST_LIMIT_MAX}）")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 registry.register(
@@ -980,9 +1000,11 @@ registry.register(
 registry.register(
     name="referral_stats",
     toolset="real_estate",
-    schema={"name": "referral_stats", "description": "转介绍贡献榜：按介绍人数排序，含成交数", "parameters": {
+    schema={"name": "referral_stats", "description": "转介绍贡献榜：按介绍人数排序，含每位介绍人介绍了多少人、其中多少人已成交；返回 total=介绍人总数、count=本次返回条数、truncated", "parameters": {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "limit": {"type": "integer", "description": "榜单条数，默认20，最多200（传0/负数按默认20）"},
+        },
     }},
     handler=lambda args, **kw: referral_stats(**args),
 )
