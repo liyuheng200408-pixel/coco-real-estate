@@ -845,6 +845,12 @@ class ToolRegistry:
                 result = entry.handler(args, **kwargs)
             return self._normalize_handler_result(name, result)
         except Exception as e:
+            # 参数名写错（模型把 budget_max 写成 budget）时给中文提示，而不是甩英文 TypeError ——
+            # 模型看到 "Tool execution failed: TypeError" 会转而自己编答案（COCO-PATCH 2026-09-24）。
+            _hint = self._unexpected_param_hint(name, entry, e)
+            if _hint:
+                logger.warning("Tool %s called with unknown argument: %s", name, _bound_error_text(str(e)))
+                return tool_error(_hint)
             # exc_info already renders the exception, so keep the message copy bounded.
             logger.exception("Tool %s dispatch error: %s", name, _bound_error_text(str(e)))
             # Sanitize so framing tokens/CDATA/fences in exception text aren't structural noise.
@@ -855,6 +861,30 @@ class ToolRegistry:
             except Exception:
                 sanitized = raw  # defensive: never let the sanitizer block error propagation
             return tool_error(sanitized)
+
+    @staticmethod
+    def _unexpected_param_hint(name, entry, exc):
+        """handler 报"不认识这个参数"时，给一句中文提示并列出该工具可用参数；否则返回 None。
+
+        COCO-PATCH 2026-09-24：模型会把字段名传错（`budget` 而不是 `budget_max`），
+        原先直接抛英文 TypeError，模型看到异常会转而自己编答案。
+        只处理异常后的提示，不做事前参数过滤：有的 handler 签名里带 schema 未声明的同义参数
+        （如 add_followup 的 property_id/next_date），预过滤会误伤正常调用。
+        """
+        if not isinstance(exc, TypeError):
+            return None
+        marker = "unexpected keyword argument "
+        msg = str(exc)
+        if marker not in msg:
+            return None
+        bad = msg.split(marker, 1)[1].strip().strip("'\"").split(" ")[0]
+        try:
+            declared = sorted((((entry.schema or {}).get("parameters") or {}).get("properties") or {}).keys())
+        except Exception:
+            declared = []
+        listing = "、".join(declared) if declared else "（该工具没有可传参数）"
+        return (f"参数名不对：{name} 不认识参数「{bad}」。可用参数：{listing}。"
+                f"请按可用参数重新调用。")
 
     @staticmethod
     def _missing_required_params(entry, args) -> list:
