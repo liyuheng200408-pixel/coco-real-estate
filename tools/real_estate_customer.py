@@ -372,12 +372,25 @@ def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT
 
 
 def get_customer(customer_id: int, task_id: str = None) -> str:
-    """获取客户详情"""
+    """获取客户详情（联系方式、等级、预算、偏好、来源、标签、阶段、状态、生日、备注、时间）"""
     db = _get_db()
     result = db.get_customer(customer_id)
-    if result:
-        return json.dumps({"success": True, "customer": result}, ensure_ascii=False)
-    return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    if not result:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    # 联系方式展示防御（2026-09-24 加，与房源详情 F16 同口径）：密钥不一致时读出来是密文，
+    # 绝不能把 gAAAA… 当客户手机号说给经纪人，也不能默默咽掉（要给 warning 让 Coco 如实转述）。
+    raw_contacts = {k: result.get(k) for k in ("phone", "wechat")}
+    result["phone"] = _safe_contact(result.get("phone"))
+    result["wechat"] = _safe_contact(result.get("wechat"))
+    masked = [k for k, v in raw_contacts.items() if v and result.get(k) != v]
+    payload = {"success": True, "customer": result}
+    if masked:
+        payload["warning_key_mismatch"] = (
+            "客户联系方式读不出来：库里的加密内容用当前密钥解不开"
+            "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
+            "在此之前不要把这条联系方式给客户。")
+        payload["cipher_fields"] = masked
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def list_customers(tier: str = None, status: str = None, customer_type: str = None, limit: int = 20,
@@ -465,7 +478,7 @@ TOOLS = [
         },
         "required": ["customer_id"],
     }, "handler": lambda args, **kw: update_customer(**args)},
-    {"name": "get_customer", "description": "获取客户详情", "parameters": {
+    {"name": "get_customer", "description": "获取某位客户的完整资料（联系方式、等级、预算区间、面积/户型偏好、意向区域、装修偏好、来源、标签、生命周期阶段、在跟/已关闭状态、生日、备注、建档与更新时间）。按客户编号查，编号来自建档或客户列表。", "parameters": {
         "type": "object", "properties": {"customer_id": {"type": "integer"}}, "required": ["customer_id"],
     }, "handler": lambda args, **kw: get_customer(**args)},
     {"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓；可按等级/客户类型/状态筛选，已关闭客户需显式要求）", "parameters": {
@@ -518,7 +531,7 @@ registry.register(
 registry.register(
     name="get_customer",
     toolset="real_estate",
-    schema={"name": "get_customer", "description": "获取客户详情", "parameters": TOOLS[2]["parameters"]},
+    schema={"name": "get_customer", "description": "获取某位客户的完整资料（联系方式、等级、预算区间、面积/户型偏好、意向区域、装修偏好、来源、标签、生命周期阶段、在跟/已关闭状态、生日、备注、建档与更新时间）。按客户编号查，编号来自建档或客户列表。", "parameters": TOOLS[2]["parameters"]},
     handler=TOOLS[2]["handler"],
 )
 registry.register(
