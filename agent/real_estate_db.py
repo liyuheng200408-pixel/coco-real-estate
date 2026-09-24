@@ -111,6 +111,27 @@ def looks_like_ciphertext(value) -> bool:
     return len(v) >= 40 and v.startswith("gAAAA") and all(ch.isalnum() or ch in "-_=" for ch in v)
 
 
+def _change_trace_value(model, field, value):
+    """变更留痕里的取值：加密字段只留掩码。
+
+    历史表 `re_customer_changes` 是明文的，而 phone/wechat 在主表里是密文 ——
+    把明文号码写进留痕等于让加密白做（备份、导出、看库的人直接读到）。
+    """
+    if value is None:
+        return None
+    text = str(value)
+    try:
+        column = model.__table__.columns.get(field)
+    except Exception:
+        column = None
+    if column is None or not isinstance(column.type, EncryptedString):
+        return text
+    # 手机号：留前 3 后 4（139****0002，便于核对是哪一位）；短号/微信号：只留前 2 位
+    if text.isdigit() and len(text) >= 8:
+        return f"{text[:3]}{'*' * 4}{text[-4:]}"
+    return f"{text[:2]}{'*' * 4}"
+
+
 def _as_money(value, default):
     """把库里的金额读成数字。
 
@@ -778,8 +799,8 @@ class RealEstateDB:
                     if old != v:
                         s.add(CustomerChange(
                             customer_id=cid, field=k,
-                            old_value=str(old) if old is not None else None,
-                            new_value=str(v) if v is not None else None,
+                            old_value=_change_trace_value(Customer, k, old),
+                            new_value=_change_trace_value(Customer, k, v),
                         ))
                     setattr(c, k, v)
             s.commit(); s.refresh(c)

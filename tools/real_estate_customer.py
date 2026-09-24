@@ -10,9 +10,46 @@ from tools.registry import registry
 # "够不着"的硬冲突理由：匹配结果全是这些时，不能说"有 N 套可能符合需求"
 _HARD_CONFLICT_REASONS = ("超预算", "区域不符", "类型不符")
 
+# 客户状态（与建档/列表口径一致）：在跟 / 暂缓 / 已关闭
+_STATUS_VALUES = ("active", "paused", "closed")
+_STATUS_ALIASES = {"在跟": "active", "跟进中": "active", "活跃": "active",
+                   "暂缓": "paused", "搁置": "paused", "暂停": "paused",
+                   "关闭": "closed", "已关闭": "closed"}
+
+# 变更历史条数（≤0 按默认，避免 limit=0 谎报"没变更"、负数变成拉全量）
+_CHANGE_LIMIT_DEFAULT = 20
+_CHANGE_LIMIT_MAX = 200
+
+
+def _norm_status(value):
+    """客户状态归一 → (规范值或 None, 是否认得)"""
+    if value is None:
+        return None, True
+    if not isinstance(value, str):
+        return None, False
+    key = value.strip().lower()
+    if key in _STATUS_VALUES:
+        return key, True
+    alias = _STATUS_ALIASES.get(value.strip())
+    return (alias, True) if alias else (None, False)
+
 
 def _fail(message: str) -> str:
     return json.dumps({"success": False, "error": message}, ensure_ascii=False)
+
+
+def _contact_conflict(label, dup, warn):
+    """改联系方式前的查重：命中别人已在用的号/微信就给两条可执行路径（与建档同口径）"""
+    if warn:
+        return _fail("检测到客户字段可能因密钥不一致无法安全判重，请先检查 COCO_ENC_KEY 再操作。")
+    if not dup:
+        return None
+    return json.dumps({
+        "success": False, "duplicate": True, "existing_customer": dup,
+        "error": (f"{label}已经是客户「{dup['name']}」（id={dup['id']}）在用。"
+                  f"如果是同一个人，请直接更新他（update_customer(customer_id={dup['id']}, ...)）；"
+                  f"如果是另一个人，请核对号码。"),
+    }, ensure_ascii=False)
 
 
 def _match_message(matches, budget_max):
@@ -193,10 +230,16 @@ def update_customer(
     notes: str = None,
     status: str = None,
     source: str = None,
+    customer_type: str = None,
     birthday: str = None,
     task_id: str = None,
 ) -> str:
-    """更新客户信息（自动记录变更历史；预算大幅下调时给出需求漂移预警）"""
+    """更新客户信息（自动记录变更历史；预算大幅下调时给出需求漂移预警）
+
+    customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)；
+                   建档时没说清、后来确认了，用这个参数补上（改类型同样留痕）。
+    status: active(在跟) / paused(暂缓) / closed(已关闭)——"这个客户不跟了"就传 closed。
+    """
     db = _get_db()
     old = db.get_customer(customer_id)
     if old is None:
@@ -214,6 +257,18 @@ def update_customer(
         tier, ok = norm_tier(tier)
         if not ok:
             return _fail(f"客户等级没能识别：收到的是「{raw_tier}」。等级只能是 S / A / B / C")
+    if status is not None:
+        raw_status = status
+        status, ok = _norm_status(status)
+        if not ok:
+            return _fail(f"客户状态没能识别：收到的是「{raw_status}」。只能是 "
+                         f"active(在跟) / paused(暂缓) / closed(已关闭)")
+    if customer_type is not None:
+        raw_type = customer_type
+        customer_type, ok = norm_customer_type(customer_type)
+        if not ok:
+            return _fail(f"客户类型没能识别：收到的是「{raw_type}」。请用 buy_new(买一手房) / "
+                         f"buy_second_hand(买二手房) / rent(租房) / unspecified(未细分)")
     for field_name, label in (('budget_min', '预算下限'), ('budget_max', '预算上限')):
         raw = budget_min if field_name == 'budget_min' else budget_max
         if raw is None:
@@ -239,12 +294,26 @@ def update_customer(
             return _fail(f"生日没能识别：收到的是「{raw_birthday}」。请用 1990-05-20 或 05-20 这类写法")
     phone = norm_phone(phone)
 
+    # 改联系方式先查重（2026-09-24 加）：建档有查重、改号这条路没有，等于从后门制造重复客户，
+    # 之后用这个号再建档就会认错人。手机号与微信分开查（各查各的）。
+    if phone is not None:
+        dup, warn = db.find_duplicate_customer(phone=phone, exclude_id=customer_id)
+        conflict = _contact_conflict("这个手机号", dup, warn)
+        if conflict:
+            return conflict
+    if wechat is not None:
+        dup, warn = db.find_duplicate_customer(wechat=wechat, exclude_id=customer_id)
+        conflict = _contact_conflict("这个微信号", dup, warn)
+        if conflict:
+            return conflict
+
     kwargs = {k: v for k, v in {
         'name': name, 'phone': phone, 'wechat': wechat, 'tier': tier,
         'budget_min': budget_min, 'budget_max': budget_max,
         'area_pref': area_pref, 'layout_pref': layout_pref,
         'location': location, 'renovation': renovation,
         'notes': notes, 'status': status, 'source': source, 'birthday': birthday,
+        'customer_type': customer_type,
     }.items() if v is not None}
     result = db.update_customer(customer_id, **kwargs)
 
@@ -258,7 +327,7 @@ def update_customer(
             alerts.append({
                 'type': 'budget_drift',
                 'level': 'warning',
-                'message': f"预算上限从 {old_max:.0f}万 下调到 {new_max:.0f}万（降 {drop_pct}%），"
+                'message': f"预算上限从 {old_max/10000:.0f}万 下调到 {new_max/10000:.0f}万（降 {drop_pct}%），"
                            f"客户很可能在别处看到了更便宜的房子，建议主动联系确认需求变化。",
             })
     if 'location' in kwargs and old.get('location') and kwargs['location'] != old.get('location'):
@@ -276,12 +345,24 @@ def update_customer(
     return json.dumps(response, ensure_ascii=False)
 
 
-def customer_change_history(customer_id: int, limit: int = 20, task_id: str = None) -> str:
-    """查询客户需求变更历史（预算/区域/户型/等级等字段的变更记录）"""
+def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT,
+                            task_id: str = None) -> str:
+    """查询客户需求变更历史（预算/区域/户型/等级/状态等字段的变更记录）
+
+    limit: 本次返回条数（默认 20，最多 200；传 0/负数按默认 20 处理，不会谎报"没有变更"、
+           也不会被放大成拉全量）
+    """
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _CHANGE_LIMIT_DEFAULT
+    if limit <= 0:
+        limit = _CHANGE_LIMIT_DEFAULT
+    limit = min(limit, _CHANGE_LIMIT_MAX)
     changes = db.get_customer_changes(customer_id, limit=limit)
     return json.dumps({
         "success": True, "customer_id": customer_id,
@@ -376,7 +457,8 @@ TOOLS = [
             "budget_min": {"type": "integer"}, "budget_max": {"type": "integer"},
             "area_pref": {"type": "string"}, "layout_pref": {"type": "string"},
             "location": {"type": "string"}, "renovation": {"type": "string"},
-            "notes": {"type": "string"}, "status": {"type": "string", "enum": ["active", "paused", "closed"]},
+            "notes": {"type": "string"}, "status": {"type": "string", "enum": ["active", "paused", "closed"], "description": "客户状态：active在跟/paused暂缓/closed已关闭（经纪人说不跟了就传 closed）"},
+            "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent", "unspecified"], "description": "客户类型：buy_new买一手房/buy_second_hand买二手房/rent租房/unspecified未细分（建档时没说清、后来确认了用它补上）"},
             "source": {"type": "string", "description": "客户来源（如 抖音/贝壳/安居客/转介绍/门店/58/其他）"},
             "wechat": {"type": "string", "description": "客户微信号（加密存储；建档后补录或修改都用这个参数）"},
             "birthday": {"type": "string", "description": "客户生日，格式 MM-DD 或 YYYY-MM-DD"},
@@ -417,7 +499,7 @@ registry.register(
 registry.register(
     name="update_customer",
     toolset="real_estate",
-    schema={"name": "update_customer", "description": "更新客户信息（自动记录变更历史；预算大幅下调≥30%时返回需求漂移预警）", "parameters": TOOLS[1]["parameters"]},
+    schema={"name": "update_customer", "description": "更新客户信息（自动记录变更历史；预算大幅下调≥30%时返回需求漂移预警；改手机号/微信会先查重防撞号）", "parameters": TOOLS[1]["parameters"]},
     handler=TOOLS[1]["handler"],
 )
 registry.register(
@@ -427,7 +509,7 @@ registry.register(
         "type": "object",
         "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},
-            "limit": {"type": "integer", "description": "返回条数，默认20"},
+            "limit": {"type": "integer", "description": "返回条数，默认20，最多200（传0或负数按默认20）"},
         },
         "required": ["customer_id"],
     }},

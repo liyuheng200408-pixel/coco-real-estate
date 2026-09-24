@@ -18,13 +18,15 @@ def run_migrate(db_url, *extra):
 
 @pytest.fixture
 def sqlite_db(tmp_path):
-    """预建 re_customers + re_properties 表的临时库（003 迁移需要 re_properties）"""
+    """预建迁移会用到的表（003 需要 re_properties、011 需要 re_customer_changes）"""
     db_path = tmp_path / "mig_test.db"
     import sqlite3
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE re_customers (id INTEGER PRIMARY KEY, name TEXT)")
     conn.execute("CREATE TABLE re_properties (id INTEGER PRIMARY KEY, name TEXT)")
     conn.execute("CREATE TABLE re_deals (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("CREATE TABLE re_customer_changes (id INTEGER PRIMARY KEY, customer_id INTEGER,"
+                 " field TEXT, old_value TEXT, new_value TEXT)")
     conn.commit()
     conn.close()
     return f"sqlite:///{db_path}"
@@ -171,3 +173,28 @@ class TestMigrate:
             assert hist == 0
         finally:
             f.unlink(missing_ok=True)
+
+    def test_011_masks_plaintext_contacts_in_change_history(self, sqlite_db):
+        """011 迁移：变更历史里的明文手机号/微信换成掩码，非加密字段不动，重跑安全"""
+        import sqlite3
+        db_path = sqlite_db.replace("sqlite:///", "")
+        conn = sqlite3.connect(db_path)
+        conn.execute("INSERT INTO re_customer_changes (customer_id, field, old_value, new_value)"
+                     " VALUES (1, 'phone', '13922220001', '13922220002')")
+        conn.execute("INSERT INTO re_customer_changes (customer_id, field, old_value, new_value)"
+                     " VALUES (1, 'wechat', 'mm_wx', 'mm_wx2')")
+        conn.execute("INSERT INTO re_customer_changes (customer_id, field, old_value, new_value)"
+                     " VALUES (1, 'budget_max', '3000000', '5000000')")
+        conn.commit()
+        conn.close()
+
+        assert run_migrate(sqlite_db).returncode == 0
+        assert run_migrate(sqlite_db).returncode == 0      # 再跑一遍：幂等
+
+        conn = sqlite3.connect(db_path)
+        rows = {f: (o, n) for f, o, n in conn.execute(
+            "SELECT field, old_value, new_value FROM re_customer_changes")}
+        conn.close()
+        assert rows["phone"] == ("139****0001", "139****0002"), rows
+        assert rows["wechat"] == ("mm****", "mm****"), rows
+        assert rows["budget_max"] == ("3000000", "5000000"), rows   # 非加密字段不被改
