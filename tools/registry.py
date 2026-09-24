@@ -857,6 +857,20 @@ class ToolRegistry:
             return tool_error(
                 f"参数超出范围：{_pairs} 超过系统可识别的编号范围（最大 {2 ** 63 - 1}）。"
                 f"请核对编号后重新调用 {name}。")
+        # 整数数组元素的形态与越界（COCO-PATCH 2026-09-25）：`property_ids=[true]` 会被当成 [1]、
+        # 返回**别的**那条记录（实测张冠李戴），`['abc']` 与 `[2**63]` 直接崩 —— 数组元素与顶层
+        # 标量同一套口径：数字串转整数、bool 拦成中文提示、越界点名值；认不出的文本不拦（交给工具）。
+        _arr_args, _bad_arr, _over_arr = self._int_array_elements(entry, args)
+        if _bad_arr:
+            _pairs = "；".join(f"参数 {k} 里出现了 {v}" for k, v in _bad_arr)
+            return tool_error(f"{_pairs} —— 编号要传数字。请核对后重新调用 {name}。")
+        if _over_arr:
+            _pairs = "；".join(f"{k} 里有 {v}" for k, v in _over_arr)
+            return tool_error(
+                f"参数超出范围：{_pairs} 超过系统可识别的编号范围（最大 {2 ** 63 - 1}）。"
+                f"请核对编号后重新调用 {name}。")
+        if _arr_args:
+            args = {**args, **_arr_args}
         # 文本参数收到数字 → 转成文本（COCO-PATCH 2026-09-25）：模型常把手机号、身份证号这类
         # 长数字串当整数传下来，声明为 string 的参数拿到 int 会在 handler 里崩（'int' object has
         # no attribute 'strip'）或崩在数据库类型上；模型看到英文异常会转去自己编答案
@@ -941,6 +955,50 @@ class ToolRegistry:
                 except ValueError:
                     continue
         return converted, bad
+
+    @staticmethod
+    def _int_array_elements(entry, args):
+        """声明为「整数数组」的参数 → (要替换的列表, 形态不认的值, 越界的值)。
+
+        COCO-PATCH 2026-09-25：数组元素与顶层标量同一套口径 —— 数字字符串转整数（省掉
+        SQLite/PostgreSQL 各自的隐式转换）、`bool` 拦成中文提示（`[true]` 会被当成 `[1]`，
+        于是返回 id=1 那条记录 = 把**别人的**数据当这条回答）、超过 int64 点名值（数组元素原先
+        不受越界校验保护，实测 OverflowError 崩）。认不出的文本不拦，语义交给工具。
+        """
+        if not isinstance(args, dict):
+            return {}, [], []
+        try:
+            props = ((entry.schema or {}).get("parameters") or {}).get("properties") or {}
+        except Exception:
+            return {}, [], []
+        converted, bad, overflow = {}, [], []
+        for key, value in args.items():
+            spec = props.get(key) or {}
+            if spec.get("type") != "array":
+                continue
+            if (spec.get("items") or {}).get("type") not in ("integer", "number"):
+                continue
+            if not isinstance(value, list):
+                continue
+            new_list, changed = [], False
+            for item in value:
+                if isinstance(item, bool):
+                    bad.append((key, "true" if item else "false"))
+                    new_list.append(item)
+                    continue
+                normal = item
+                if isinstance(item, str):
+                    try:
+                        normal = int(item.strip())
+                        changed = True
+                    except ValueError:
+                        normal = item
+                if isinstance(normal, int) and abs(normal) > 2 ** 63 - 1:
+                    overflow.append((key, normal))
+                new_list.append(normal)
+            if changed:
+                converted[key] = new_list
+        return converted, bad, overflow
 
     @staticmethod
     def _text_params_from_numbers(entry, args):

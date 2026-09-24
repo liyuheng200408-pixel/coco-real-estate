@@ -25,6 +25,7 @@ def add_property(
     image_paths: str = None, agent_id: str = None,
     tenant_requirements: str = None,
     owner_name: str = None, owner_phone: str = None, owner_wechat: str = None,
+    viewing_note: str = None,
     force: bool = False, task_id: str = None,
 ) -> str:
     """添加新房源
@@ -32,6 +33,7 @@ def add_property(
     property_type: new(一手房) / second_hand(二手房) / rental(租房)
     images: 图片链接或标识（逗号分隔）
     image_paths: 本地图片文件路径（逗号分隔），优先于 images 合并存储
+    viewing_note: 看房方式（如 钥匙在门店/需提前预约），房源详情与业主查询里会显示
     force=True 跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用，默认 False）。
     """
     db = _get_db()
@@ -100,7 +102,7 @@ def add_property(
         renovation=renovation, year_built=year_built,
         has_elevator=has_elevator, parking=parking, property_type=property_type,
         tags=tags, images=merged_images, agent_id=agent_id,
-        tenant_requirements=tenant_requirements,
+        tenant_requirements=tenant_requirements, viewing_note=viewing_note,
     )
     # 租客要求入库后同步到返回结果
     if tenant_requirements:
@@ -250,13 +252,14 @@ def update_property(
     tags: str = None, fill_missing_only: bool = False,
     property_type: str = None, tenant_requirements: str = None,
     owner_name: str = None, owner_phone: str = None, owner_wechat: str = None,
+    viewing_note: str = None,
     task_id: str = None,
 ) -> str:
     """更新房源信息（可同时补充业主联系方式：owner_name/owner_phone/owner_wechat，自动登记房东并关联）
 
     也支持补录/修改：户型(rooms/halls/bathrooms)、楼层(floor)、朝向(orientation)、
     详细地址(address)、建造年份(year_built)、电梯(has_elevator)、车位(parking)、标签(tags)、
-    房源类型(property_type，录错时可纠正)、租客要求(tenant_requirements)。
+    房源类型(property_type，录错时可纠正)、租客要求(tenant_requirements)、看房方式(viewing_note)。
     楼层没传时，只在**库里还没有楼层**的情况下按房号补一个（不会覆盖已有值）。
     fill_missing_only=True 时**只补空缺**：库里已有值的字段一律不动（合并重复房源时用这一档）。
     """
@@ -300,6 +303,7 @@ def update_property(
         'address': address, 'year_built': year_built,
         'has_elevator': has_elevator, 'parking': parking, 'tags': tags,
         'property_type': property_type, 'tenant_requirements': tenant_requirements,
+        'viewing_note': viewing_note,
     }.items() if v is not None}
     kept_existing = {}
     if fill_missing_only and kwargs:
@@ -756,6 +760,7 @@ TOOLS = [
             "owner_name": {"type": "string", "description": "业主（房东）姓名。填了即自动登记房东并关联此房源"},
             "owner_phone": {"type": "string", "description": "业主（房东）手机号，加密存储"},
             "owner_wechat": {"type": "string", "description": "业主（房东）微信号，加密存储"},
+            "viewing_note": {"type": "string", "description": "看房方式（如 钥匙在门店/需提前预约），房源详情与业主查询里会显示"},
             "address": {"type": "string", "description": "详细地址（楼栋门牌等，如 7号楼2单元301）"},
             "bathrooms": {"type": "integer", "description": "卫数"},
             "floor": {"type": "string", "description": "楼层。经纪人怎么说都行（3楼/十六楼/16F/5/18层/低楼层/中楼层/高楼层/顶层），系统会归一成「16层」「5层（共18层）」这类写法"},
@@ -786,6 +791,7 @@ TOOLS = [
             "tags": {"type": "string", "description": "特色标签，多个用逗号分隔"},
             "owner_name": {"type": "string", "description": "业主姓名。填了即自动登记房东并关联此房源"},
             "owner_phone": {"type": "string", "description": "业主手机号，加密存储"},
+            "viewing_note": {"type": "string", "description": "看房方式（如 钥匙在门店/需提前预约），房源详情与业主查询里会显示"},
             "owner_wechat": {"type": "string", "description": "业主微信号，加密存储"},
             "property_type": {"type": "string", "enum": ["new", "second_hand", "rental"], "description": "房源类型（录错时可纠正）：new(一手房)/second_hand(二手房)/rental(出租)"},
             "tenant_requirements": {"type": "string", "description": "出租房源的租客要求（如不吸烟/办居住证/学生优先），可修改"},
@@ -842,7 +848,8 @@ def get_property_form(task_id: str = None) -> str:
 - 车位：（有/无）
 - 房源类型：（一手房/二手房/租房）
 - 业主（房东）姓名 / 电话 / 微信：（可选；填了系统会自动登记房东并关联此房源，电话加密保存）
-- 租客要求：（仅出租房源，如"不吸烟、禁养宠物/学生优先"）
+-- 租客要求：（仅出租房源，如"不吸烟、禁养宠物/学生优先"）
+-- 看房方式：（如"钥匙在门店""需提前一天预约"）
 - 特色标签：（如"学区房""地铁房"，多个用逗号分隔）
 - 房源图片：（可直接在消息中发送图片，会自动关联）"""
     return json.dumps({"success": True, "form": form}, ensure_ascii=False)

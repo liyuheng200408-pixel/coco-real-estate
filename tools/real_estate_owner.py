@@ -177,32 +177,47 @@ def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
         return json.dumps({"success": False,
                            "error": "一次最多查询 3 套房源，请分批查询"},
                           ensure_ascii=False)
-    rows = db.get_property_owners(property_ids)
+    # 编号形态归一（2026-09-25）：数组元素也要过 —— 传 'abc' 会崩、传 true 会命中 id=1（张冠李戴）
+    ids = []
+    for item in property_ids:
+        pid, problem = norm_id(item, '房源编号')
+        if problem:
+            return json.dumps({"success": False, "error": problem + "。"}, ensure_ascii=False)
+        ids.append(pid)
+    rows = db.get_property_owners(ids)
+    # 联系方式展示防御（2026-09-25 修：原先只有 message 那句走了 _safe_contact，**结构体没走**，
+    # Coco 读结构化数据时拿到的是 gAAAA…；warning 也改成共用函数以便带 cipher_fields）
+    masked_fields = []
+    for r in rows:
+        if r.get('owner'):
+            r['owner'], row_masked = _mask_owner_contacts(r['owner'])
+            masked_fields.extend(row_masked)
     lines = []
     for r in rows:
         o = r.get('owner')
         if not o:
             lines.append(f"· {r['title']}（ID:{r['id']}）：未录入业主信息")
             continue
-        phone = _safe_contact(o.get('phone'))
-        wechat = _safe_contact(o.get('wechat'))
+        phone = o.get('phone')
+        wechat = o.get('wechat')
         view = f"，看房方式: {r.get('viewing_note')}" if r.get('viewing_note') else ""
         lines.append(
             f"· {r['title']}（ID:{r['id']}）：业主 {o.get('name')}，"
             f"电话 {phone or '未录'}"
             + (f"，微信 {wechat}" if wechat else "")
             + view)
+    found_ids = {r.get('id') for r in rows}
+    not_found = [pid for pid in ids if pid not in found_ids]
+    if not_found:
+        lines.append("编号 " + "、".join(str(i) for i in not_found) + " 没有对应房源")
     payload = {
         "success": True,
         "count": len(rows),
+        "not_found": not_found,
         "properties": rows,
         "message": "\n".join(lines),
     }
-    if any('读取失败' in ln for ln in lines):
-        payload["warning_key_mismatch"] = ("有业主的联系方式读不出来：库里的加密内容用当前密钥解不开"
-                                           "（常见于换了机器、或恢复备份时没带上密钥文件）。"
-                                           "先用备份里的密钥文件恢复，在此之前不要把这条联系方式给客户。")
-    return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(_attach_key_warning(payload, masked_fields), ensure_ascii=False)
 
 
 def find_person_by_name(name: str = None, task_id: str = None) -> str:
