@@ -141,6 +141,36 @@ def customer_type_filter(value):
 
 TIERS = ("S", "A", "B", "C")
 
+# ==================== 客户生命周期阶段 ====================
+
+STAGES = ("lead", "interested", "strong", "viewed", "negotiating", "dealing", "maintain", "lost")
+STAGE_LABELS = {
+    "lead": "潜在", "interested": "意向", "strong": "强意向", "viewed": "已看房",
+    "negotiating": "谈判", "dealing": "成交中", "maintain": "售后维护", "lost": "流失",
+}
+_STAGE_ALIASES = {label: key for key, label in STAGE_LABELS.items()}
+
+
+def norm_stage(value):
+    """客户阶段归一 → (规范值或 None, 是否认得)。
+
+    接受英文键（大小写/空格不敏感）与中文说法（潜在/意向/强意向/已看房/谈判/成交中/售后维护/流失）。
+    """
+    if value is None:
+        return None, True
+    if not isinstance(value, str):
+        return None, False
+    key = value.strip().lower()
+    if key in STAGES:
+        return key, True
+    alias = _STAGE_ALIASES.get(value.strip())
+    return (alias, True) if alias else (None, False)
+
+
+def stage_options_text():
+    """给上层看的可用阶段（中文名 + 英文键），用于提示语"""
+    return " / ".join(f"{STAGE_LABELS[k]}({k})" for k in STAGES)
+
 
 def norm_tier(value):
     """客户等级归一 → (规范值或 None, 是否认得)"""

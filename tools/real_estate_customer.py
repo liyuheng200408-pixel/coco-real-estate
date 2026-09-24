@@ -3,8 +3,9 @@ Coco 房产工具 - 客户管理
 """
 import json
 
-from agent.real_estate_input import (norm_birthday, norm_customer_type, norm_money,
-                                     norm_phone, norm_tier)
+from agent.real_estate_input import (STAGES, STAGE_LABELS, norm_birthday, norm_customer_type,
+                                     norm_money, norm_phone, norm_stage, norm_tier,
+                                     stage_options_text)
 from tools.registry import registry
 
 # "够不着"的硬冲突理由：匹配结果全是这些时，不能说"有 N 套可能符合需求"
@@ -74,6 +75,13 @@ def _attach_key_warning(payload, masked):
         payload["warning_key_mismatch"] = KEY_MISMATCH_WARNING
         payload["cipher_fields"] = sorted(set(masked))
     return payload
+
+
+def _stage_before(new_stage, old_stage):
+    """新阶段是否比原阶段更靠前（回退）；拿不到原阶段时不算回退"""
+    if not new_stage or not old_stage or new_stage not in STAGES or old_stage not in STAGES:
+        return False
+    return STAGES.index(new_stage) < STAGES.index(old_stage)
 
 
 def _tier_error(raw_tier):
@@ -755,29 +763,46 @@ registry.register(
 
 
 def update_customer_stage(customer_id: int, stage: str, task_id: str = None) -> str:
-    """更新客户生命周期阶段，自动写变更历史"""
+    """更新客户生命周期阶段，自动写变更历史
+
+    stage: lead(潜在) / interested(意向) / strong(强意向) / viewed(已看房) /
+           negotiating(谈判) / dealing(成交中) / maintain(售后维护) / lost(流失)；
+           中文说法与大小写都认。
+    """
     db = _get_db()
-    STAGE_NAMES = {
-        'lead': '潜在', 'interested': '意向', 'strong': '强意向',
-        'viewed': '已看房', 'negotiating': '谈判', 'dealing': '成交中',
-        'maintain': '售后维护', 'lost': '流失',
-    }
-    if stage not in STAGE_NAMES:
-        return json.dumps({"success": False,
-                           "error": f"非法阶段: {stage}，可选: {list(STAGE_NAMES.keys())}"},
-                          ensure_ascii=False)
+    stage_value, ok = norm_stage(stage)
+    if not ok:
+        return _fail(f"客户阶段没能识别：收到的是「{stage}」。可用阶段：{stage_options_text()}")
+    old = db.get_customer(customer_id)
+    if not old:
+        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
     try:
-        updated = db.update_stage(customer_id, stage)
-    except ValueError as e:
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+        updated = db.update_stage(customer_id, stage_value)
+    except ValueError:
+        # 理论上到不了（上面已归一），兜住数据库层的英文异常
+        return _fail(f"客户阶段没能识别：收到的是「{stage}」。可用阶段：{stage_options_text()}")
     if not updated:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+
+    # 阶段与状态/成交是两套维度，这里只如实提示、不替经纪人做决定（2026-09-24 老板定的口径）
+    warnings = []
+    if old.get('status') == 'closed':
+        warnings.append("该客户已关闭，改阶段前请确认是否要重新打开")
+    if db.customer_has_deal(customer_id) and _stage_before(stage_value, old.get('stage')):
+        warnings.append("该客户有成交记录，阶段回退请确认")
+    if stage_value == 'lost' and old.get('status') != 'closed':
+        warnings.append("该客户状态仍是「在跟」；如不再跟进，请把状态改为 closed"
+                        "（update_customer(status='closed')）")
+
     updated, masked = _mask_customer_contacts(updated)
-    return json.dumps(_attach_key_warning({
+    payload = {
         "success": True,
-        "message": f"{updated['name']} 生命周期阶段已更新为: {STAGE_NAMES[stage]}",
+        "message": f"{updated['name']} 生命周期阶段已更新为: {STAGE_LABELS[stage_value]}",
         "customer": updated,
-    }, masked), ensure_ascii=False)
+    }
+    if warnings:
+        payload["warnings"] = warnings
+    return json.dumps(_attach_key_warning(payload, masked), ensure_ascii=False)
 
 
 registry.register(
