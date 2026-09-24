@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 
 from agent.real_estate_input import norm_id, norm_phone
+from tools.real_estate_customer import _mask_customer_contacts
 from tools.real_estate_property import _STATUS_LABELS, _fmt_price
 from tools.registry import registry
 
@@ -33,6 +34,14 @@ OWNER_KEY_MISMATCH_WARNING = (
     "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
     "在此之前不要把这条联系方式给客户。")
 
+# 按姓名查人时客户与业主两块联系方式都要提示，用一句合并文案（2026-09-25）
+PERSON_KEY_MISMATCH_WARNING = (
+    "客户/业主的联系方式读不出来：库里的加密内容用当前密钥解不开"
+    "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
+    "在此之前不要把这条联系方式给客户。")
+
+FIND_LIMIT_DEFAULT = 20   # 按姓名查人：客户/业主两张表各自默认返回条数（与客户列表同口径）
+
 
 def _mask_owner_contacts(row):
     """把房东行里的联系方式做展示防御，返回 (row, 被掩码的字段列表)。
@@ -52,10 +61,13 @@ def _mask_owner_contacts(row):
     return row, masked
 
 
-def _attach_key_warning(payload, masked):
-    """命中密文时给返回体补 warning 与 cipher_fields（让 Coco 如实转述，不静默）"""
+def _attach_key_warning(payload, masked, text=None):
+    """命中密文时给返回体补 warning 与 cipher_fields（让 Coco 如实转述，不静默）
+
+    text 默认房东版文案；按姓名查人那种同时涉及客户与业主的出口传合并文案（PERSON_KEY_MISMATCH_WARNING）。
+    """
     if masked:
-        payload["warning_key_mismatch"] = OWNER_KEY_MISMATCH_WARNING
+        payload["warning_key_mismatch"] = text or OWNER_KEY_MISMATCH_WARNING
         payload["cipher_fields"] = sorted(set(masked))
     return payload
 
@@ -74,6 +86,24 @@ TRUST_NOTE_MAX = 200
 # 列表分页口径（与客户侧 list_customers 同一套：默认 50、上限 200、≤0 与非数字按默认）
 _LIST_LIMIT_DEFAULT = 50
 _LIST_LIMIT_MAX = 200
+
+
+def _fmt_budget(value):
+    """预算展示（系统存元）→ 300万 / 5000元
+
+    2026-09-25 修：原先直接把元值配"万"（3000000-5000000 显示成 3000000-5000000万，差 1 万倍）。
+    低于 1 万按元说（客户的租房预算常见 5000 元，说成 0.5万 反而难读）。
+    """
+    if value is None:
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if amount < 10000:
+        return f"{amount:.0f}元"
+    wan = amount / 10000
+    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.1f}万"
 
 
 def _clamp_limit(value, default=_LIST_LIMIT_DEFAULT, maximum=_LIST_LIMIT_MAX):
@@ -220,45 +250,66 @@ def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
     return json.dumps(_attach_key_warning(payload, masked_fields), ensure_ascii=False)
 
 
-def find_person_by_name(name: str = None, task_id: str = None) -> str:
+def find_person_by_name(name: str = None, limit: int = None, task_id: str = None) -> str:
     """按姓名同时查客户和业主（两边都给），电话/微信给完整号码。
 
-    老板实测：问"某人详细信息"（如"欧阳先生"），Coco 默认只查客户，找不到就报"库内无此客户"，
-    实际对方可能是业主（房东）。本工具一次覆盖 客户(买家/租客) + 业主(房源主人)两类，
-    按姓名模糊匹配，找到哪类报哪类；同名两边都有则分别列出。
+    limit: 每张表返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）。
+    返回里 count_customers/count_owners 是本次条数，total_customers/total_owners 是符合条件的
+    总数，truncated 表示是否被截断（被截断时 message 里会说明）。
     """
     db = _get_db()
     if not (name or '').strip():
         return json.dumps({"success": False, "error": "请提供要查询的姓名（name）"},
                           ensure_ascii=False)
-    result = db.find_person_by_name(name)
+    limit = _clamp_limit(limit, default=FIND_LIMIT_DEFAULT)
+    result = db.find_person_by_name(name, limit=limit)
     customers = result.get('customers', [])
     owners = result.get('owners', [])
-    lines = [f"按姓名「{name}」检索到 客户 {len(customers)} 人 / 业主 {len(owners)} 人："]
+    total_customers = result.get('total_customers', len(customers))
+    total_owners = result.get('total_owners', len(owners))
+    truncated = total_customers > len(customers) or total_owners > len(owners)
+    # 联系方式展示防御（2026-09-25）：**结构体也要过**（原先只有 message 那句走了 _safe_contact，
+    # Coco 读结构化数据时拿到的是 gAAAA…）；客户段与业主段各用自己那套掩码函数。
+    masked_fields = []
     for c in customers:
-        phone = _safe_contact(c.get('phone'))
-        _wechat_c = _safe_contact(c.get('wechat'))
+        _, row_masked = _mask_customer_contacts(c)
+        masked_fields.extend(row_masked)
+    for o in owners:
+        _, row_masked = _mask_owner_contacts(o)
+        masked_fields.extend(row_masked)
+    lines = [f"按姓名「{name}」检索到 客户 {total_customers} 人 / 业主 {total_owners} 人："]
+    if truncated:
+        lines.append(f"共命中 客户 {total_customers} 人 / 业主 {total_owners} 人，"
+                     f"本次各返回 客户 {len(customers)} / 业主 {len(owners)} 位（姓名子串匹配）。"
+                     f"要看得更全就把关键词写长一点，或把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+    for c in customers:
+        budget = '-'.join(filter(None, [str(_fmt_budget(c.get('budget_min')) or ''),
+                                        str(_fmt_budget(c.get('budget_max')) or '')])) or '-'
         lines.append(f"\n【客户】{c.get('name')}（ID:{c.get('id')}）"
-                     f"电话 {phone or '未录'} | 微信 {_wechat_c or '未录'} | 等级 {c.get('tier') or '-'} | "
-                     f"类型 {c.get('customer_type') or '-'} | 预算 {'-'.join(filter(None,[str(c.get('budget_min') or ''),str(c.get('budget_max') or '')])) or '-'}万 | "
+                     f"电话 {c.get('phone') or '未录'} | 微信 {c.get('wechat') or '未录'} | "
+                     f"等级 {c.get('tier') or '-'} | "
+                     f"类型 {c.get('customer_type') or '-'} | 预算 {budget} | "
                      f"意向 {c.get('location') or '-'} {c.get('layout_pref') or ''}")
     for o in owners:
-        phone = _safe_contact(o.get('phone'))
-        wechat = _safe_contact(o.get('wechat'))
         lines.append(f"\n【业主】{o.get('name')}（ID:{o.get('id')}）"
-                     f"电话 {phone or '未录'} | 微信 {wechat or '未录'} | "
+                     f"电话 {o.get('phone') or '未录'} | 微信 {o.get('wechat') or '未录'} | "
                      f"脱敏证件 {o.get('id_masked') or '-'} | 信任度 {o.get('trust_note') or '-'}")
     if not customers and not owners:
         lines.append("\n客户表和业主表均无此人。可能未登记；如需新建客户请提供电话及需求，业主可先登记。")
-    return json.dumps({
-        "success": True,
-        "name": name,
-        "customers": customers,
-        "owners": owners,
-        "count_customers": len(customers),
-        "count_owners": len(owners),
-        "message": "\n".join(lines),
-    }, ensure_ascii=False)
+    return json.dumps(
+        _attach_key_warning({
+            "success": True,
+            "name": name,
+            "customers": customers,
+            "owners": owners,
+            "count_customers": len(customers),
+            "count_owners": len(owners),
+            "total_customers": total_customers,
+            "total_owners": total_owners,
+            "truncated": truncated,
+            "message": "\n".join(lines),
+        }, masked_fields, PERSON_KEY_MISMATCH_WARNING),
+        ensure_ascii=False)
 
 
 def get_owner(owner_id: int, task_id: str = None) -> str:
@@ -420,10 +471,13 @@ TOOLS = [
     },
     {
         "name": "find_person_by_name",
-        "description": "按姓名同时查客户和业主（两边都给），电话/微信给完整号码。用于经纪人问'某人/某先生/某女士的详细信息'（对方可能是客户=买家租客，也可能是业主=房东），按姓名模糊匹配，找到哪类报哪类，同名两边都有则分别列出；两表都无则如实说明。严禁用psql直接连库",
+        "description": "按姓名同时查客户和业主（两边都给），电话/微信给完整号码。用于经纪人问'某人/某先生/某女士的详细信息'（对方可能是客户=买家租客，也可能是业主=房东），按姓名子串匹配（通配符按字面处理），找到哪类报哪类，同名两边都有则分别列出；两表都无则如实说明。返回 count/total/truncated（客户与业主两表各自）。严禁用psql直接连库",
         "parameters": {
             "type": "object",
-            "properties": {"name": {"type": "string", "description": "姓名（支持模糊匹配，子串命中即返回）"}},
+            "properties": {
+                "name": {"type": "string", "description": "姓名（子串匹配即命中，如「欧阳」能查到「欧阳先生」）"},
+                "limit": {"type": "integer", "description": "每张表返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）—— 客户与业主两张表各自计"},
+            },
             "required": ["name"],
         },
         "handler": lambda args, **kw: find_person_by_name(**args),

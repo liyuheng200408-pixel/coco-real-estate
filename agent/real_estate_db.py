@@ -111,6 +111,23 @@ def looks_like_ciphertext(value) -> bool:
     return len(v) >= 40 and v.startswith("gAAAA") and all(ch.isalnum() or ch in "-_=" for ch in v)
 
 
+def _name_substring_filter(session, column, text):
+    """姓名子串匹配的过滤条件：SQLite/MySQL 用 `instr()`、PostgreSQL 用 `strpos()`。
+
+    为什么不走 LIKE（2026-09-25 老板拍板）：`%`/`_` 在 LIKE 里是通配符，模型或经纪人随手传一个
+    `%` 就能把**全库名单**捞出来（实测 2 位客户 + 2 位业主全命中，大库上就是上万条、8MB）。
+    位置函数天然没有通配符语义，读到什么字就按什么字匹配。
+    """
+    from sqlalchemy import func
+    try:
+        dialect = session.get_bind().dialect.name
+    except Exception:
+        dialect = 'sqlite'
+    if dialect in ('postgresql', 'postgres'):
+        return func.strpos(column, text) > 0
+    return func.instr(column, text) > 0
+
+
 def _change_trace_value(model, field, value):
     """变更留痕里的取值：加密字段只留掩码。
 
@@ -1428,25 +1445,31 @@ class RealEstateDB:
                 result.append(d)
             return result
 
-    def find_person_by_name(self, name):
+    def find_person_by_name(self, name, limit=None):
         """按姓名同时查客户表和业主表（2026-08-30 加，治"Coco 只按客户查人找不到业主"）。
 
         老板实测：问"欧阳先生的详细信息"，Coco 默认按客户查，62 位客户无此人就下结论
         "库内无此客户"，实际欧阳先生是业主（房东）。经纪人隐式假定"找一个人"应同时覆盖
         客户(买家/租客)与业主(房源主人)两类。
 
-        name: 姓名（支持模糊匹配，子串命中即返回）。返回 dict：
-          {'customers': [客户dict...], 'owners': [业主dict...]}
-        两者 phone/wechat 读出即明文（EncryptedString 自动解密）；若无匹配，对应列表为空。
+        name: 姓名（支持模糊匹配，子串命中即返回）；**通配符按字面处理**（用位置函数匹配，
+        2026-09-25 修：原先走 LIKE，`%`/`_` 会被当通配符 —— 传一个 `%` 能把全库名单捞出来）。
+        limit: 两张表各自取前 N 条（None = 不限，分页边界留在工具层）。
+        返回 dict：customers/owners 为本次明细，total_customers/total_owners 为**符合条件的总数**
+        （SQL 聚合，不受 limit 影响）。
         """
         name = (name or '').strip()
         with self.get_session() as s:
-            # 客户：姓名子串匹配（不区分是否 active，让经纪人看到全量同名）
-            custs = s.query(Customer).filter(Customer.name.contains(name)).all()
-            owners = s.query(Owner).filter(Owner.name.contains(name)).all()
+            custs = s.query(Customer).filter(_name_substring_filter(s, Customer.name, name))
+            owners = s.query(Owner).filter(_name_substring_filter(s, Owner.name, name))
+            total_customers, total_owners = custs.count(), owners.count()
+            if limit is not None:
+                custs, owners = custs.limit(limit), owners.limit(limit)
             return {
-                'customers': [c.to_dict() for c in custs],
-                'owners': [o.to_dict() for o in owners],
+                'customers': [c.to_dict() for c in custs.all()],
+                'owners': [o.to_dict() for o in owners.all()],
+                'total_customers': total_customers,
+                'total_owners': total_owners,
             }
 
     def link_owner_to_property(self, property_id, name=None, phone=None, wechat=None, return_info=False):
