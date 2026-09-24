@@ -32,8 +32,10 @@ class TestListCustomersScope:
         make_customer(db, name="活跃客户", status="active")
         make_customer(db, name="暂缓客户", status="paused")
         make_customer(db, name="已关闭客户", status="closed")
-        names = [c["name"] for c in db.list_customers()]
-        assert names == ["活跃客户", "暂缓客户"]
+        # 只断言"范围"（是否含已关闭）；默认排序是"最新录入优先"，顺序断言见
+        # tests/real_estate/test_list_customers_guards.py（2026-09-24 改口径）
+        names = {c["name"] for c in db.list_customers()}
+        assert names == {"活跃客户", "暂缓客户"}
 
     def test_explicit_status_still_supported(self, db):
         make_customer(db, name="活跃客户", status="active")

@@ -20,6 +20,10 @@ _STATUS_ALIASES = {"在跟": "active", "跟进中": "active", "活跃": "active"
 _CHANGE_LIMIT_DEFAULT = 20
 _CHANGE_LIMIT_MAX = 200
 
+# 客户列表条数（同上：≤0/非数字按默认，且有上限 —— 列表最容易把上下文撑爆）
+_LIST_LIMIT_DEFAULT = 20
+_LIST_LIMIT_MAX = 200
+
 
 def _norm_status(value):
     """客户状态归一 → (规范值或 None, 是否认得)"""
@@ -395,12 +399,15 @@ def get_customer(customer_id: int, task_id: str = None) -> str:
 
 def list_customers(tier: str = None, status: str = None, customer_type: str = None, limit: int = 20,
                    include_closed: bool = False, task_id: str = None) -> str:
-    """列出客户列表（默认只列在跟客户：活跃 + 暂缓）
+    """列出客户列表（默认只列在跟客户：活跃 + 暂缓，按最新录入优先）
 
     customer_type: buy_new(买一手房) / buy_second_hand(买二手房) / rent(租房)；
                    unspecified=未细分（经纪人没说买新房还是买二手房的客户）。
+    status: active(在跟) / paused(暂缓) / closed(已关闭) —— 传了就只列该状态。
     include_closed=True 才把已关闭客户一并列出（默认不列：关掉的客户不再跟进，
     混在列表与数量里会让数字越用越虚）。
+    limit: 本次返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20 处理）。
+    返回 total=符合条件的总数、count=本次返回条数、truncated=是否被截断。
     """
     db = _get_db()
     if customer_type:
@@ -414,11 +421,44 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
         if not ok:
             return _fail(f"客户等级筛选没能识别：收到的是「{tier}」。等级只能是 S / A / B / C")
         tier = tier_value
-    result = db.list_customers(tier=tier, status=status, customer_type=customer_type,
-                               limit=limit, include_closed=include_closed)
+    if status is not None:
+        raw_status = status
+        status, ok = _norm_status(status)
+        if not ok:
+            return _fail(f"客户状态筛选没能识别：收到的是「{raw_status}」。只能是 "
+                         f"active(在跟) / paused(暂缓) / closed(已关闭)")
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = _LIST_LIMIT_DEFAULT
+    if limit <= 0:
+        limit = _LIST_LIMIT_DEFAULT
+    limit = min(limit, _LIST_LIMIT_MAX)
+
+    result, total = db.list_customers(tier=tier, status=status, customer_type=customer_type,
+                                      limit=limit, include_closed=include_closed, with_total=True)
+    # 联系方式展示防御（2026-09-24 加，与 get_customer / 房源详情 F16 同口径）
+    masked_fields = set()
+    for row in result:
+        for key in ("phone", "wechat"):
+            before = row.get(key)
+            row[key] = _safe_contact(before)
+            if before and row[key] != before:
+                masked_fields.add(key)
     scope = "按指定状态" if status else ("含已关闭" if include_closed else "在跟客户（活跃+暂缓）")
-    return json.dumps({"success": True, "customers": result, "count": len(result),
-                       "count_scope": scope}, ensure_ascii=False)
+    total = total if total is not None else len(result)
+    response = {"success": True, "customers": result, "count": len(result), "total": total,
+                "truncated": bool(total > len(result)), "count_scope": scope}
+    if response["truncated"]:
+        response["message"] = (f"共 {total} 位{scope}，本次返回 {len(result)} 位（最新录入优先）。"
+                               f"要看得更全就缩小条件，或把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+    if masked_fields:
+        response["warning_key_mismatch"] = (
+            "部分客户联系方式读不出来：库里的加密内容用当前密钥解不开"
+            "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
+            "在此之前不要把这些联系方式给客户。")
+        response["cipher_fields"] = sorted(masked_fields)
+    return json.dumps(response, ensure_ascii=False)
 
 
 def update_tier(customer_id: int, tier: str, task_id: str = None) -> str:
@@ -481,13 +521,13 @@ TOOLS = [
     {"name": "get_customer", "description": "获取某位客户的完整资料（联系方式、等级、预算区间、面积/户型偏好、意向区域、装修偏好、来源、标签、生命周期阶段、在跟/已关闭状态、生日、备注、建档与更新时间）。按客户编号查，编号来自建档或客户列表。", "parameters": {
         "type": "object", "properties": {"customer_id": {"type": "integer"}}, "required": ["customer_id"],
     }, "handler": lambda args, **kw: get_customer(**args)},
-    {"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓；可按等级/客户类型/状态筛选，已关闭客户需显式要求）", "parameters": {
+    {"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓，按最新录入优先；可按等级/客户类型/状态筛选；已关闭客户默认不列，要看需传 include_closed=true 或 status=\"closed\"）。返回 total=符合条件的总数、count=本次返回条数、truncated", "parameters": {
         "type": "object", "properties": {
             "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
             "customer_type": {"type": "string", "enum": ["buy_new", "buy_second_hand", "rent", "unspecified"], "description": "客户类型筛选：buy_new买一手房/buy_second_hand买二手房/rent租房/unspecified未细分（经纪人没确认买新房还是买二手房的客户）"},
             "status": {"type": "string", "enum": ["active", "paused", "closed"], "description": "按状态筛选（不传默认不列已关闭客户）"},
             "include_closed": {"type": "boolean", "description": "是否把已关闭客户一起列出（默认 false）"},
-            "limit": {"type": "integer"},
+            "limit": {"type": "integer", "description": "本次返回条数，默认20，最多200（传0/负数按默认20）"},
         },
     }, "handler": lambda args, **kw: list_customers(**args)},
     {"name": "update_tier", "description": "调整客户等级", "parameters": {
@@ -537,7 +577,7 @@ registry.register(
 registry.register(
     name="list_customers",
     toolset="real_estate",
-    schema={"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓；已关闭客户默认不列，要看需传 include_closed=true，或按状态传 status=\"closed\"）", "parameters": TOOLS[3]["parameters"]},
+    schema={"name": "list_customers", "description": "列出客户列表（默认只列在跟客户：活跃+暂缓，按最新录入优先；可按等级/客户类型/状态筛选；已关闭客户默认不列，要看需传 include_closed=true 或 status=\"closed\"）。返回 total=符合条件的总数、count=本次返回条数、truncated", "parameters": TOOLS[3]["parameters"]},
     handler=TOOLS[3]["handler"],
 )
 registry.register(

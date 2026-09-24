@@ -819,11 +819,15 @@ class RealEstateDB:
             c = s.query(Customer).get(cid)
             return c.to_dict() if c else None
     
-    def list_customers(self, tier=None, status=None, customer_type=None, limit=50, include_closed=False):
-        """列客户。默认只列在跟的（active 活跃 / paused 暂缓）
+    def list_customers(self, tier=None, status=None, customer_type=None, limit=50, include_closed=False,
+                       with_total=False):
+        """列客户。默认只列在跟的（active 活跃 / paused 暂缓），**按最新录入优先**。
 
         2026-09-23 改：此前不传 status 会把已关闭(closed)的客户也列出来，导致"列客户"
         与"客户总数"越用越虚。要看已关闭客户，显式传 status='closed' 或 include_closed=True。
+        2026-09-24 改：① 默认按 created_at 倒序（同秒按 id 倒序）—— 原先按主键升序，客户一多
+        就只看得到最早录入的那批，"刚录的客户"在默认列表里根本看不见；② 加 with_total=True
+        时返回 (rows, 符合条件总数)，供上层区分"本次返回条数"与"总数"（与 search_properties 同形状）。
         """
         with self.get_session() as s:
             q = s.query(Customer)
@@ -833,13 +837,16 @@ class RealEstateDB:
             if customer_type:
                 values = customer_type_filter(customer_type)
                 if values is None:
-                    return []
+                    return ([], 0) if with_total else []
                 cols = [v for v in values if v]
                 cond = Customer.customer_type.in_(cols)
                 if None in values:
                     cond = or_(cond, Customer.customer_type.is_(None))
                 q = q.filter(cond)
-            return [c.to_dict() for c in q.limit(limit).all()]
+            total = q.count() if with_total else None
+            rows = [c.to_dict() for c in q.order_by(Customer.created_at.desc(),
+                                                   Customer.id.desc()).limit(limit).all()]
+            return (rows, total) if with_total else rows
 
     def get_birthday_customers(self, month=None, day=None):
         """查询指定月/日过生日的客户（用于生日提醒）
