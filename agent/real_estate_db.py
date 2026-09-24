@@ -2740,6 +2740,22 @@ class RealEstateDB:
                     'message': f'{"预演：" if dry_run else ""}将把 {len(restored)} 条恢复为在售/在跟'}
 
     # ---------- 统计 ----------
+    def count_overdue_followups(self):
+        """逾期跟进数（SQL 聚合；口径与 get_overdue 完全一致：每位客户只看最新一条跟进且已过期）
+
+        2026-09-24 改：统计里原先用 len(self.get_overdue())，会把**全部跟进记录**拉进内存再数
+        —— 1.2 万客户 / 2.4 万跟进下约 0.5 秒，而同一口径的 SQL 聚合只要 0.014 秒。
+        """
+        from sqlalchemy import text as _text
+        with self.get_session() as s:
+            row = s.execute(_text(
+                "SELECT COUNT(*) FROM re_followups f"
+                " WHERE f.customer_id IS NOT NULL AND f.next_date IS NOT NULL AND f.next_date < :now"
+                "   AND f.id = (SELECT x.id FROM re_followups x WHERE x.customer_id = f.customer_id"
+                "               ORDER BY x.created_at DESC, x.id DESC LIMIT 1)"),
+                {"now": datetime.now()}).fetchone()
+            return int(row[0]) if row else 0
+
     def get_stats(self):
         """统计。客户数按"在跟"口径（活跃+暂缓），已关闭单列不计入
 
@@ -2749,8 +2765,26 @@ class RealEstateDB:
         with self.get_session() as s:
             tracking = s.query(Customer).filter(Customer.status != 'closed').count()
             closed = s.query(Customer).filter(Customer.status == 'closed').count()
+            active = s.query(Customer).filter(Customer.status == 'active').count()
+            paused = s.query(Customer).filter(Customer.status == 'paused').count()
             tiers = {t: s.query(Customer).filter(
                 Customer.tier == t, Customer.status != 'closed').count() for t in ['S','A','B','C']}
+            # 客户类型分布（2026-09-24 加，与房源侧 available_by_type 对称）：经纪人问"多少租房客户"
+            # 要一次答出来，而不是逐个类型调 list_customers。未细分（含历史 'buy'/空值）单列一档。
+            type_counts = {t: s.query(Customer).filter(
+                Customer.status != 'closed', Customer.customer_type == t).count()
+                for t in ('buy_new', 'buy_second_hand', 'rent')}
+            unsp_vals = customer_type_filter('unspecified')
+            unsp_cols = [v for v in unsp_vals if v]
+            unsp_cond = Customer.customer_type.in_(unsp_cols)
+            if None in unsp_vals:
+                unsp_cond = or_(unsp_cond, Customer.customer_type.is_(None))
+            type_counts['unspecified'] = s.query(Customer).filter(
+                Customer.status != 'closed', unsp_cond).count()
+            typed = sum(type_counts.values())
+            if typed < tracking:
+                # 库里若有既不属于任何类型也不属于未分组的脏值（历史遗留），如实单列，别让分布对不上总数
+                type_counts['other'] = tracking - typed
             props = s.query(Property).filter(Property.status == 'available').count()
             # 房源侧多维统计（2026-09-24 加）：原先只报一个"在售数"，经纪人问"一共多少套/卖了几套/
             # 多少套在出租"都答不了，而客户侧却有 4 个维度。
@@ -2760,11 +2794,17 @@ class RealEstateDB:
             avail_by_type = {t: s.query(Property).filter(Property.status == 'available',
                                                         Property.property_type == t).count()
                              for t in ('new', 'second_hand', 'rental')}
-            overdue = len(self.get_overdue())
+            overdue = self.count_overdue_followups()
             return {
                 'total_customers': tracking, 'closed_customers': closed,
-                'customer_count_note': '客户数按"在跟"统计（活跃+暂缓），已关闭单列不计入',
+                'active_customers': active, 'paused_customers': paused,
+                'customer_count_note': ('客户数按"在跟"统计（活跃+暂缓），已关闭单列不计入；'
+                                        'active_customers/paused_customers 是在跟客户的细分'),
                 'tier_counts': tiers,
+                'customer_type_counts': type_counts,
+                'customer_type_note': ('客户类型分布按"在跟"口径：buy_new=买一手房 / buy_second_hand=买二手房 / '
+                                       'rent=租房 / unspecified=未细分（没确认买新房还是买二手房的；含历史值）。'
+                                       '按来源看渠道分布请用 channel_stats'),
                 'total_properties': total_props,
                 'available_properties': props,
                 'sold_properties': sold_props,

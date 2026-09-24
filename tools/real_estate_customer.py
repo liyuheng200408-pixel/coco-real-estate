@@ -506,7 +506,7 @@ def update_tier(customer_id: int, tier: str, task_id: str = None) -> str:
 
 
 def customer_stats(task_id: str = None) -> str:
-    """获取客户统计数据"""
+    """获取经营统计（客户数按"在跟"口径；含各等级/各类型/活跃暂缓分布；房源四维；逾期跟进数）"""
     db = _get_db()
     stats = db.get_stats()
     return json.dumps({"success": True, "stats": stats}, ensure_ascii=False)
@@ -571,7 +571,7 @@ TOOLS = [
         },
         "required": ["customer_id", "tier"],
     }, "handler": lambda args, **kw: update_tier(**args)},
-    {"name": "customer_stats", "description": "获取客户统计数据", "parameters": {
+    {"name": "customer_stats", "description": "获取经营统计：客户数（在跟口径，已关闭单列）、各等级客户数、各类型客户数、活跃/暂缓分布、房源统计（总数/在售/已售/已租/在售按类型）、逾期跟进数。客户来源分布用 channel_stats。", "parameters": {
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: customer_stats()},
 ]
@@ -622,7 +622,7 @@ registry.register(
 registry.register(
     name="customer_stats",
     toolset="real_estate",
-    schema={"name": "customer_stats", "description": "获取客户统计（客户数按\"在跟\"口径：活跃+暂缓；已关闭单列 closed_customers，不计入客户数）", "parameters": TOOLS[5]["parameters"]},
+    schema={"name": "customer_stats", "description": "获取经营统计：客户数（在跟口径，已关闭单列）、各等级客户数、各类型客户数、活跃/暂缓分布、房源统计（总数/在售/已售/已租/在售按类型）、逾期跟进数。客户来源分布用 channel_stats。", "parameters": TOOLS[5]["parameters"]},
     handler=TOOLS[5]["handler"],
 )
 
