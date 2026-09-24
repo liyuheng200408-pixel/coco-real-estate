@@ -837,6 +837,17 @@ class ToolRegistry:
         if _missing:
             _req = ", ".join(_missing)
             return tool_error(f"缺少必填参数：{_req}。请补齐这些参数后重新调用 {name}。")
+        # 整数参数形态归一（COCO-PATCH 2026-09-25）：`limit` 传 "12"、编号传 true 这类形态在
+        # 实测里 10 个读类工具全中 —— `owner_id=true` 会被当成 1、返回 id=1 那条记录（把**别人的
+        # 资料**当成这位客户的资料念出来），数字串则依赖数据库的隐式转换（SQLite 与 PostgreSQL
+        # 口径不同）。数字串转成整数，bool 直接拦成中文提示；认不出的文本不拦（`limit` 类参数的
+        # 口径是"非数字按默认"，语义由工具自己判）。
+        _int_args, _bad_int = self._int_params_from_values(entry, args)
+        if _bad_int:
+            _pairs = "；".join(f"参数 {k} 要是数字，收到的是 {v}" for k, v in _bad_int)
+            return tool_error(f"{_pairs}。请核对后重新调用 {name}。")
+        if _int_args:
+            args = {**args, **_int_args}
         # 整数参数越界校验（COCO-PATCH 2026-09-24）：模型偶尔把一长串数字当编号（截图识别、
         # 把手机号/金额当 id），超出 int64 会让 ORM/数据库抛 OverflowError。模型看到英文异常会
         # 转去自己编答案（与必填 null、参数名写错同一个病根），这里先拦成中文提示。
@@ -900,6 +911,36 @@ class ToolRegistry:
             if abs(value) > 2 ** 63 - 1:
                 overflow.append((key, value))
         return overflow
+
+    @staticmethod
+    def _int_params_from_values(entry, args):
+        """声明为整数/数值的参数 → (要转成整数的值, 认不出的值)。
+
+        COCO-PATCH 2026-09-25：
+        - 数字字符串（`"12"`、`" 12 "`）转成整数 —— 不依赖 SQLite/PostgreSQL 各自的隐式转换；
+        - `bool` 当编号在系统里没有任何含义，却会被当成 1 命中 id=1 的那条记录（上层传 true 就
+          拿到**别人的**资料），直接拦成中文提示；
+        - 认不出的文本（`"abc"`）不拦：`limit` 这类参数的口径是"非数字按默认"，语义交给工具判。
+        """
+        if not isinstance(args, dict):
+            return {}, []
+        try:
+            props = ((entry.schema or {}).get("parameters") or {}).get("properties") or {}
+        except Exception:
+            return {}, []
+        converted, bad = {}, []
+        for key, value in args.items():
+            if (props.get(key) or {}).get("type") not in ("integer", "number"):
+                continue
+            if isinstance(value, bool):
+                bad.append((key, "true" if value else "false"))
+                continue
+            if isinstance(value, str):
+                try:
+                    converted[key] = int(value.strip())
+                except ValueError:
+                    continue
+        return converted, bad
 
     @staticmethod
     def _text_params_from_numbers(entry, args):

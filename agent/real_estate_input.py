@@ -232,6 +232,26 @@ def birthday_matches_month_day(stored, month=None, day=None):
     return False
 
 
+# ==================== 编号 ====================
+
+def norm_id(value, label="编号", hint=""):
+    """编号写法归一 → (整数或 None, 提示或 None)。
+
+    上层把编号传成文本/布尔时（`"12"`、`true`、`abc`），宁可给一句中文提示，
+    也不要静默走到"对象不存在"：编号形态认不出 ≠ 库里没有这条记录（2026-09-25 加）。
+    框架层已经拦掉整数参数收到 bool/数字串的形态，这里给"以编号为入口"的工具兜底，
+    并让提示说清"编号是数字"。
+    """
+    if isinstance(value, bool):
+        return None, f"{label}没能识别：收到的是 {'true' if value else 'false'}。{label}是数字（如 12）{hint}"
+    if isinstance(value, int):
+        return value, None
+    text = str(value).strip()
+    if text.lstrip('+').isdigit():
+        return int(text), None
+    return None, f"{label}没能识别：收到的是「{value}」。{label}是数字（如 12）{hint}"
+
+
 # ==================== 客户标签 ====================
 
 TAG_MAX_LEN = 20

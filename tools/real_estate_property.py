@@ -4,7 +4,7 @@ Coco 房产工具 - 房源管理
 import json
 import re
 
-from agent.real_estate_input import cn_number, norm_customer_type, norm_money
+from agent.real_estate_input import cn_number, norm_customer_type, norm_id, norm_money
 from tools.registry import registry
 
 
@@ -613,7 +613,12 @@ def get_property_detail(property_id: int = None, title: str = None, task_id: str
     """
     db = _get_db()
     if property_id:
-        prop = db.get_property(int(property_id))
+        # 编号形态归一（2026-09-25）：原先直接 int(property_id)，传 'abc' 这类文本会抛
+        # ValueError（上层看到"执行失败"会转向自己编答案）
+        pid, problem = norm_id(property_id, '房源编号')
+        if problem:
+            return json.dumps({"success": False, "error": problem + "。"}, ensure_ascii=False)
+        prop = db.get_property(pid)
         if not prop:
             return json.dumps({"success": False, "not_found": True,
                                "error": f"没有编号为 {property_id} 的房源"}, ensure_ascii=False)

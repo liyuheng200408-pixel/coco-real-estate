@@ -6,7 +6,7 @@ Coco 房产工具 - 房东（业主）委托管理
 import json
 from datetime import datetime
 
-from agent.real_estate_input import norm_phone
+from agent.real_estate_input import norm_id, norm_phone
 from tools.registry import registry
 
 
@@ -25,6 +25,38 @@ def _safe_contact(value):
         return None
     from agent.real_estate_db import KEY_MISMATCH_HINT, looks_like_ciphertext
     return KEY_MISMATCH_HINT if looks_like_ciphertext(value) else value
+
+
+OWNER_KEY_MISMATCH_WARNING = (
+    "房东联系方式读不出来：库里的加密内容用当前密钥解不开"
+    "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
+    "在此之前不要把这条联系方式给客户。")
+
+
+def _mask_owner_contacts(row):
+    """把房东行里的联系方式做展示防御，返回 (row, 被掩码的字段列表)。
+
+    密钥不一致时 EncryptedString 会把密文原样返回 —— 所有会把房东数据交给上层的路径都要过这里
+    （2026-09-25 加：原先读路径直接把 gAAAA… 当电话交出去，get_property_owners 是唯一做了的）。
+    """
+    masked = []
+    for key in ("phone", "wechat"):
+        before = row.get(key)
+        if before is None:
+            continue
+        after = _safe_contact(before)
+        if after != before:
+            masked.append(key)
+        row[key] = after
+    return row, masked
+
+
+def _attach_key_warning(payload, masked):
+    """命中密文时给返回体补 warning 与 cipher_fields（让 Coco 如实转述，不静默）"""
+    if masked:
+        payload["warning_key_mismatch"] = OWNER_KEY_MISMATCH_WARNING
+        payload["cipher_fields"] = sorted(set(masked))
+    return payload
 
 
 def _mask_id(id_number: str) -> str:
@@ -200,12 +232,19 @@ def find_person_by_name(name: str = None, task_id: str = None) -> str:
 
 
 def get_owner(owner_id: int, task_id: str = None) -> str:
-    """查询房东信息"""
+    """查询房东详情"""
+    oid, problem = norm_id(owner_id, '房东编号', '，可在房东列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem + "。"}, ensure_ascii=False)
     db = _get_db()
-    owner = db.get_owner(owner_id)
+    owner = db.get_owner(oid)
     if not owner:
         return json.dumps({"success": False, "error": "房东不存在"}, ensure_ascii=False)
-    return json.dumps({"success": True, "owner": owner}, ensure_ascii=False)
+    # 联系方式展示防御（2026-09-25 加，与客户详情 F46 同口径）：密钥不一致时读出来是密文，
+    # 绝不能把 gAAAA… 当房东电话说给经纪人，也不能默默咽掉（给 warning 让 Coco 如实转述）。
+    owner, masked = _mask_owner_contacts(owner)
+    return json.dumps(_attach_key_warning({"success": True, "owner": owner}, masked),
+                      ensure_ascii=False)
 
 
 def list_owners(limit: int = 50, task_id: str = None) -> str:
@@ -274,10 +313,10 @@ TOOLS = [
     },
     {
         "name": "get_owner",
-        "description": "查询房东信息",
+        "description": "查房东详情：姓名、手机号、微信号、脱敏身份证号、信任度备注、备注、登记时间；联系方式给完整号码（经纪人本人是唯一接收方）。房东不存在或编号写错会如实说明。用于经纪人问\"这位房东的详细资料/电话号码\"",
         "parameters": {
             "type": "object",
-            "properties": {"owner_id": {"type": "integer", "description": "房东ID"}},
+            "properties": {"owner_id": {"type": "integer", "description": "房东ID（数字，如 12；不确定就先列房东列表查）"}},
             "required": ["owner_id"],
         },
         "handler": lambda args, **kw: get_owner(**args),
