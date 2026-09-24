@@ -270,12 +270,14 @@ def norm_tags(value, max_len=TAG_MAX_LEN):
 def clean_tags(value):
     """把库里存的标签串读成干净的列表（去空元素/去首尾空白/去重，不改动库存值）。
 
-    存量数据里可能有 "A, A"、"A,,"、带空格的写法 —— 读路径统一过滤，避免列表里冒出空标签。
+    用**与写入侧同一套分隔符**拆分：存量数据里可能有 "A, A"、"A,,"、"学区房，地铁房"（全角）、
+    "急售、钥匙在我这"（顿号）这些没归一的写法 —— 读路径统一兜住，否则整串会被当成"一个标签"，
+    按标签筛选会漏、删也删不掉（2026-09-24 修：写入侧归一了、读取侧漏了）。
     """
     if not value:
         return []
     out, seen = [], set()
-    for part in str(value).split(","):
+    for part in _TAG_SEPARATORS.split(str(value)):
         tag = part.strip()
         if tag and tag not in seen:
             seen.add(tag)

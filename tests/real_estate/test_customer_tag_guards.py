@@ -193,3 +193,24 @@ def test_add_and_remove_descriptions_state_behavior():
     assert "多个" in add_desc and "重复" in add_desc, add_desc
     assert "归一" in rm_desc, rm_desc
 
+# ---------- ⑥ 读取侧对存量脏值兜底（F74） ----------
+@pytest.mark.parametrize("legacy,expected", [
+    ("学区房，地铁房、急售", ["学区房", "地铁房", "急售"]),   # 全角逗号 + 顿号
+    ("A/B|C", ["A", "B", "C"]),
+    ("学区房, ,学区房", ["学区房"]),
+])
+def test_clean_tags_splits_legacy_separators(legacy, expected):
+    assert clean_tags(legacy) == expected
+
+
+def test_remove_works_on_legacy_fullwidth_separators(tool_db):
+    """库里存全角写法时，也要能按规范标签名删掉（并在写入时顺带清洗该行）"""
+    cid = make(tool_db)
+    with tool_db.get_session() as s:
+        from sqlalchemy import text
+        s.execute(text("UPDATE re_customers SET tags = '学区房，地铁房、急售' WHERE id = :i"), {"i": cid})
+        s.commit()
+    assert tags_of(cid) == ["学区房", "地铁房", "急售"]        # 读取侧不再把整串当一个标签
+    r = remove(cid, "地铁房")
+    assert r["success"] is True and r["removed"] == ["地铁房"], r
+    assert raw(tool_db, cid) == "学区房,急售"                  # 写入时顺带清洗成规范写法
