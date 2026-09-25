@@ -260,14 +260,16 @@ def midday_check(task_id: str = None) -> str:
 
 
 TOOLS = [
-    {"name": "add_followup", "description": "添加客户跟进记录", "parameters": {
+    {"name": "add_followup", "description": "添加客户跟进记录（电话/带看/成交/备注/提醒），可关联房源、设下次跟进日期与时间；写入前会核对客户与房源是否存在", "parameters": {
         "type": "object", "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},
             "content": {"type": "string", "description": "跟进内容"},
             "property_id": {"type": "integer", "description": "关联房源ID"},
-            "type": {"type": "string", "enum": ["call", "visit", "deal", "note", "reminder"], "description": "跟进类型"},
-            "next_date": {"type": "string", "description": "下次跟进日期（ISO格式）"},
-            "next_time": {"type": "string", "description": "提醒时间，如 09:00"},
+            "type": {"type": "string", "enum": ["call", "visit", "deal", "note", "reminder"],
+                     "description": "跟进类型（call 电话 / visit 带看 / deal 成交 / note 备注 / reminder 提醒，也认中文写法）"},
+            "next_date": {"type": "string",
+                          "description": "下次跟进日期（2026-12-31 / 2026/12/31 / 2026年12月31日 都认；给了时间会并到这一刻）"},
+            "next_time": {"type": "string", "description": "下次跟进时间，如 09:30（也认 9点30 / 0930）"},
         }, "required": ["customer_id", "content"],
     }, "handler": lambda args, **kw: add_followup(**args)},
     {"name": "get_followups", "description": "获取客户跟进历史", "parameters": {
@@ -299,7 +301,7 @@ TOOLS = [
 registry.register(
     name="add_followup",
     toolset="real_estate",
-    schema={"name": "add_followup", "description": "添加客户跟进记录", "parameters": TOOLS[0]["parameters"]},
+    schema={"name": "add_followup", "description": "添加客户跟进记录（电话/带看/成交/备注/提醒），可关联房源、设下次跟进日期与时间；写入前会核对客户与房源是否存在", "parameters": TOOLS[0]["parameters"]},
     handler=TOOLS[0]["handler"],
 )
 registry.register(

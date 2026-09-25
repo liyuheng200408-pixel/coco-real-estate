@@ -289,3 +289,31 @@ class TestOutputs:
         rows = {r.customer_id: r.content for r in _followup_rows(wired)}
         assert rows[fixtures["customer"]["id"]] == "甲"
         assert rows[fixtures["other"]["id"]] == "乙"
+
+
+# ==================== ⑦ 描述（模型靠它判断这工具能给什么）====================
+
+class TestDescription:
+    def test_description_states_what_it_does(self):
+        from tools.registry import registry
+
+        desc = registry.get_entry("add_followup").schema["description"]
+        assert len(desc) >= 30, desc
+        for word in ("跟进", "电话", "带看", "日期", "房源"):
+            assert word in desc, (word, desc)
+
+    def test_description_not_written_twice_with_drift(self):
+        """模块级 TOOLS 与 registry.register 各写一份描述，两份必须一致"""
+        from tools.registry import registry
+        import tools.real_estate_followup as m
+
+        assert registry.get_entry("add_followup").schema["description"] == m.TOOLS[0]["description"]
+
+    def test_param_descriptions_state_accepted_forms(self):
+        """参数说明要写清能认的写法，否则模型只按 ISO 传"""
+        from tools.registry import registry
+
+        props = registry.get_entry("add_followup").schema["parameters"]["properties"]
+        assert "2026/12/31" in props["next_date"]["description"]
+        assert "09:30" in props["next_time"]["description"]
+        assert "中文" in props["type"]["description"]
