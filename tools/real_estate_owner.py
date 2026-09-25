@@ -9,7 +9,8 @@ from datetime import datetime
 from agent.real_estate_display import (OWNER_KEY_MISMATCH_WARNING, PERSON_KEY_MISMATCH_WARNING,
                                        attach_key_warning, mask_contacts, safe_contact)
 from agent.real_estate_input import clamp_limit, norm_id, norm_phone
-from tools.real_estate_property import _STATUS_LABELS, _fmt_price
+from agent.real_estate_money import fmt_budget, fmt_price
+from tools.real_estate_property import _STATUS_LABELS
 from tools.registry import registry
 
 
@@ -52,24 +53,6 @@ def _norm_days(value, default=30):
     except (TypeError, ValueError):
         return default
     return max(value, 0)
-
-
-def _fmt_budget(value):
-    """预算展示（系统存元）→ 300万 / 5000元
-
-    2026-09-25 修：原先直接把元值配"万"（3000000-5000000 显示成 3000000-5000000万，差 1 万倍）。
-    低于 1 万按元说（客户的租房预算常见 5000 元，说成 0.5万 反而难读）。
-    """
-    if value is None:
-        return None
-    try:
-        amount = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    if amount < 10000:
-        return f"{amount:.0f}元"
-    wan = amount / 10000
-    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.1f}万"
 
 
 def _clip(value, max_len):
@@ -238,8 +221,8 @@ def find_person_by_name(name: str = None, limit: int = None, task_id: str = None
                      f"本次各返回 客户 {len(customers)} / 业主 {len(owners)} 位（姓名子串匹配）。"
                      f"要看得更全就把关键词写长一点，或把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
     for c in customers:
-        budget = '-'.join(filter(None, [str(_fmt_budget(c.get('budget_min')) or ''),
-                                        str(_fmt_budget(c.get('budget_max')) or '')])) or '-'
+        budget = '-'.join(filter(None, [str(fmt_budget(c.get('budget_min')) or ''),
+                                        str(fmt_budget(c.get('budget_max')) or '')])) or '-'
         lines.append(f"\n【客户】{c.get('name')}（ID:{c.get('id')}）"
                      f"电话 {c.get('phone') or '未录'} | 微信 {c.get('wechat') or '未录'} | "
                      f"等级 {c.get('tier') or '-'} | "
@@ -333,10 +316,10 @@ def owner_portfolio(owner_id: int, limit: int = None, task_id: str = None) -> st
         lines.append(f"共 {stats['total']} 套房源，这里列出最新登记的 {len(shown)} 套（最新登记优先）。"
                      f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
     for p in shown:
-        # 展示口径复用房源侧：_fmt_price（出租 → 元/月）/ _STATUS_LABELS（在售/已售/已租）
+        # 展示口径复用共用实现：fmt_price（出租 → 元/月）/ _STATUS_LABELS（在售/已售/已租）
         viewing = f"，看房方式: {p['viewing_note']}" if p.get("viewing_note") else ""
         status = _STATUS_LABELS.get(p.get('status'), p.get('status') or '未录入')
-        lines.append(f"\n· {p['title']}（ID:{p['id']}）{_fmt_price(p)} [{status}]{viewing}")
+        lines.append(f"\n· {p['title']}（ID:{p['id']}）{fmt_price(p)} [{status}]{viewing}")
     payload = {
         "success": True, **result,
         "count": len(shown), "truncated": truncated,
@@ -373,7 +356,7 @@ def exclusive_expiring(days: int = 30, limit: int = None, task_id: str = None) -
                      f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
     for it in items:
         when = "已过期" if it['days_remaining'] < 0 else f"还有 {it['days_remaining']} 天到期"
-        lines.append(f"\n· {it['title']}（ID:{it['id']}）{_fmt_price(it)} — {when}")
+        lines.append(f"\n· {it['title']}（ID:{it['id']}）{fmt_price(it)} — {when}")
     lines.append("\n到期前是重新谈委托条件或建议调价的窗口")
     return json.dumps({
         "success": True, "items": items,

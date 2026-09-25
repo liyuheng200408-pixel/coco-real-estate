@@ -4,6 +4,7 @@ Coco 房产工具 - 客户管理
 import json
 
 from agent.real_estate_display import attach_key_warning, mask_contacts, safe_contact
+from agent.real_estate_money import fmt_budget, fmt_wan
 from agent.real_estate_input import (STAGES, STAGE_LABELS, clamp_limit, clean_tags,
                                      norm_birthday, norm_customer_type, norm_id, norm_money,
                                      norm_phone, norm_stage, norm_tags, norm_tier,
@@ -84,11 +85,11 @@ def _match_message(matches, budget_max):
     parts = []
     for m in matches[:2]:
         price = m.get('price')
-        price_txt = f"{price/10000:.0f}万" if isinstance(price, (int, float)) and price else "价格未知"
+        price_txt = fmt_wan(price, 0) if isinstance(price, (int, float)) and price else "价格未知"
         reasons = [r for r in (m.get('match_reasons') or []) if r in _HARD_CONFLICT_REASONS]
         if '超预算' in reasons and isinstance(price, (int, float)) and isinstance(budget_max, (int, float)) \
                 and price > budget_max:
-            extra = f"，超出预算 {(price - budget_max)/10000:.0f}万"
+            extra = f"，超出预算 {fmt_wan(price - budget_max, 0)}"
         elif reasons:
             extra = "，" + "、".join(reasons)
         else:
@@ -159,7 +160,7 @@ def add_customer(
         else:
             budget_max = value
     if budget_min is not None and budget_max is not None and budget_min > budget_max:
-        warnings.append(f"预算下限 {budget_min/10000:.0f}万 大于上限 {budget_max/10000:.0f}万，"
+        warnings.append(f"预算下限 {fmt_budget(budget_min)} 大于上限 {fmt_budget(budget_max)}，"
                         f"已按原样登记，请核对哪个写反了")
 
     raw_birthday = birthday
@@ -299,7 +300,7 @@ def update_customer(
     eff_min = budget_min if budget_min is not None else norm_money(old.get('budget_min'))
     eff_max = budget_max if budget_max is not None else norm_money(old.get('budget_max'))
     if eff_min is not None and eff_max is not None and eff_min > eff_max:
-        warnings.append(f"预算下限 {eff_min/10000:.0f}万 大于上限 {eff_max/10000:.0f}万，"
+        warnings.append(f"预算下限 {fmt_budget(eff_min)} 大于上限 {fmt_budget(eff_max)}，"
                         f"已按原样登记，请核对哪个写反了")
     if birthday is not None:
         raw_birthday = birthday
@@ -341,7 +342,7 @@ def update_customer(
             alerts.append({
                 'type': 'budget_drift',
                 'level': 'warning',
-                'message': f"预算上限从 {old_max/10000:.0f}万 下调到 {new_max/10000:.0f}万（降 {drop_pct}%），"
+                'message': f"预算上限从 {fmt_budget(old_max)} 下调到 {fmt_budget(new_max)}（降 {drop_pct}%），"
                            f"客户很可能在别处看到了更便宜的房子，建议主动联系确认需求变化。",
             })
     if 'location' in kwargs and old.get('location') and kwargs['location'] != old.get('location'):
@@ -387,6 +388,8 @@ def _display_change_value(field, value):
             yuan = float(text)
         except ValueError:
             return text
+        # 留痕口径**刻意不同**：变更历史要精确到 0.01 万并去掉尾零（5000 元 → "0.5万"），
+        # 与"说给经纪人听"的 fmt_budget（<1 万按元说）不是一回事，别硬套。
         wan = yuan / 10000
         wan_text = f"{wan:.2f}".rstrip("0").rstrip(".")
         return f"{wan_text}万"

@@ -25,6 +25,8 @@ import shutil
 import subprocess
 import tempfile
 
+from agent.real_estate_money import fmt_price
+
 W, H = 1080, 1920
 MARGIN = 70                      # 左右安全边
 CONTENT_W = W - MARGIN * 2       # 940
@@ -311,20 +313,13 @@ def _footer(text: str = "房源信息以实际看房为准", color: str = "#FFFF
 
 
 def _price_text(p: dict) -> str:
-    price = p.get("price")
-    if price in (None, ""):
-        return "价格待定"
-    try:
-        price = float(price)
-    except (TypeError, ValueError):
-        return "价格待定"
-    if p.get("property_type") == "rental":
-        return "%d元/月" % round(price)
-    wan = price / 10000
-    return ("%d万" % round(wan)) if abs(wan - round(wan)) < 0.05 else ("%.1f万" % wan)
+    """海报大字价格：复用共用实现（一位小数），near_int 让 29.96万 这类零头直接说 30万"""
+    return fmt_price(p, digits=1, empty="价格待定", near_int=True)
 
 
 def _unit_price_text(p: dict, prefix: str = "单价 ") -> str:
+    """海报大字单价**刻意**用"万/㎡"（≥1万时）：画面上"1.88万/㎡"比"18750.00元/㎡"短一半，
+    与列表/文案里的"元/㎡"（`fmt_unit_price`）不是同一语境，别硬套共用实现。"""
     up = p.get("unit_price")
     if not up:
         return ""

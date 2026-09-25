@@ -4,7 +4,10 @@ Coco 房产工具 - 房源管理
 import json
 import re
 
-from agent.real_estate_display import OWNER_KEY_MISMATCH_WARNING, attach_key_warning, mask_contacts, safe_contact
+from agent.real_estate_display import (OWNER_KEY_MISMATCH_WARNING, attach_key_warning, mask_contacts,
+                                       safe_contact)
+from agent.real_estate_money import (fmt_budget, fmt_delta, fmt_price, fmt_unit_price,
+                                     fmt_wan)
 from agent.real_estate_input import (clamp_limit, cn_number, norm_customer_type, norm_date, norm_id,
                                      norm_money)
 from tools.registry import registry
@@ -525,25 +528,8 @@ def _norm_orientation(value):
 _STATUS_LABELS = {"available": "在售", "sold": "已售", "rented": "已租"}
 
 
-def _fmt_price(prop: dict) -> str:
-    """价格展示（系统存元）：二手/一手房 → '28.37万'，出租 → '1000元/月'"""
-    price = prop.get("price")
-    if price is None:
-        return "未录入"
-    price = float(price)
-    if prop.get("property_type") == "rental":
-        return f"{price:.0f}元/月"
-    wan = price / 10000
-    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.2f}万"
-
-
 def _fmt_field(value) -> str:
     return str(value) if value not in (None, "") else "未录入"
-
-
-def _fmt_unit_price(value) -> str:
-    """单价展示统一两位小数（20000.0 → 20000.00；11058.25 保持两位）"""
-    return f"{float(value):.2f}"
 
 
 def _fmt_area(value) -> str:
@@ -568,8 +554,8 @@ def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
     """房源详情的人类可读摘要（模型照抄即可，避免它自己拼表时漏字段）"""
     lines = [f"【房源】{prop.get('title')}（编号 {prop.get('id')}）"]
     unit_price = prop.get("unit_price")
-    unit_part = f"单价 {_fmt_unit_price(unit_price)}元/㎡" if unit_price else "单价 面积缺失，无法计算"
-    lines.append(f"总价 {_fmt_price(prop)} | 面积 {_fmt_area(prop.get('area'))}㎡ | {unit_part}")
+    unit_part = f"单价 {fmt_unit_price(unit_price)}元/㎡" if unit_price else "单价 面积缺失，无法计算"
+    lines.append(f"总价 {fmt_price(prop)} | 面积 {_fmt_area(prop.get('area'))}㎡ | {unit_part}")
     lines.append(
         f"类型 {_TYPE_LABELS.get(prop.get('property_type'), prop.get('property_type') or '未录入')}"
         f" | 状态 {_STATUS_LABELS.get(prop.get('status'), prop.get('status') or '未录入')}"
@@ -601,8 +587,8 @@ def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
     lines.append(f"【图片】{image_count} 张" if image_count else "【图片】未关联图片")
     if history:
         h = history[0]
-        lines.append(f"【调价】最近一次 调至 {_fmt_price({'price': h.get('new_price'), 'property_type': prop.get('property_type')})}"
-                     f"（原 {_fmt_price({'price': h.get('old_price'), 'property_type': prop.get('property_type')})}）")
+        lines.append(f"【调价】最近一次 调至 {fmt_price({'price': h.get('new_price'), 'property_type': prop.get('property_type')})}"
+                     f"（原 {fmt_price({'price': h.get('old_price'), 'property_type': prop.get('property_type')})}）")
     return "\n".join(lines)
 
 
@@ -988,7 +974,7 @@ def price_history(property_id: int, limit: int = _PRICE_HISTORY_LIMIT_DEFAULT, t
     summary = db.get_price_history_summary(property_id)
     if not summary['count']:
         return json.dumps({"success": True, "message": "该房源暂无调价记录", "history": []}, ensure_ascii=False)
-    message = f"共 {summary['count']} 次调价，累计变动 {summary['change']/10000:+.1f}万"
+    message = f"共 {summary['count']} 次调价，累计变动 {fmt_delta(summary['change'], 1)}"
     if summary['count'] > len(history):
         message += f"（下面列出最近 {len(history)} 次明细）"
     return json.dumps({"success": True, "message": message, "history": history,
@@ -1037,11 +1023,12 @@ def price_drop_alerts(days: int = 7, task_id: str = None) -> str:
         head += f"；这里列前 {len(shown)} 套"
     lines = [head]
     for a in shown:
-        drop_w = (a["drop_amount"] or 0) / 10000
-        lines.append(f"\n· {a['title']}（ID:{a['property_id']}）降价 {drop_w:.0f}万 → 现价 {a['new_price']/10000:.0f}万")
+        lines.append(f"\n· {a['title']}（ID:{a['property_id']}）降价 {fmt_wan(a['drop_amount'] or 0, 0)}"
+                     f" → 现价 {fmt_wan(a['new_price'], 0)}")
         for c in a["matched_customers"]:
             afford = "现在够得着" if c["now_affordable"] else "还差一点"
-            lines.append(f"   → {c['name']}（{c['tier']}级，预算上限{c['budget_max']/10000:.0f}万，上次差{c['gap']/10000:.0f}万，{afford}）建议联系")
+            lines.append(f"   → {c['name']}（{c['tier']}级，预算上限{fmt_budget(c['budget_max'])}，"
+                         f"上次差{fmt_wan(c['gap'], 0)}，{afford}）建议联系")
     return json.dumps({
         "success": True,
         "summary": f"{len(alerts)}套降价、{total_hits}位可捞回客户",
@@ -1101,8 +1088,9 @@ def find_alternatives(property_id: int, limit: int = _FIND_ALT_LIMIT_DEFAULT, ta
     lines = [f"🔁 找到 {len(alts)} 套平替方案（按贴近度排序）"]
     for a in alts:
         diff = a.get("diff_price") or 0
-        diff_str = f"{'贵' if diff > 0 else '便宜'}{abs(diff)/10000:.0f}万" if diff else "同价"
-        lines.append(f"\n· {a['title']}（ID:{a['id']}）{a['price']/10000:.0f}万（{diff_str}）{a['area']}㎡ {a['rooms'] or '?'}室")
+        diff_str = (f"{'贵' if diff > 0 else '便宜'}{fmt_wan(abs(diff), 0)}" if diff else "同价")
+        lines.append(f"\n· {a['title']}（ID:{a['id']}）{fmt_wan(a['price'], 0)}（{diff_str}）"
+                     f"{a['area']}㎡ {a['rooms'] or '?'}室")
         lines.append(f"  贴近度: {a['match_level']}分")
     return json.dumps({
         "success": True,

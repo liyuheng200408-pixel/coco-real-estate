@@ -3,13 +3,14 @@ Coco 房产工具 - 房源发布文案生成
 为不同平台生成标准化的房源发布文案
 """
 import json
+from functools import partial
+
 from tools.registry import registry
 from agent.real_estate_input import norm_id
+from agent.real_estate_money import fmt_price, fmt_unit_price
 
-
-def _fmt_unit_price(value) -> str:
-    """单价展示统一两位小数（20000.0 → 20000.00）"""
-    return f"{float(value):.2f}"
+# 文案口径：整万说整万、非整万保留一位（海报/文案的字要短）；缺价格说"价格待定"
+_fmt_price = partial(fmt_price, digits=1, empty="价格待定")
 
 
 def _get_db():
@@ -41,18 +42,6 @@ def _fmt_basic(p):
     return "，".join(parts)
 
 
-def _fmt_price(p):
-    """价格展示（系统存元）：二手/一手房 → '400万'，出租 → '1000元/月'"""
-    price = p.get('price')
-    if price is None:
-        return '价格待定'
-    price = float(price)
-    if p.get('property_type') == 'rental':
-        return f"{price:.0f}元/月"
-    wan = price / 10000
-    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.1f}万"
-
-
 def generate_listing_copy(property_id: int, platform: str = "friends", task_id: str = None) -> str:
     """生成房源发布文案
 
@@ -81,7 +70,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"📍 {district} {community}\n"
             f"{basic}\n"
             f"💰 价格 {_fmt_price(p)}"
-            + (f"（单价 {_fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
+            + (f"（单价 {fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
             + "\n\n"
             f"感兴趣的私信我，随时约看房！"
         )
@@ -90,7 +79,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"{title}，{district} {community}\n"
             f"{basic}\n"
             f"价格：{_fmt_price(p)}"
-            + (f"，单价：{_fmt_unit_price(unit_price)}元/㎡" if unit_price else "")
+            + (f"，单价：{fmt_unit_price(unit_price)}元/㎡" if unit_price else "")
             + "\n"
             f"地址：{address or community}\n"
             f"真实房源，看房方便，欢迎咨询。"
@@ -101,7 +90,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"{district}·{community}\n"
             f"{basic}\n"
             f"价格：{_fmt_price(p)}"
-            + (f"（{_fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
+            + (f"（{fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
             + "\n"
             f"地址：{address or community}\n"
             f"房源真实有效，随时可看，中介费优惠，欢迎来电咨询。"
@@ -111,7 +100,7 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
             f"{title}（{community or district}）\n"
             f"【房屋信息】{basic}\n"
             f"【价格】{_fmt_price(p)}"
-            + (f"（单价{_fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
+            + (f"（单价{fmt_unit_price(unit_price)}元/㎡）" if unit_price else "")
             + "\n"
             f"【位置】{address or community or district}\n"
             f"【亮点】真实房源，产权清晰，看房方便，价格可谈。"

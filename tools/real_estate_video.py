@@ -3,25 +3,18 @@ Coco 房产工具 - 短视频口播脚本生成
 抖音/视频号 30 秒卖房口播脚本：开头钩子 + 房源亮点 + 价格钩子 + 行动号召
 """
 import json
+from functools import partial
 from tools.registry import registry
 from agent.real_estate_input import norm_id
+from agent.real_estate_money import fmt_price
+
+# 口播稿口径：整万说整万、非整万保留一位；缺价格说"价格待定"
+_fmt_price = partial(fmt_price, digits=1, empty="价格待定")
 
 
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
     return get_real_estate_db()
-
-
-def _fmt_price(p):
-    """价格展示（系统存元）：二手/一手房 → '400万'，出租 → '1000元/月'"""
-    price = p.get('price')
-    if price is None:
-        return '价格待定'
-    price = float(price)
-    if p.get('property_type') == 'rental':
-        return f"{price:.0f}元/月"
-    wan = price / 10000
-    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.1f}万"
 
 
 def _layout_text(p):

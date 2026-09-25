@@ -4,14 +4,14 @@ Coco 房产工具 - 房源海报/九宫格生成
 """
 import json
 import os
+from functools import partial
 
 from agent.real_estate_input import norm_id
+from agent.real_estate_money import fmt_price, fmt_unit_price
 from tools.registry import registry
 
-
-def _fmt_unit_price(value) -> str:
-    """单价展示统一两位小数（20000.0 → 20000.00）"""
-    return f"{float(value):.2f}"
+# 海报口径：整万说整万、非整万保留一位（画面上字要短）；缺价格说"价格待定"
+_fmt_price = partial(fmt_price, digits=1, empty="价格待定")
 
 
 def _get_db():
@@ -44,18 +44,6 @@ def _poster_dir():
     cache_dir = os.path.expanduser('~/.hermes/image_cache')
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
-
-
-def _fmt_price(p):
-    """价格展示（系统存元）：二手/一手房 → '400万'，出租 → '1000元/月'"""
-    price = p.get('price')
-    if price is None:
-        return '价格待定'
-    price = float(price)
-    if p.get('property_type') == 'rental':
-        return f"{price:.0f}元/月"
-    wan = price / 10000
-    return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.1f}万"
 
 
 def _gradient(size, c1, c2):
@@ -218,7 +206,7 @@ def _draw_premium(img, draw, p, qr_content):
     draw.text((50, 830), price_text, font=f_price, fill=gold)
     f_unit = _load_font(34)
     if p.get('unit_price'):
-        draw.text((50, 990), f"单价 {_fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=(120, 125, 140))
+        draw.text((50, 990), f"单价 {fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=(120, 125, 140))
 
     # 信息卡（白色圆角卡片）
     area = p.get('area')
@@ -305,7 +293,7 @@ def _draw_modern(img, draw, p, qr_content):
     draw.text((50, 660), price_text, font=f_price, fill=accent)
     f_unit = _load_font(32)
     if p.get('unit_price'):
-        draw.text((50, 800), f"单价 {_fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=gray)
+        draw.text((50, 800), f"单价 {fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=gray)
 
     # 信息卡（三列白卡）
     area = p.get('area')
@@ -391,7 +379,7 @@ def _draw_vibrant(img, draw, p, qr_content):
     draw.text((50, 760), price_text, font=f_price, fill=red)
     f_unit = _load_font(34)
     if p.get('unit_price'):
-        draw.text((50, 930), f"单价 {_fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=(140, 90, 70))
+        draw.text((50, 930), f"单价 {fmt_unit_price(p['unit_price'])} 元/㎡", font=f_unit, fill=(140, 90, 70))
 
     # 信息卡（半透明白卡片）
     area = p.get('area')
