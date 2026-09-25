@@ -2642,15 +2642,17 @@ class RealEstateDB:
                    .first())
             return row.to_dict() if row else None
 
-    def find_followup_by_viewing(self, viewing_id):
-        """某次带看自动生成的回访提醒 → dict 或 None
+    def find_followup_by_viewing(self, viewing_id, followup_type=None):
+        """某次带看自动生成的那条记录 → dict 或 None
 
-        带看重复记「完成」时要靠它精确找到那一条（有就不重复建）。
+        带看重复记「完成」时要靠它精确找到那一条（有就不重复建）。`followup_type`
+        用来区分同一条带看产生的两类记录：'reminder'（回访提醒）与 'visit'（带看跟进）。
         """
         with self.get_session() as s:
-            row = (s.query(Followup)
-                   .filter(Followup.source_viewing_id == viewing_id)
-                   .order_by(Followup.id.asc()).first())
+            query = s.query(Followup).filter(Followup.source_viewing_id == viewing_id)
+            if followup_type:
+                query = query.filter(Followup.type == followup_type)
+            row = query.order_by(Followup.id.asc()).first()
             return row.to_dict() if row else None
 
     def update_followup(self, followup_id, **kwargs):

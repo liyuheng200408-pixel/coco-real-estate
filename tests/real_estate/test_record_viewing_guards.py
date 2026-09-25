@@ -53,7 +53,7 @@ def _record(**kwargs):
     return json.loads(m.record_viewing(**kwargs))
 
 
-def _reminders(db, viewing_id=None, customer_id=None):
+def _reminders(db, viewing_id=None, customer_id=None, followup_type="reminder"):
     sql = ("SELECT id, customer_id, property_id, type, content, next_date, next_time,"
            " source_viewing_id FROM re_followups")
     params, where = {}, []
@@ -63,6 +63,9 @@ def _reminders(db, viewing_id=None, customer_id=None):
     if customer_id is not None:
         where.append("customer_id = :c")
         params["c"] = customer_id
+    if followup_type:
+        where.append("type = :t")
+        params["t"] = followup_type
     if where:
         sql += " WHERE " + " AND ".join(where)
     with db.get_session() as s:
@@ -146,7 +149,7 @@ class TestReceipt:
     def test_status_and_result_receipt(self, wired, cid, pid):
         vid = _schedule(cid, pid)
         out = _record(viewing_id=vid, status="已完成", result="感兴趣")
-        assert out["message"].startswith(f"带看已记录：已完成、客户感兴趣（带看编号 {vid}）"), out["message"]
+        assert out["message"].startswith(f"带看记录：已完成、客户感兴趣（带看编号 {vid}）"), out["message"]
 
     def test_feedback_only_receipt(self, wired, cid, pid):
         vid = _schedule(cid, pid)
@@ -156,7 +159,7 @@ class TestReceipt:
     def test_result_only_receipt(self, wired, cid, pid):
         vid = _schedule(cid, pid)
         out = _record(viewing_id=vid, result="不感兴趣")
-        assert "带看已记录：客户不感兴趣" in out["message"], out["message"]
+        assert "带看记录：客户不感兴趣" in out["message"], out["message"]
 
     def test_receipt_has_no_parameter_names(self, wired, cid, pid):
         vid = _schedule(cid, pid)

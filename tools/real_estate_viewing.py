@@ -4,7 +4,7 @@ Coco 房产工具 - 带看管理
 import json
 from datetime import datetime, timedelta
 from tools.registry import registry
-from agent.real_estate_input import clamp_limit, clean_text, norm_date, norm_id
+from agent.real_estate_input import (STAGE_LABELS, clamp_limit, clean_text, norm_date, norm_id)
 from tools.real_estate_followup import norm_followup_time, split_time_part
 from tools.real_estate_property import _STATUS_LABELS
 
@@ -32,6 +32,36 @@ _VIEWING_RESULT_ALIASES = {
     '不喜欢': 'not_interested',
     '再考虑': 'pending', '待定': 'pending', '再看看': 'pending', '再想想': 'pending', '犹豫': 'pending',
 }
+
+# 带看真的完成后，哪些阶段档位可以自动挪到「已看房」（2026-09-25 老板拍板）：
+# 潜在/意向/强意向 都还没到"看过房"，挪过去是事实；**标着「流失」的也挪**（他又带看了，说明没流失）；
+# 已看房及更靠后的档位（谈判/成交中/售后维护）一律不动 —— 机器不替经纪人往回拉。
+_STAGE_ADVANCE_FROM = ('lead', 'interested', 'strong', 'lost', None, '')
+
+# 记完结果后给经纪人的下一步建议（只说不做，不自动调别的工具）
+_NEXT_STEP_ADVICE = {
+    'interested': '下一步要不要我找几套同小区/同户型的给他对比？',
+    'not_interested': '要不要我按他的要求换几套给他看？',
+    'pending': '要不要过两天提醒你跟一下？',
+}
+
+
+def _next_step_advice(result, status):
+    if status == 'cancelled':
+        return '要不要重新约个时间？'
+    return _NEXT_STEP_ADVICE.get(result or '')
+
+
+def _has_overdue_followup(db, customer_id):
+    """这位客户当前是否有逾期提醒（按"每客户最新一条跟进"的口径，与 get_overdue 一致）"""
+    latest = db.get_latest_followup(customer_id)
+    if not latest or not latest.get('next_date'):
+        return False
+    try:
+        when = datetime.fromisoformat(str(latest['next_date']).replace(' ', 'T')[:19])
+    except ValueError:
+        return False
+    return when < datetime.now()
 
 
 def _get_db():
@@ -152,8 +182,10 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
     """记录带看结果：状态（待带看/已完成/已取消）、客户意向（感兴趣/不感兴趣/再考虑）、客户反馈
 
     状态与意向认中文说法（已完成、已看、客户不感兴趣…）也认英文值；**什么都没说就给一句提示**，
-    不回一个"成功"却什么也没记。带看标记已完成的会自动安排 1 小时后回访提醒并关联房源，
-    **同一条带看只留一条提醒**（再记一次只更新那条、不重复建）；把已完成的带看改回其它状态只提醒不拦。
+    不回一个"成功"却什么也没记。带看真的完成时，Coco 会连带做四件事（都按"同一条带看只做一次"）：
+    ① 把这次带看记到那位客户的跟进里（含结果与客户反馈）② 客户阶段在"潜在/意向/强意向/流失"时挪到「已看房」
+    （已看房及更靠后的档位、已关闭的客户一律不动）③ 安排 1 小时后回访提醒（并关联房源）
+    ④ 有客户反馈或"不感兴趣"时重扫该房源缺陷标签。回执里给下一步建议；改回其它状态只提醒不拦。
     """
     viewing_id, problem = norm_id(viewing_id, '带看编号', '，可在带看记录列表里查')
     if problem:
@@ -188,17 +220,63 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
         warnings.append(f"这条带看原来记的是已完成，现在改成了{_VIEWING_STATUS_LABELS[status_value]}"
                         f" —— 如果不是笔误就不用管")
 
-    # 带看完成 → 自动安排 1 小时后回访提醒（同一条带看只留一条：命中就更新那条，不重复建）
+    # 带看真的完成了 → 三件连带（都是同一条带看只做一次：命中就更新/不动，不重复建）
+    #   ① 写一条「带看」跟进，把这次带看沉淀到客户时间线上
+    #   ② 按事实把客户阶段推进到「已看房」（只在档位早于它时推，不回退）
+    #   ③ 回访提醒（1 小时后）
+    followup, followup_reused = None, False
+    stage_change = None
     reminder, reminder_reused = None, False
     reminder_error = None
-    if status_value == 'done':
+    if updated.get('status') == 'done':
+        customer = db.get_customer(updated['customer_id'])
+        customer_name = customer.get('name') if customer else '客户'
+        title = updated.get('property_title') or '这套房源'
+        # 写这次带看之前，先看这位客户原来是不是有逾期提醒（写入后"最新一条跟进"就变了）
+        prior_overdue = _has_overdue_followup(db, updated['customer_id'])
+
+        # ① 带看跟进
+        try:
+            parts = [f"带看 {title}"]
+            if updated.get('result'):
+                parts.append(f"，客户{_VIEWING_RESULT_LABELS.get(updated['result'], updated['result'])}")
+            if updated.get('feedback'):
+                parts.append(f"；客户反馈：{updated['feedback']}")
+            if not updated.get('result') and not updated.get('feedback'):
+                parts.append("（已完成）")
+            content = "".join(parts)
+            existing_visit = db.find_followup_by_viewing(viewing_id, followup_type='visit')
+            if existing_visit:
+                followup = db.update_followup(existing_visit['id'], content=content)
+                followup_reused = True
+            else:
+                followup = db.add_followup(
+                    customer_id=updated['customer_id'], property_id=updated.get('property_id'),
+                    type='visit', content=content, source_viewing_id=viewing_id,
+                )
+        except Exception as exc:
+            followup = None
+            warnings.append("这次带看没能记到客户的跟进里 —— 你手动记一条也行")
+
+        # ② 阶段推进（事实是他看过房了；已在更靠后的档位不动，客户已关闭不动）
+        stage_from = (customer or {}).get('stage')
+        if _STAGE_ADVANCE_FROM and (customer or {}).get('status') != 'closed' \
+                and stage_from in _STAGE_ADVANCE_FROM:
+            try:
+                moved = db.update_stage(updated['customer_id'], 'viewed')
+                if moved:
+                    stage_change = {'from': stage_from or None, 'to': 'viewed',
+                                    'from_label': STAGE_LABELS.get(stage_from, stage_from or '未设'),
+                                    'to_label': STAGE_LABELS['viewed']}
+            except Exception:
+                stage_change = None
+
+        # ③ 回访提醒
         try:
             when = datetime.now() + timedelta(hours=1)
-            customer = db.get_customer(updated['customer_id'])
-            customer_name = customer.get('name') if customer else '客户'
             content = (f"带看后回访：{customer_name} 看完 {updated.get('property_title')} 已 1 小时，"
                        f"主动跟进了解意向")
-            existing = db.find_followup_by_viewing(viewing_id)
+            existing = db.find_followup_by_viewing(viewing_id, followup_type='reminder')
             if existing:
                 reminder = db.update_followup(existing['id'], content=content,
                                               property_id=updated.get('property_id'))
@@ -215,6 +293,10 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
             reminder = None
             reminder_error = type(exc).__name__
             warnings.append("回访提醒这次没建起来 —— 你手动记一条也行，或者再说一次我重试")
+
+        # 带看跟进成了"最新一条跟进" → 该客户原来那条逾期提醒从此不再报（如实说明）
+        if followup and prior_overdue:
+            warnings.append("这位客户原来那条逾期提醒已经随这次带看更新客户状态。")
 
     # 缺陷标签反哺（2026-08-28 功能3）：记录带看结果后自动重扫该房缺陷
     defect_refreshed = None
@@ -233,19 +315,30 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
     if result_value:
         labels.append(f"客户{_VIEWING_RESULT_LABELS[result_value]}")
     if labels:
-        message = f"带看已记录：{'、'.join(labels)}（带看编号 {viewing_id}）"
+        message = f"带看记录：{'、'.join(labels)}（带看编号 {viewing_id}）"
         if feedback:
             message += "，客户反馈也记下了"
     else:
         message = f"已记下客户反馈（带看编号 {viewing_id}）"
+    if followup:
+        message += "，已记到这位客户的跟进里"
+    if stage_change:
+        message += (f"，客户阶段也从「{stage_change['from_label']}」挪到「{stage_change['to_label']}」")
     if reminder_reused:
         message += "；这条带看的回访提醒已经在（时间不变），我把它一起更新了"
     elif reminder:
         message += "，已安排 1 小时后回访提醒"
     if defect_refreshed:
         message += f"；检测到共性差评，已更新房源缺陷标签: {'、'.join(defect_refreshed)}"
+    advice = _next_step_advice(updated.get('result'), updated.get('status'))
+    if advice:
+        message += f"。{advice}"
 
     payload = {"success": True, "viewing": updated, "message": message}
+    if followup:
+        payload["followup"] = followup
+    if stage_change:
+        payload["stage_change"] = stage_change
     if reminder:
         payload["reminder"] = reminder
     if defect_refreshed:
@@ -321,8 +414,10 @@ registry.register(
     toolset="real_estate",
     schema={"name": "record_viewing", "description":
             "记录带看结果：带看状态（待带看/已完成/已取消）、客户意向（感兴趣/不感兴趣/再考虑）、客户反馈；"
-            "认中文说法也认英文值，也可以只补一句反馈。标记为已完成会自动安排 1 小时后回访提醒"
-            "（同一条带看只留一条，再记一次只更新那条）；把已完成的带看改回其它状态只提醒不拦。", "parameters": {
+            "认中文说法也认英文值，也可以只补一句反馈。带看真的完成时会连带做四件事：把这次带看记到客户的跟进里、"
+            "客户阶段在「潜在/意向/强意向/流失」时挪到「已看房」（更靠后的档位与已关闭客户不动）、"
+            "安排 1 小时后回访提醒（同一条带看只留一条）、按反馈重扫房源缺陷标签；回执里给下一步建议。"
+            "把已完成的带看改回其它状态只提醒不拦。", "parameters": {
         "type": "object",
         "properties": {
             "viewing_id": {"type": "integer", "description": "带看编号（数字，来自预约带看的回执或带看列表）"},
