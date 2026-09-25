@@ -3264,6 +3264,17 @@ class RealEstateDB:
             if status: q = q.filter(Viewing.status == status)
             return [v.to_dict() for v in q.order_by(Viewing.viewing_time.desc()).limit(limit).all()]
 
+    def find_scheduled_viewing(self, customer_id, property_id, viewing_time):
+        """同一客户同一房源同一时间是否已约了还没完成的带看（用于「不重复登记」）"""
+        with self.get_session() as s:
+            v = (s.query(Viewing)
+                 .filter(Viewing.customer_id == customer_id,
+                         Viewing.property_id == property_id,
+                         Viewing.viewing_time == viewing_time,
+                         Viewing.status == 'scheduled')
+                 .order_by(Viewing.id.asc()).first())
+            return v.to_dict() if v else None
+
     def viewing_stats(self, period='month'):
         """带看统计：总数、已看、取消、感兴趣客户"""
         with self.get_session() as s:

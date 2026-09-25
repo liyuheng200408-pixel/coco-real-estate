@@ -83,11 +83,12 @@ def _time_problem(value, label='下次跟进时间'):
     return f"{label}没能识别：收到的是「{value}」。请用 09:30 这类写法"
 
 
-def _split_time_part(value):
+def split_time_part(value):
     """从日期参数里拆出可能夹带的时刻 → (日期部分, 时刻部分或 None)
 
     模型常把整个 datetime 塞进 next_date（2026-09-28T14:30:00 / 2026-09-28 14:30），
     原先走 fromisoformat 能认，归一后必须照样认，不然后退成"日期格式错误"。
+    带看侧（`real_estate_viewing.norm_viewing_when`）也用它 —— 「日期+时刻」的拆分只留这一处。
     """
     if value is None:
         return None, None
@@ -110,7 +111,7 @@ def norm_followup_when(date_value, time_value, date_label='下次跟进日期', 
     也认日期里夹带时刻的写法；显式传的 time 优先于日期里带的时刻。
     给了时刻就并进 datetime —— 与「设置提醒」「带看后自动提醒」同一口径。
     """
-    date_part, embedded = _split_time_part(date_value)
+    date_part, embedded = split_time_part(date_value)
     day, problem = norm_date(date_part, date_label, date_sample)
     if problem:
         return None, None, problem
