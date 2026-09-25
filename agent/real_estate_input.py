@@ -252,6 +252,45 @@ def norm_id(value, label="编号", hint=""):
     return None, f"{label}没能识别：收到的是「{value}」。{label}是数字（如 12）{hint}"
 
 
+# ==================== 日期 ====================
+
+def norm_date(value, label="日期"):
+    """日期归一 → (datetime 或 None, 提示或 None)。
+
+    接受 `2026-12-31` / `2026/12/31` / `2026.12.31` / `2026年12月31日`；
+    只有月日（`12月31日` / `12-31`）时按**当年**算，若当年那天已过按**次年**（到期日总是指未来）。
+    认不出返回 (None, 中文提示) —— 不猜、也不静默存错。
+    """
+    from datetime import datetime as _dt
+    if value is None:
+        return None, None
+    if isinstance(value, _dt):
+        return value, None
+    text = str(value).strip()
+    if not text:
+        return None, None
+    text = (text.replace('年', '-').replace('月', '-').replace('日', '')
+                .replace('/', '-').replace('.', '-'))
+    parts = [p for p in text.split('-') if p != '']
+    try:
+        nums = [int(p) for p in parts]
+    except ValueError:
+        return None, f"{label}没能识别：收到的是「{value}」。请用 2026-12-31 这类写法"
+    try:
+        if len(nums) == 3:
+            return _dt(nums[0], nums[1], nums[2]), None
+        if len(nums) == 2:
+            month, day = nums
+            year = _dt.now().year
+            candidate = _dt(year, month, day)
+            if candidate.date() < _dt.now().date():
+                candidate = _dt(year + 1, month, day)
+            return candidate, None
+    except ValueError:
+        return None, f"{label}没能识别：收到的是「{value}」。请用 2026-12-31 这类写法"
+    return None, f"{label}没能识别：收到的是「{value}」。请用 2026-12-31 这类写法"
+
+
 # ==================== 客户标签 ====================
 
 TAG_MAX_LEN = 20

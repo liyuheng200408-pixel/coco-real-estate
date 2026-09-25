@@ -1529,8 +1529,12 @@ class RealEstateDB:
             owner_dict = owner.to_dict()
             return (owner_dict, info) if return_info else owner_dict
 
-    def exclusive_expiring(self, days=30):
-        """独家委托 N 天内到期清单（重新谈委托/降价的时机）"""
+    def exclusive_expiring(self, days=30, limit=None):
+        """独家委托 N 天内到期清单（重新谈委托/降价的时机）
+
+        limit=None 表示不限条数（分页边界留在工具层）；返回 (items, total)，
+        total 是窗口内的**全部**套数（不受 limit 影响）。
+        """
         from datetime import datetime, timedelta
         deadline = datetime.now() + timedelta(days=days)
         with self.get_session() as s:
@@ -1547,7 +1551,25 @@ class RealEstateDB:
                 d['urgency'] = '已过期' if remain < 0 else f'{remain}天'
                 result.append(d)
             result.sort(key=lambda x: x['days_remaining'])
-            return result
+            total = len(result)
+            if limit is not None:
+                result = result[:limit]
+            return result, total
+
+    def exclusive_summary(self):
+        """独家委托登记概况 → {'registered': 在售且登记了到期日的套数, 'nearest_days': 最近一套还有几天}
+
+        用于空态如实说明"库里到底有没有登记过独家委托"（否则"无到期"分不清是没登记还是没到期）。
+        """
+        from datetime import datetime
+        with self.get_session() as s:
+            rows = s.query(Property.exclusive_until).filter(
+                Property.exclusive_until.isnot(None),
+                Property.status == 'available',
+            ).all()
+        now = datetime.now()
+        days = [(v[0] - now).days for v in rows if v[0] is not None]
+        return {'registered': len(days), 'nearest_days': min(days) if days else None}
 
     def find_duplicate_property(self, title, area, exclude_id=None, property_type=None):
         """查在售房源里是否已有这套房（防重复录入）→ 返回已存在房源 dict；没有则 None

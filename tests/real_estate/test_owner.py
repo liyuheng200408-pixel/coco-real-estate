@@ -61,8 +61,8 @@ class TestExclusiveExpiring:
         p = make_property(db, title="快到期独家")
         deadline = datetime.now() + timedelta(days=15)
         db.update_property(p["id"], owner_id=o["id"], exclusive_until=deadline)
-        items = db.exclusive_expiring(days=30)
-        assert len(items) == 1
+        items, total = db.exclusive_expiring(days=30)      # 2026-09-25 起返回 (items, total)
+        assert len(items) == total == 1
         assert "天" in items[0]["urgency"] and "已过期" not in items[0]["urgency"]
 
     def test_expired_flagged(self, db):
@@ -70,7 +70,7 @@ class TestExclusiveExpiring:
         p = make_property(db, title="已过期独家")
         db.update_property(p["id"], owner_id=o["id"],
                            exclusive_until=datetime.now() - timedelta(days=5))
-        items = db.exclusive_expiring(days=30)
+        items, _ = db.exclusive_expiring(days=30)
         assert items[0]["urgency"] == "已过期"
 
     def test_far_future_not_listed(self, db):
@@ -78,12 +78,24 @@ class TestExclusiveExpiring:
         p = make_property(db)
         db.update_property(p["id"], owner_id=o["id"],
                            exclusive_until=datetime.now() + timedelta(days=90))
-        assert db.exclusive_expiring(days=30) == []
+        items, total = db.exclusive_expiring(days=30)
+        assert items == [] and total == 0
 
     def test_none_exclusive_excluded(self, db):
         o = _add_owner(db)
         make_property(db, owner_id=None)
-        assert db.exclusive_expiring(days=30) == []
+        items, total = db.exclusive_expiring(days=30)
+        assert items == [] and total == 0
+
+    def test_limit_keeps_total_full(self, db):
+        """明细可截断，total 必须仍是窗口内全部（2026-09-25 加）"""
+        o = _add_owner(db)
+        for i in range(5):
+            p = make_property(db, title=f"独家房源{i}", price=2_000_000 + i, area=80.0 + i)
+            db.update_property(p["id"], owner_id=o["id"],
+                               exclusive_until=datetime.now() + timedelta(days=i + 1))
+        items, total = db.exclusive_expiring(days=30, limit=2)
+        assert len(items) == 2 and total == 5
 
 
 # ==================== 工具层 ====================

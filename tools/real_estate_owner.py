@@ -41,6 +41,7 @@ PERSON_KEY_MISMATCH_WARNING = (
     "在此之前不要把这条联系方式给客户。")
 
 FIND_LIMIT_DEFAULT = 20   # 按姓名查人：客户/业主两张表各自默认返回条数（与客户列表同口径）
+EXCLUSIVE_LIMIT_DEFAULT = 20   # 独家到期清单默认返回条数
 
 
 def _mask_owner_contacts(row):
@@ -86,6 +87,18 @@ TRUST_NOTE_MAX = 200
 # 列表分页口径（与客户侧 list_customers 同一套：默认 50、上限 200、≤0 与非数字按默认）
 _LIST_LIMIT_DEFAULT = 50
 _LIST_LIMIT_MAX = 200
+
+
+def _norm_days(value, default=30):
+    """天数窗口归一 → 非数字/None 按默认 30；**0 保留原义**（今天到期及已过期）；负数按 0
+
+    与 `_clamp_limit` 的"≤0 按默认"不同：days 是时间窗口，0 有明确含义（只看已到期/今天到期的）。
+    """
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(value, 0)
 
 
 def _fmt_budget(value):
@@ -389,20 +402,39 @@ def owner_portfolio(owner_id: int, limit: int = None, task_id: str = None) -> st
     return json.dumps(_attach_key_warning(payload, masked), ensure_ascii=False)
 
 
-def exclusive_expiring(days: int = 30, task_id: str = None) -> str:
-    """独家委托到期清单：到期是重新谈委托或谈降价的天然时机"""
+def exclusive_expiring(days: int = 30, limit: int = None, task_id: str = None) -> str:
+    """独家委托到期清单：到期是重新谈委托或建议调价的天然时机
+
+    days: 未来几天内到期（默认 30；**传 0 表示只看今天到期及已过期的**；非数字/None 按默认 30，负数按 0）。
+    limit: 返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）。
+    返回 count(本次)/total(窗口内全部)/truncated；空结果会说明"库里有没有登记过独家委托"。
+    """
+    days = _norm_days(days)
+    limit = _clamp_limit(limit, default=EXCLUSIVE_LIMIT_DEFAULT)
     db = _get_db()
-    items = db.exclusive_expiring(days)
+    items, total = db.exclusive_expiring(days, limit=limit)
     if not items:
-        return json.dumps({"success": True,
-                           "message": f"未来 {days} 天内无独家委托到期", "items": []},
-                          ensure_ascii=False)
-    lines = [f"📌 独家委托到期提醒（{days}天内 {len(items)} 套）"]
+        summary = db.exclusive_summary()
+        if not summary.get('registered'):
+            note = "（库里还没有登记过独家委托到期日——登记或更新房源时填「独家委托到期日」即可）"
+        else:
+            nearest = summary.get('nearest_days')
+            when = "已过期" if nearest is not None and nearest < 0 else f"还有 {nearest} 天到期"
+            note = f"（库里共登记 {summary['registered']} 套独家委托，最近的一套{when}）"
+        return json.dumps({"success": True, "items": [], "count": 0, "total": 0, "truncated": False,
+                           "message": f"未来 {days} 天内无独家委托到期{note}"}, ensure_ascii=False)
+    truncated = total > len(items)
+    lines = [f"独家委托到期提醒（{days} 天内 {total} 套）"]
+    if truncated:
+        lines.append(f"共 {total} 套独家委托在未来 {days} 天内到期，这里列出最急的 {len(items)} 套。"
+                     f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
     for it in items:
-        lines.append(f"\n· {it['title']}（ID:{it['id']}）{it['price']/10000:.0f}万 — {it['urgency']}到期")
-        lines.append("  时机提示: 到期前是重新谈委托条件或建议调价的窗口")
+        when = "已过期" if it['days_remaining'] < 0 else f"还有 {it['days_remaining']} 天到期"
+        lines.append(f"\n· {it['title']}（ID:{it['id']}）{_fmt_price(it)} — {when}")
+    lines.append("\n到期前是重新谈委托条件或建议调价的窗口")
     return json.dumps({
         "success": True, "items": items,
+        "count": len(items), "total": total, "truncated": truncated,
         "message": "\n".join(lines),
     }, ensure_ascii=False)
 
@@ -487,7 +519,10 @@ TOOLS = [
         "description": "独家委托到期清单：到期前是重新谈委托条件或建议调价的窗口",
         "parameters": {
             "type": "object",
-            "properties": {"days": {"type": "integer", "description": "未来几天内到期（默认30）"}},
+            "properties": {
+                "days": {"type": "integer", "description": "未来几天内到期（默认 30；传 0 表示只看今天到期及已过期的）"},
+                "limit": {"type": "integer", "description": "返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
+            },
         },
         "handler": lambda args, **kw: exclusive_expiring(**args),
     },
