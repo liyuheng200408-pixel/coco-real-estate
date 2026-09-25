@@ -4,7 +4,12 @@ Coco 房产工具 - 跟进管理
 import json
 from datetime import datetime
 from tools.registry import registry
-from agent.real_estate_input import norm_id
+from agent.real_estate_input import clamp_limit, norm_id
+
+# 列表分页口径（与 list_customers/list_owners 同一套：默认 20、上限 200、≤0 与非数字按默认）
+_LIST_LIMIT_DEFAULT = 20
+_LIST_LIMIT_MAX = 200
+
 
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
@@ -39,8 +44,9 @@ def add_followup(
     return json.dumps({"success": True, "followup": result}, ensure_ascii=False)
 
 
-def get_followups(customer_id: int, limit: int = 20, task_id: str = None) -> str:
+def get_followups(customer_id: int, limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
     """获取客户跟进历史"""
+    limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
@@ -142,7 +148,8 @@ TOOLS = [
     }, "handler": lambda args, **kw: add_followup(**args)},
     {"name": "get_followups", "description": "获取客户跟进历史", "parameters": {
         "type": "object", "properties": {
-            "customer_id": {"type": "integer"}, "limit": {"type": "integer"},
+            "customer_id": {"type": "integer"},
+            "limit": {"type": "integer", "description": "返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
         }, "required": ["customer_id"],
     }, "handler": lambda args, **kw: get_followups(**args)},
     {"name": "get_overdue", "description": "获取逾期跟进列表", "parameters": {

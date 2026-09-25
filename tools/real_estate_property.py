@@ -4,7 +4,8 @@ Coco 房产工具 - 房源管理
 import json
 import re
 
-from agent.real_estate_input import cn_number, norm_customer_type, norm_date, norm_id, norm_money
+from agent.real_estate_input import (clamp_limit, cn_number, norm_customer_type, norm_date, norm_id,
+                                     norm_money)
 from tools.registry import registry
 
 
@@ -389,13 +390,7 @@ def search_property(
         return json.dumps({"success": False, "error": (
             f"排序「{sort}」不认识：只能是 latest（最新录入优先）/ price_asc（总价低到高）/ price_desc（总价高到低）")},
             ensure_ascii=False)
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        limit = _SEARCH_LIMIT_DEFAULT
-    if limit <= 0:
-        limit = _SEARCH_LIMIT_DEFAULT
-    limit = min(limit, _SEARCH_LIMIT_MAX)
+    limit = clamp_limit(limit, _SEARCH_LIMIT_DEFAULT, _SEARCH_LIMIT_MAX)
     filters = {}
     if min_price: filters['min_price'] = min_price
     if max_price: filters['max_price'] = max_price
@@ -1000,13 +995,7 @@ def price_history(property_id: int, limit: int = _PRICE_HISTORY_LIMIT_DEFAULT, t
         return json.dumps({"success": False, "not_found": True,
                            "error": f"没有编号为 {property_id} 的房源"}, ensure_ascii=False)
     # limit 边界（2026-09-24）：传 0/负数/非数字一律按默认 20，不再出现"0 条却报没调过价"或全量拉取
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        limit = _PRICE_HISTORY_LIMIT_DEFAULT
-    if limit <= 0:
-        limit = _PRICE_HISTORY_LIMIT_DEFAULT
-    limit = min(limit, _PRICE_HISTORY_LIMIT_MAX)
+    limit = clamp_limit(limit, _PRICE_HISTORY_LIMIT_DEFAULT, _PRICE_HISTORY_LIMIT_MAX)
     history = db.get_price_history(property_id, limit)
     summary = db.get_price_history_summary(property_id)
     if not summary['count']:
@@ -1117,13 +1106,7 @@ def find_alternatives(property_id: int, limit: int = _FIND_ALT_LIMIT_DEFAULT, ta
         return json.dumps({"success": False, "not_found": True,
                            "error": f"没有编号为 {property_id} 的房源"}, ensure_ascii=False)
     # limit 边界（2026-09-24）：传 0/负数/非数字一律按默认 5，并设上限 20（大库里一次吐几百套会撑爆上下文）
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        limit = _FIND_ALT_LIMIT_DEFAULT
-    if limit <= 0:
-        limit = _FIND_ALT_LIMIT_DEFAULT
-    limit = min(limit, _FIND_ALT_LIMIT_MAX)
+    limit = clamp_limit(limit, _FIND_ALT_LIMIT_DEFAULT, _FIND_ALT_LIMIT_MAX)
     alts = db.find_alternatives(property_id, limit)
     if not alts:
         return json.dumps({"success": True, "message": "暂无贴近度足够的替代房源，建议扩大区域或预算范围", "alternatives": []}, ensure_ascii=False)

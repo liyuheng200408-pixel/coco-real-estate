@@ -3,7 +3,14 @@ Coco 房产工具 - 竞品对比与客户意向度
 """
 import json
 from tools.registry import registry
-from agent.real_estate_input import norm_id
+from agent.real_estate_input import clamp_limit, norm_id
+
+
+# 条数口径：对比默认 5/上限 20（一次列太多没意义）；列表默认 20/上限 200（与其它列表同一套）
+_COMPARE_LIMIT_DEFAULT = 5
+_COMPARE_LIMIT_MAX = 20
+_LIST_LIMIT_DEFAULT = 20
+_LIST_LIMIT_MAX = 200
 
 
 def _get_db():
@@ -16,6 +23,7 @@ def compare_property(property_id: int, limit: int = 5, task_id: str = None) -> s
     property_id, problem = norm_id(property_id, '房源编号')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    limit = clamp_limit(limit, _COMPARE_LIMIT_DEFAULT, _COMPARE_LIMIT_MAX)
     db = _get_db()
     result = db.compare_properties(property_id, limit)
     if result is None:
@@ -35,8 +43,9 @@ def intent_score(customer_id: int, task_id: str = None) -> str:
     return json.dumps({"success": True, "intent": result}, ensure_ascii=False)
 
 
-def list_intent_scores(tier: str = None, limit: int = 20, task_id: str = None) -> str:
+def list_intent_scores(tier: str = None, limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
     """列出客户意向度评分排名"""
+    limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     db = _get_db()
     customers = db.list_customers(tier=tier, status='active', limit=limit)
     scored = []
@@ -64,7 +73,7 @@ registry.register(
         "type": "object",
         "properties": {
             "property_id": {"type": "integer", "description": "房源ID"},
-            "limit": {"type": "integer", "description": "对比房源数量"},
+            "limit": {"type": "integer", "description": "对比条数（默认 5，最多 20；传 0/负数/非数字按默认 5）"},
         },
         "required": ["property_id"],
     }},
@@ -89,7 +98,7 @@ registry.register(
         "type": "object",
         "properties": {
             "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
-            "limit": {"type": "integer"},
+            "limit": {"type": "integer", "description": "返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
         },
     }},
     handler=lambda args, **kw: list_intent_scores(**args),

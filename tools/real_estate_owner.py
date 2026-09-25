@@ -6,7 +6,7 @@ Coco 房产工具 - 房东（业主）委托管理
 import json
 from datetime import datetime
 
-from agent.real_estate_input import norm_id, norm_phone
+from agent.real_estate_input import clamp_limit, norm_id, norm_phone
 from tools.real_estate_customer import _mask_customer_contacts
 from tools.real_estate_property import _STATUS_LABELS, _fmt_price
 from tools.registry import registry
@@ -92,7 +92,7 @@ _LIST_LIMIT_MAX = 200
 def _norm_days(value, default=30):
     """天数窗口归一 → 非数字/None 按默认 30；**0 保留原义**（今天到期及已过期）；负数按 0
 
-    与 `_clamp_limit` 的"≤0 按默认"不同：days 是时间窗口，0 有明确含义（只看已到期/今天到期的）。
+    与 `clamp_limit` 的"≤0 按默认"不同：days 是时间窗口，0 有明确含义（只看已到期/今天到期的）。
     """
     try:
         value = int(value)
@@ -117,17 +117,6 @@ def _fmt_budget(value):
         return f"{amount:.0f}元"
     wan = amount / 10000
     return f"{wan:.0f}万" if wan == int(wan) else f"{wan:.1f}万"
-
-
-def _clamp_limit(value, default=_LIST_LIMIT_DEFAULT, maximum=_LIST_LIMIT_MAX):
-    """条数归一 → 正整数：非数字/≤0 按默认、超过上限按上限（与客户侧 list_customers 同一套口径）"""
-    try:
-        value = int(value)
-    except (TypeError, ValueError):
-        return default
-    if value <= 0:
-        return default
-    return min(value, maximum)
 
 
 def _clip(value, max_len):
@@ -274,7 +263,7 @@ def find_person_by_name(name: str = None, limit: int = None, task_id: str = None
     if not (name or '').strip():
         return json.dumps({"success": False, "error": "请提供要查询的姓名（name）"},
                           ensure_ascii=False)
-    limit = _clamp_limit(limit, default=FIND_LIMIT_DEFAULT)
+    limit = clamp_limit(limit, FIND_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     result = db.find_person_by_name(name, limit=limit)
     customers = result.get('customers', [])
     owners = result.get('owners', [])
@@ -347,7 +336,7 @@ def list_owners(limit: int = 50, task_id: str = None) -> str:
     limit: 返回条数（默认 50，最多 200；传 0/负数/非数字按默认 50 处理）。
     返回 count=本次条数、total=房东总数、truncated=是否被截断（被截断时给一句说明）。
     """
-    limit = _clamp_limit(limit)
+    limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     db = _get_db()
     owners, total = db.list_owners(limit=limit, with_total=True)
     # 联系方式展示防御（2026-09-25 加，与 get_owner / 客户列表 F53 同口径）
@@ -371,7 +360,7 @@ def owner_portfolio(owner_id: int, limit: int = None, task_id: str = None) -> st
     oid, problem = norm_id(owner_id, '房东编号', '，可在房东列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem + "。"}, ensure_ascii=False)
-    limit = _clamp_limit(limit)
+    limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     db = _get_db()
     result = db.owner_portfolio(oid, limit=limit)
     if not result:
@@ -410,7 +399,7 @@ def exclusive_expiring(days: int = 30, limit: int = None, task_id: str = None) -
     返回 count(本次)/total(窗口内全部)/truncated；空结果会说明"库里有没有登记过独家委托"。
     """
     days = _norm_days(days)
-    limit = _clamp_limit(limit, default=EXCLUSIVE_LIMIT_DEFAULT)
+    limit = clamp_limit(limit, EXCLUSIVE_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     db = _get_db()
     items, total = db.exclusive_expiring(days, limit=limit)
     if not items:

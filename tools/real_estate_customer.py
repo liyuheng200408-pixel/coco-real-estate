@@ -3,9 +3,10 @@ Coco 房产工具 - 客户管理
 """
 import json
 
-from agent.real_estate_input import (STAGES, STAGE_LABELS, clean_tags, norm_birthday,
-                                     norm_customer_type, norm_id, norm_money, norm_phone,
-                                     norm_stage, norm_tags, norm_tier, stage_options_text)
+from agent.real_estate_input import (STAGES, STAGE_LABELS, clamp_limit, clean_tags,
+                                     norm_birthday, norm_customer_type, norm_id, norm_money,
+                                     norm_phone, norm_stage, norm_tags, norm_tier,
+                                     stage_options_text)
 from tools.registry import registry
 
 # "够不着"的硬冲突理由：匹配结果全是这些时，不能说"有 N 套可能符合需求"
@@ -455,13 +456,7 @@ def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT
     customer = db.get_customer(customer_id)
     if not customer:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        limit = _CHANGE_LIMIT_DEFAULT
-    if limit <= 0:
-        limit = _CHANGE_LIMIT_DEFAULT
-    limit = min(limit, _CHANGE_LIMIT_MAX)
+    limit = clamp_limit(limit, _CHANGE_LIMIT_DEFAULT, _CHANGE_LIMIT_MAX)
     changes, total = db.get_customer_changes(customer_id, limit=limit, with_total=True)
     for ch in changes:
         ch["field_label"] = _CHANGE_FIELD_LABELS.get(ch.get("field"), ch.get("field"))
@@ -526,13 +521,7 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
         if not ok:
             return _fail(f"客户状态筛选没能识别：收到的是「{raw_status}」。只能是 "
                          f"active(在跟) / paused(暂缓) / closed(已关闭)")
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        limit = _LIST_LIMIT_DEFAULT
-    if limit <= 0:
-        limit = _LIST_LIMIT_DEFAULT
-    limit = min(limit, _LIST_LIMIT_MAX)
+    limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
 
     tag_values = []
     if tag is not None:
@@ -982,13 +971,7 @@ def referral_stats(limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str
     返回 total=介绍人总数、count=本次返回条数、truncated=是否被截断。
     """
     db = _get_db()
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        limit = _LIST_LIMIT_DEFAULT
-    if limit <= 0:
-        limit = _LIST_LIMIT_DEFAULT
-    limit = min(limit, _LIST_LIMIT_MAX)
+    limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     board = db.referral_stats(limit=limit)
     total = db.count_referrers()
     payload = {"success": True, "leaderboard": board, "count": len(board), "total": total,

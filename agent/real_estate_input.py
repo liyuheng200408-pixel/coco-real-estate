@@ -232,6 +232,24 @@ def birthday_matches_month_day(stored, month=None, day=None):
     return False
 
 
+# ==================== 条数（limit） ====================
+
+def clamp_limit(value, default, maximum=200):
+    """条数归一 → 正整数：非数字/≤0 按**该工具自己的默认值**、超过上限按上限。
+
+    口径（老板 2026-09-24 定，契约 5）：`limit` 传 0/负数/非数字一律按默认，
+    **负数绝不能变成"拉全量"**（列表类工具最容易把上下文撑爆）。默认值各工具不同
+    （客户列表 20、房东列表 50、竞品对比 5…），所以默认值由调用方传入。
+    """
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    if value <= 0:
+        return default
+    return min(value, maximum)
+
+
 # ==================== 编号 ====================
 
 def norm_id(value, label="编号", hint=""):
