@@ -1268,32 +1268,32 @@ class RealEstateDB:
         '异味': ['异味', '味道', '甲醛'],
         '楼层差': ['楼层差', '腰线层', '设备层'],
     }
-    DEFECT_THRESHOLD = 2  # 至少2组客户提及才标记
+    DEFECT_THRESHOLD = 2  # 至少 2 位不同客户提及才标记
 
     def refresh_defect_tags(self, property_id):
-        """扫描带看反馈，负面关键词被>=2组客户提及则写入缺陷标签"""
-        from collections import Counter
+        """扫描带看反馈，负面关键词被 **≥2 位不同客户** 提及则写入缺陷标签
+
+        计数按"不同客户"算（同一位客户的两条带看只算一次）—— 这样才说明是**共性**差评，
+        「组客户」的口径与工具/文档一致（2026-09-25 老板拍板改口径；原实现按带看条数计数）。
+        """
         with self.get_session() as s:
             viewings = s.query(Viewing).filter(
                 Viewing.property_id == property_id,
                 Viewing.status == 'done',
                 Viewing.feedback.isnot(None),
             ).all()
-            counter = Counter()
+            mentions = {tag: set() for tag in self.DEFECT_KEYWORDS}
             for v in viewings:
                 fb = v.feedback or ''
-                seen_in_this = set()
                 for tag, kws in self.DEFECT_KEYWORDS.items():
-                    if tag in seen_in_this:
-                        continue
                     if any(kw in fb for kw in kws):
-                        counter[tag] += 1
-                        seen_in_this.add(tag)
-            defects = sorted([t for t, n in counter.items() if n >= self.DEFECT_THRESHOLD])
+                        mentions[tag].add(v.customer_id)
+            defects = sorted([t for t, cids in mentions.items()
+                              if len(cids) >= self.DEFECT_THRESHOLD])
             p = s.query(Property).get(property_id)
             if not p:
                 return []
-            detail = {t: counter[t] for t in defects}
+            detail = {t: len(mentions[t]) for t in defects}
             p.defect_tags = json.dumps(detail, ensure_ascii=False) if defects else None
             s.commit()
             return defects

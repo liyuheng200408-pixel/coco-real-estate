@@ -14,6 +14,15 @@ def _view_and_feedback(db, customer_name, property_id, feedback, result="not_int
     db.update_viewing(v["id"], status="done", result=result, feedback=feedback)
 
 
+def _add_done_viewing(db, customer_id, property_id, feedback, day=20):
+    """给指定客户造一条"已完成 + 带反馈"的带看"""
+    from datetime import datetime
+    v = db.add_viewing(customer_id=customer_id, property_id=property_id,
+                       viewing_time=datetime(2026, 8, day, 10, 0), status="done")
+    db.update_viewing(v["id"], status="done", result="not_interested", feedback=feedback)
+    return v["id"]
+
+
 # ==================== 缺陷标签生成 ====================
 
 class TestDefectTags:
@@ -58,6 +67,30 @@ class TestDefectTags:
                            )
         db.update_viewing(v["id"], status="cancelled", feedback="听朋友说采光差")
         assert db.refresh_defect_tags(p["id"]) == []
+
+    def test_same_customer_twice_not_enough(self, db):
+        """口径（2026-09-25 老板拍板）：按 **≥2 位不同客户** 判 —— 同一客户两次带看都提"采光差"不打标"""
+        p = make_property(db)
+        one = make_customer(db, name="同一位客户")
+        _add_done_viewing(db, one["id"], p["id"], "采光差，白天要开灯", day=20)
+        _add_done_viewing(db, one["id"], p["id"], "还是采光差，太暗了", day=21)
+        assert db.refresh_defect_tags(p["id"]) == []
+
+    def test_two_distinct_customers_tagged_and_counted(self, db):
+        """两位不同客户各提一次 → 打标，明细里记的是"不同客户数"（不是带看条数）"""
+        import json as _json
+        p = make_property(db)
+        a = make_customer(db, name="客户甲")
+        b = make_customer(db, name="客户乙")
+        _add_done_viewing(db, a["id"], p["id"], "采光差", day=20)
+        _add_done_viewing(db, b["id"], p["id"], "采光不好", day=21)
+        _add_done_viewing(db, b["id"], p["id"], "采光还是差", day=22)   # 同一位的第二条
+        defects = db.refresh_defect_tags(p["id"])
+        assert "采光差" in defects, defects
+        with db.get_session() as s:
+            from agent.real_estate_db import Property
+            detail = _json.loads(s.query(Property).get(p["id"]).defect_tags)
+        assert detail["采光差"] == 2, detail          # 2 位不同客户（不是 3 条带看）
 
 
 # ==================== 匹配降权 ====================
