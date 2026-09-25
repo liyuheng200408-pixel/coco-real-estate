@@ -52,7 +52,7 @@ def norm_followup_type(value):
     return None, f"跟进类型没能识别：收到的是「{value}」。可用：{options}"
 
 
-def norm_followup_time(value):
+def norm_followup_time(value, label='下次跟进时间'):
     """跟进时间归一 → ('HH:MM' 或 None, 提示或 None)。认 9:00 / 09:00 / 9点30 / 9点 / 0930 / 09:30:00"""
     if value is None:
         return None, None
@@ -65,15 +65,15 @@ def norm_followup_time(value):
         text = text + ':00'
     matched = re.match(r'^(\d{1,2})(?::(\d{1,2}))?', text)
     if not matched or (':' in text and not matched.group(2)):
-        return None, _time_problem(value)
+        return None, _time_problem(value, label)
     hour, minute = int(matched.group(1)), int(matched.group(2) or 0)
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        return None, _time_problem(value)
+        return None, _time_problem(value, label)
     return f"{hour:02d}:{minute:02d}", None
 
 
-def _time_problem(value):
-    return f"下次跟进时间没能识别：收到的是「{value}」。请用 09:30 这类写法"
+def _time_problem(value, label='下次跟进时间'):
+    return f"{label}没能识别：收到的是「{value}」。请用 09:30 这类写法"
 
 
 def _split_time_part(value):
@@ -95,7 +95,8 @@ def _split_time_part(value):
     return text, None
 
 
-def norm_followup_when(date_value, time_value):
+def norm_followup_when(date_value, time_value, date_label='下次跟进日期', time_label='下次跟进时间',
+                       date_sample='2026-12-31'):
     """下次跟进时间归一 → (datetime 或 None, 'HH:MM' 或 None, 提示或 None)
 
     日期认 2026-12-31 / 2026/12/31 / 2026.12.31 / 2026年12月31日 / 12月31日，
@@ -103,11 +104,11 @@ def norm_followup_when(date_value, time_value):
     给了时刻就并进 datetime —— 与「设置提醒」「带看后自动提醒」同一口径。
     """
     date_part, embedded = _split_time_part(date_value)
-    day, problem = norm_date(date_part, '下次跟进日期')
+    day, problem = norm_date(date_part, date_label, date_sample)
     if problem:
         return None, None, problem
     time_text, problem = norm_followup_time(
-        time_value if str(time_value or '').strip() else embedded)
+        time_value if str(time_value or '').strip() else embedded, time_label)
     if problem:
         return None, None, problem
     if day and time_text:
@@ -326,24 +327,69 @@ def stale_check(task_id: str = None) -> str:
     }, ensure_ascii=False)
 
 
-def schedule_reminder(customer_id: int, date: str, time: str, content: str = None, task_id: str = None) -> str:
-    """设置客户跟进提醒"""
+def schedule_reminder(customer_id: int, date: str, time: str = None, content: str = None,
+                      task_id: str = None) -> str:
+    """设置客户跟进提醒（到点会出现在逾期提醒与早报里）
+
+    日期/时间复用 add_followup 那套归一（`norm_followup_when`）：认 2026-12-31 / 2026/12/31 /
+    2026年12月31日 / 12月31日，时间认 09:30 / 9点30 / 0930，不传时间按 09:00；认不出分别提示日期/时间。
+    同一客户同一时刻的提醒不重复建（内容变了就把那条改掉）。返回 `reminder` 结构化记录供回显核对。
+    """
     customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if not str(date or '').strip():
+        return json.dumps({"success": False, "error": "请说个提醒日期（如 2026-12-31 或 12月31日）"},
+                          ensure_ascii=False)
+    next_date_dt, next_time_text, problem = norm_followup_when(
+        date, time, '提醒日期', '提醒时间', '2026-12-31 或 12月31日')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if next_date_dt is None:
+        return json.dumps({"success": False, "error": "请说个提醒日期（如 2026-12-31 或 12月31日）"},
+                          ensure_ascii=False)
+    if next_time_text is None:      # 没给时间 → 09:00（口径写进描述与文案，别落空串）
+        next_time_text = '09:00'
+        next_date_dt = next_date_dt.replace(hour=9, minute=0, second=0, microsecond=0)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
-        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
-    next_date_dt = None
-    if date:
+        return json.dumps({"success": False, "error": "客户不存在，请先在客户列表里核对编号"},
+                          ensure_ascii=False)
+    reminder_content = clean_text(content) or f"跟进客户 {customer.get('name')}"
+    when = next_date_dt.strftime('%Y-%m-%d %H:%M')
+    warnings = []
+    if next_date_dt < datetime.now():
+        warnings.append("提醒时间已经过了，会立刻出现在逾期提醒里")
+    # 设提醒会取代该客户原来那条逾期提醒（逾期按"每位客户最新一条跟进"判定）—— 如实说明，别静默
+    previous = db.get_latest_followup(customer_id)
+    if previous and previous.get('next_date'):
         try:
-            next_date_dt = datetime.fromisoformat(f"{date}T{time or '09:00'}")
+            if datetime.fromisoformat(previous['next_date']) < datetime.now():
+                warnings.append("这位客户之前那条逾期提醒不再出现了（系统按最新一条跟进算逾期）")
         except ValueError:
-            return json.dumps({"success": False, "error": "日期格式错误"}, ensure_ascii=False)
-    reminder_content = content or f"跟进客户 {customer.get('name')}"
-    db.add_followup(customer_id=customer_id, type='reminder', content=reminder_content, next_date=next_date_dt, next_time=time)
-    return json.dumps({"success": True, "message": f"已设置 {date} {time} 提醒跟进 {customer.get('name')}"}, ensure_ascii=False)
+            pass
+
+    existing = db.find_reminder(customer_id, next_date_dt)
+    duplicate = bool(existing)
+    if existing:
+        if existing.get('content') != reminder_content:
+            reminder = db.update_followup_content(existing['id'], reminder_content) or existing
+            message = f"已把这条提醒的内容改成「{reminder_content}」"
+        else:
+            reminder = existing
+            message = f"这位客户 {when} 的提醒已经在（第 {existing['id']} 条），没有重复加"
+    else:
+        reminder = db.add_followup(customer_id=customer_id, type='reminder',
+                                   content=reminder_content, next_date=next_date_dt,
+                                   next_time=next_time_text)
+        message = f"已设置「{customer.get('name')}」{when} 的跟进提醒"
+    payload = {"success": True, "message": message, "reminder": reminder}
+    if duplicate:
+        payload["duplicate"] = True
+    if warnings:
+        payload["warnings"] = warnings
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def daily_report(task_id: str = None) -> str:
@@ -397,11 +443,14 @@ TOOLS = [
             "document": {"type": "boolean", "description": "要不要生成完整清单文档（含全部条目，不受条数限制）；返回 document_path，用 MEDIA:路径 发给经纪人。默认 false"},
         },
     }, "handler": lambda args, **kw: get_overdue(**args)},
-    {"name": "schedule_reminder", "description": "设置客户跟进提醒", "parameters": {
+    {"name": "schedule_reminder", "description": "设置客户跟进提醒（到点会出现在逾期提醒与早报里）。日期认 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日，时间认 09:30 / 9点30 / 0930（不传时间按 09:00）。返回 reminder=新建（或已有）的提醒记录；同一客户同一时间的提醒不重复建。", "parameters": {
         "type": "object", "properties": {
-            "customer_id": {"type": "integer"}, "date": {"type": "string"},
-            "time": {"type": "string"}, "content": {"type": "string"},
-        }, "required": ["customer_id", "date", "time"],
+            "customer_id": {"type": "integer", "description": "客户ID"},
+            "date": {"type": "string",
+                     "description": "提醒日期（2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日 都认）"},
+            "time": {"type": "string", "description": "提醒时间（如 09:30；也认 9点30 / 0930；不传按 09:00）"},
+            "content": {"type": "string", "description": "提醒内容（不传默认「跟进客户 X」）"},
+        }, "required": ["customer_id", "date"],
     }, "handler": lambda args, **kw: schedule_reminder(**args)},
     {"name": "daily_report", "description": "生成每日早报", "parameters": {
         "type": "object", "properties": {},
@@ -435,7 +484,7 @@ registry.register(
 registry.register(
     name="schedule_reminder",
     toolset="real_estate",
-    schema={"name": "schedule_reminder", "description": "设置客户跟进提醒", "parameters": TOOLS[3]["parameters"]},
+    schema={"name": "schedule_reminder", "description": "设置客户跟进提醒（到点会出现在逾期提醒与早报里）。日期认 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日，时间认 09:30 / 9点30 / 0930（不传时间按 09:00）。返回 reminder=新建（或已有）的提醒记录；同一客户同一时间的提醒不重复建。", "parameters": TOOLS[3]["parameters"]},
     handler=TOOLS[3]["handler"],
 )
 registry.register(

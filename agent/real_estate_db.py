@@ -2560,6 +2560,40 @@ class RealEstateDB:
             items = [f.to_dict() for f in query.limit(limit).all()]
         return (items, total) if with_total else items
 
+    def get_latest_followup(self, customer_id):
+        """该客户最新一条跟进（按 created_at，同一时刻按 id 最大）→ dict 或 None
+
+        「设提醒会不会顶掉旧的逾期」这类判断要用它（口径与 get_overdue 一致）。
+        """
+        with self.get_session() as s:
+            row = (s.query(Followup)
+                   .filter(Followup.customer_id == customer_id)
+                   .order_by(Followup.created_at.desc(), Followup.id.desc())
+                   .first())
+            return row.to_dict() if row else None
+
+    def find_reminder(self, customer_id, next_date):
+        """同客户 + 同一时刻的提醒（type='reminder'）→ dict 或 None（重复设置判定用）"""
+        with self.get_session() as s:
+            row = (s.query(Followup)
+                   .filter(Followup.customer_id == customer_id,
+                           Followup.type == 'reminder',
+                           Followup.next_date == next_date)
+                   .order_by(Followup.id.desc())
+                   .first())
+            return row.to_dict() if row else None
+
+    def update_followup_content(self, followup_id, content):
+        """改一条跟进的正文（只用于「同时间的提醒改了内容」）→ 更新后的 dict 或 None"""
+        with self.get_session() as s:
+            row = s.query(Followup).get(followup_id)
+            if not row:
+                return None
+            row.content = content
+            s.commit()
+            s.refresh(row)
+            return row.to_dict()
+
     def get_property_titles(self, property_ids):
         """按 id 批量取房源标题 → {id: 标题}（只取要展示的两列，缺号不补占位）"""
         ids = [int(i) for i in set(property_ids or []) if i is not None]

@@ -201,6 +201,20 @@ def case_get_property_detail_without_owner(w):
     return _load(w.pr.get_property_detail(property_id=p["id"]))
 
 
+def case_schedule_reminder(w):
+    """设提醒的三条话术：正常设置 / 重复设置 / 时间已过（warnings）"""
+    c = w.db.add_customer(name="提醒客户", customer_type="rent")
+    soon = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
+    past = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+    first = _load(w.fu.schedule_reminder(customer_id=c["id"], date=soon, time="09:30"))
+    dup = _load(w.fu.schedule_reminder(customer_id=c["id"], date=soon, time="09:30"))
+    old_one = _load(w.fu.schedule_reminder(customer_id=c["id"], date=past, time="09:00"))
+    return {
+        "message": "｜".join(filter(None, [first.get("message"), dup.get("message"), old_one.get("message")])),
+        "warnings": (first.get("warnings") or []) + (dup.get("warnings") or []) + (old_one.get("warnings") or []),
+    }
+
+
 def case_market_brief(w):
     _customers(w.db, 3)
     return _load(w.an.market_brief())
@@ -225,6 +239,7 @@ SCENARIOS = [
     ("update_customer_stage 警告", case_update_customer_stage_warning),
     ("get_property_detail 无业主", case_get_property_detail_without_owner),
     ("market_brief 简报", case_market_brief),
+    ("schedule_reminder 话术", case_schedule_reminder),
 ]
 
 

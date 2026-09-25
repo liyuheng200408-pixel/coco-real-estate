@@ -274,12 +274,13 @@ def norm_id(value, label="编号", hint=""):
 
 # ==================== 日期 ====================
 
-def norm_date(value, label="日期"):
+def norm_date(value, label="日期", sample="2026-12-31"):
     """日期归一 → (datetime 或 None, 提示或 None)。
 
     接受 `2026-12-31` / `2026/12/31` / `2026.12.31` / `2026年12月31日`；
     只有月日（`12月31日` / `12-31`）时按**当年**算，若当年那天已过按**次年**（到期日总是指未来）。
     认不出返回 (None, 中文提示) —— 不猜、也不静默存错。
+    `sample` 是提示里给的写法示例（调用方按场景换，不要手改文案）。
     """
     from datetime import datetime as _dt
     if value is None:
@@ -295,7 +296,7 @@ def norm_date(value, label="日期"):
     try:
         nums = [int(p) for p in parts]
     except ValueError:
-        return None, f"{label}没能识别：收到的是「{value}」。请用 2026-12-31 这类写法"
+        return None, f"{label}没能识别：收到的是「{value}」。请用 {sample} 这类写法"
     try:
         if len(nums) == 3:
             return _dt(nums[0], nums[1], nums[2]), None
@@ -307,8 +308,8 @@ def norm_date(value, label="日期"):
                 candidate = _dt(year + 1, month, day)
             return candidate, None
     except ValueError:
-        return None, f"{label}没能识别：收到的是「{value}」。请用 2026-12-31 这类写法"
-    return None, f"{label}没能识别：收到的是「{value}」。请用 2026-12-31 这类写法"
+        return None, f"{label}没能识别：收到的是「{value}」。请用 {sample} 这类写法"
+    return None, f"{label}没能识别：收到的是「{value}」。请用 {sample} 这类写法"
 
 
 # ==================== 列宽 / 文本入库 ====================
