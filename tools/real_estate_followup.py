@@ -17,6 +17,8 @@ AGENT_ID_MAX = 100
 
 # 逾期清单：默认在对话里列 50 条；limit 不设上限（老板 2026-09-25：要看全部走文档，别塞对话）
 OVERDUE_LIMIT_DEFAULT = 50
+# 每日早报里的流失名单最多列几位（老板 2026-09-25 定 20：早报要能一眼看完，总数另给 stale_total）
+DAILY_STALE_LIMIT = 20
 # 生成的清单文档只保留最近 N 份（每天早报都可能生成，不清理会越堆越多）
 OVERDUE_DOC_KEEP = 20
 
@@ -394,16 +396,36 @@ def schedule_reminder(customer_id: int, date: str, time: str = None, content: st
 
 
 def daily_report(task_id: str = None) -> str:
-    """生成每日早报（附带流失预警与自动降级信息）"""
+    """生成每日早报（今天要跟进的客户 / 今天到期与已逾期的跟进 / 客户与房源概览 / 流失预警）
+
+    会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），降级名单在 `report.downgrades` 里如实说明
+    （含降级前后的等级、多久没互动、该等级的阈值）。流失名单只列最久的 `DAILY_STALE_LIMIT` 位，
+    总数在 `report.stale_total`；今天要跟进的只列前 `TODAY_TASK_LIMIT` 位，总数在 `report.today_followups`。
+    """
     db = _get_db()
     report = db.daily_report()
-    downgrade = db.auto_downgrade_stale_customers()
+    # 先算一份流失快照，降级复用同一份（原先各扫一遍全库）
     stale = db.get_stale_customers()
+    downgrade = db.auto_downgrade_stale_customers(stale=stale)
     if downgrade.get('downgrades'):
         report['downgrades'] = downgrade['downgrades']
+    notes = []
+    if not report.get('total_customers'):
+        notes.append("库里还没有客户，先登记客户再看早报")
+    else:
+        shown_tasks = len(report.get('today_tasks') or [])
+        if (report.get('today_followups') or 0) > shown_tasks:
+            notes.append(f"今天要跟进 {report['today_followups']} 位，这里列前 {shown_tasks} 位")
     if stale:
-        report['stale_customers'] = stale
-    return json.dumps({"success": True, "report": report}, ensure_ascii=False)
+        report['stale_total'] = len(stale)
+        report['stale_customers'] = stale[:DAILY_STALE_LIMIT]
+        if len(stale) > DAILY_STALE_LIMIT:
+            notes.append(f"共 {len(stale)} 位客户长期无互动，这里列最久的 {DAILY_STALE_LIMIT} 位"
+                         f"（要我列全就说一声）")
+    payload = {"success": True, "report": report}
+    if notes:
+        payload["message"] = "；".join(notes)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def midday_check(task_id: str = None) -> str:
@@ -453,7 +475,7 @@ TOOLS = [
             "content": {"type": "string", "description": "提醒内容（不传默认「跟进客户 X」）"},
         }, "required": ["customer_id", "date"],
     }, "handler": lambda args, **kw: schedule_reminder(**args)},
-    {"name": "daily_report", "description": "生成每日早报", "parameters": {
+    {"name": "daily_report", "description": "生成每日早报（今天要跟进的客户 / 今天到期与已逾期的跟进 / 客户与房源概览 / 流失预警）。会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），降级名单在 report.downgrades 里如实说明；report.stale_total 是流失客户总数，report.stale_customers 只列最久的 20 位。", "parameters": {
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: daily_report()},
     {"name": "midday_check", "description": "午间检查", "parameters": {
@@ -491,7 +513,7 @@ registry.register(
 registry.register(
     name="daily_report",
     toolset="real_estate",
-    schema={"name": "daily_report", "description": "生成每日早报", "parameters": TOOLS[4]["parameters"]},
+    schema={"name": "daily_report", "description": "生成每日早报（今天要跟进的客户 / 今天到期与已逾期的跟进 / 客户与房源概览 / 流失预警）。会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），降级名单在 report.downgrades 里如实说明；report.stale_total 是流失客户总数，report.stale_customers 只列最久的 20 位。", "parameters": TOOLS[4]["parameters"]},
     handler=TOOLS[4]["handler"],
 )
 registry.register(

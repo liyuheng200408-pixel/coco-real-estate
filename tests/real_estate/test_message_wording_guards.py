@@ -215,6 +215,23 @@ def case_schedule_reminder(w):
     }
 
 
+def case_daily_report(w):
+    """早报的三条说明句：今天要跟进被截断 / 流失名单被截断（正常情况不加说明）"""
+    today = datetime.now().date()
+    for i in range(12):
+        c = w.db.add_customer(name=f"今天要跟进{i}", customer_type="rent")
+        w.db.add_followup(customer_id=c["id"], type="note", content=f"第{i}条",
+                          next_date=datetime.combine(today, datetime.min.time()).replace(hour=9),
+                          next_time="09:00")
+    for i in range(25):
+        w.db.add_customer(name=f"久未联系{i}", tier="C", customer_type="rent",
+                          created_at=datetime.now() - timedelta(days=120))
+    out = _load(w.fu.daily_report())
+    empty = _load(w.fu.daily_report())          # 再调一次，确认不重复降级/不飘
+    return {"message": "｜".join(filter(None, [out.get("message"), empty.get("message")])),
+            "warnings": (out.get("warnings") or []) + (empty.get("warnings") or [])}
+
+
 def case_market_brief(w):
     _customers(w.db, 3)
     return _load(w.an.market_brief())
@@ -240,6 +257,7 @@ SCENARIOS = [
     ("get_property_detail 无业主", case_get_property_detail_without_owner),
     ("market_brief 简报", case_market_brief),
     ("schedule_reminder 话术", case_schedule_reminder),
+    ("daily_report 说明句", case_daily_report),
 ]
 
 

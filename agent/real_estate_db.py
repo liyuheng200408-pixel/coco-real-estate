@@ -311,6 +311,10 @@ def _extra_csv_items(keep_value, drop_value):
 
 # ==================== 数据模型 ====================
 
+# 每日早报里最多列几条「今天要跟进」（其余用计数说明，不再堆满整个早报）
+TODAY_TASK_LIMIT = 10
+
+
 class Customer(Base):
     """客户表"""
     __tablename__ = 're_customers'
@@ -2673,6 +2677,8 @@ class RealEstateDB:
                         'days_inactive': days, 'threshold': threshold,
                         'last_contact': last_time.isoformat() if last_time else None,
                     })
+            # 最久没互动的在前（调用方直接取前 N 位就是"最该跟进的"）
+            result.sort(key=lambda x: x['days_inactive'], reverse=True)
             return result
     
     def auto_downgrade_stale_customers(self, stale=None):
@@ -2696,24 +2702,31 @@ class RealEstateDB:
                                 s.query(CustomerChange.customer_id, func.max(CustomerChange.created_at))
                                 .filter(CustomerChange.field == 'tier')
                                 .group_by(CustomerChange.customer_id).all()}
-            for item in stale:
-                c = s.query(Customer).get(item['customer_id'])
-                if not c:
-                    continue
-                changed_at = last_tier_change.get(c.id)
-                if changed_at and changed_at.date() == today:
-                    continue
-                mapping = {'S': 'A', 'A': 'B', 'B': 'C'}
-                new_tier = mapping.get(c.tier)
-                if new_tier and c.tier != new_tier:
-                    old = c.tier
-                    c.tier = new_tier
-                    s.add(CustomerChange(customer_id=c.id, field='tier',
-                                         old_value=old, new_value=new_tier))
-                    downgrades.append({
-                        'customer_id': c.id, 'name': c.name,
-                        'from': old, 'to': new_tier, 'days_inactive': item['days_inactive'],
-                    })
+            # 2026-09-25（F160）：原先逐客户 query(Customer).get(id)（1.2 万流失客户 = 1.2 万次查询 ≈ 11 秒），
+            # 改成分批一次取出来再改 —— 判定口径一行未动，只去 N+1。
+            for start in range(0, len(stale), 500):
+                chunk = stale[start:start + 500]
+                by_id = {c.id: c for c in s.query(Customer)
+                         .filter(Customer.id.in_([i['customer_id'] for i in chunk])).all()}
+                for item in chunk:
+                    c = by_id.get(item['customer_id'])
+                    if not c:
+                        continue
+                    changed_at = last_tier_change.get(c.id)
+                    if changed_at and changed_at.date() == today:
+                        continue
+                    mapping = {'S': 'A', 'A': 'B', 'B': 'C'}
+                    new_tier = mapping.get(c.tier)
+                    if new_tier and c.tier != new_tier:
+                        old = c.tier
+                        c.tier = new_tier
+                        s.add(CustomerChange(customer_id=c.id, field='tier',
+                                             old_value=old, new_value=new_tier))
+                        downgrades.append({
+                            'customer_id': c.id, 'name': c.name,
+                            'from': old, 'to': new_tier, 'days_inactive': item['days_inactive'],
+                            'threshold': item.get('threshold'),
+                        })
             s.commit()
         return {'downgrades': downgrades, 'still_stale': len(stale) - len(downgrades)}
 
@@ -3110,21 +3123,27 @@ class RealEstateDB:
         overdue = self.get_overdue()
         today = datetime.now().date()
         with self.get_session() as s:
-            today_fu = s.query(Followup).join(Customer).filter(
-                Followup.next_date >= datetime.combine(today, datetime.min.time()),
-                Followup.next_date < datetime.combine(today + timedelta(days=1), datetime.min.time()),
-            ).all()
+            # 2026-09-25（F159）：客户名走 join 一起查出来，**在会话内**把要展示的内容拼好 ——
+            # 原先在 with 块外访问 f.customer.name，session 已关 → DetachedInstanceError，
+            # 只要有客户今天要跟进，早报就整条失败。
+            rows = (s.query(Followup, Customer.name)
+                    .join(Customer, Followup.customer_id == Customer.id)
+                    .filter(Followup.next_date >= datetime.combine(today, datetime.min.time()),
+                            Followup.next_date < datetime.combine(today + timedelta(days=1),
+                                                                  datetime.min.time()))
+                    .order_by(Followup.next_date.asc(), Followup.id.asc())
+                    .all())
+            today_total = len(rows)
+            today_tasks = [{'customer': name or '未知', 'time': f.next_time, 'content': f.content}
+                           for f, name in rows[:TODAY_TASK_LIMIT]]
         return {
             'date': today.isoformat(),
             'customer_stats': stats.get('tier_counts', {}),
             'total_customers': stats.get('total_customers', 0),
             'available_properties': stats.get('available_properties', 0),
             'overdue_count': len(overdue),
-            'today_followups': len(today_fu),
-            'today_tasks': [
-                {'customer': f.customer.name if f.customer else '未知', 'time': f.next_time, 'content': f.content}
-                for f in today_fu[:10]
-            ],
+            'today_followups': today_total,
+            'today_tasks': today_tasks,
         }
     
     def midday_check(self):
