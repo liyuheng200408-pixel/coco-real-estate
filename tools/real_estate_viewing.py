@@ -334,7 +334,7 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
     if advice:
         message += f"。{advice}"
 
-    payload = {"success": True, "viewing": updated, "message": message}
+    payload = {"success": True, "viewing": _viewing_display(updated), "message": message}
     if followup:
         payload["followup"] = followup
     if stage_change:
@@ -410,7 +410,12 @@ def get_viewing(viewing_id: int, task_id: str = None) -> str:
 
 def list_viewings(customer_id: int = None, property_id: int = None, status: str = None,
                   limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
-    """列出带看记录，可按客户/房源/状态筛选"""
+    """列出带看记录：谁看了哪套房、什么时候、状态与客户意向（中文）、客户反馈、有没有安排回访提醒
+
+    默认按带看时间倒序（最近约的在前），可按客户/房源/状态筛（状态认 待带看/已完成/已取消 与英文值），
+    默认列 20 条（最多 200）。返回 total=符合条件的总数、count=本次返回条数、truncated；被截断时给一句说明。
+    "客户不存在"、"房源不存在"与"有客户但还没带看"分开说 —— 前者多半是编号打错了。
+    """
     limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     if customer_id is not None:
         customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
@@ -420,9 +425,39 @@ def list_viewings(customer_id: int = None, property_id: int = None, status: str 
         property_id, problem = norm_id(property_id, '房源编号')
         if problem:
             return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    status_value, problem = norm_viewing_status(status)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
-    result = db.list_viewings(customer_id=customer_id, property_id=property_id, status=status, limit=limit)
-    return json.dumps({"success": True, "viewings": result, "count": len(result)}, ensure_ascii=False)
+    if customer_id is not None and not db.get_customer(customer_id):
+        return json.dumps({"success": False, "error": "客户不存在，请先在客户列表里核对编号"},
+                          ensure_ascii=False)
+    if property_id is not None and not db.get_property(property_id):
+        return json.dumps({"success": False, "error": "房源不存在，请核对房源编号"},
+                          ensure_ascii=False)
+    rows, total = db.list_viewings(customer_id=customer_id, property_id=property_id,
+                                   status=status_value, limit=limit, with_total=True)
+    viewings = [_viewing_display(row) for row in rows]
+    reminders = db.find_followups_by_viewings([x['id'] for x in viewings])
+    for item in viewings:
+        reminder = reminders.get(item['id'])
+        if reminder:
+            item['reminder'] = reminder
+            item['reminder_label'] = f"已安排回访提醒（{_readable_time(reminder.get('next_date'))}）"
+    payload = {"success": True, "viewings": viewings, "count": len(viewings), "total": total,
+               "truncated": bool(total and total > len(viewings))}
+    if not total:
+        if status_value:
+            payload["message"] = "没有符合这个条件的带看记录"
+        elif customer_id is not None:
+            payload["message"] = "这位客户还没有带看记录"
+        elif property_id is not None:
+            payload["message"] = "这套房源还没有带看记录"
+        else:
+            payload["message"] = "还没有任何带看记录"
+    elif payload["truncated"]:
+        payload["message"] = f"共 {total} 条带看，这里列最近 {len(viewings)} 条（要我多列就说一声）"
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def viewing_stats(task_id: str = None) -> str:
@@ -499,12 +534,19 @@ registry.register(
 registry.register(
     name="list_viewings",
     toolset="real_estate",
-    schema={"name": "list_viewings", "description": "列出带看记录，可按客户/房源/状态筛选", "parameters": {
+    schema={"name": "list_viewings", "description":
+            "列出带看记录：谁看了哪套房、带看时间、状态与客户意向（中文 status_label/result_label）、"
+            "客户反馈；带看完成后安排过回访提醒的会给 reminder_label。默认按带看时间倒序（最近约的在前），"
+            "可按客户/房源/状态筛（状态认 待带看/已完成/已取消，也认 scheduled/done/cancelled），默认列 20 条（最多 200）。"
+            "返回 total=符合条件的总数、count=本次返回条数、truncated。经纪人问「这位客户都看过哪些房」"
+            "「这套房谁看过」时用它。", "parameters": {
         "type": "object",
         "properties": {
-            "customer_id": {"type": "integer"},
-            "property_id": {"type": "integer"},
-            "status": {"type": "string", "enum": ["scheduled", "done", "cancelled"]},
+            "customer_id": {"type": "integer", "description": "客户编号（数字，来自建档或客户列表）"},
+            "property_id": {"type": "integer", "description": "房源编号（数字，来自建档或房源列表）"},
+            "status": {"type": "string", "enum": ["scheduled", "done", "cancelled"],
+                       "description": "带看状态：scheduled待带看 / done已完成 / cancelled已取消"
+                                      "（也可以直接说 已完成、看完了、已取消）"},
             "limit": {"type": "integer", "description": "返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
         },
     }},

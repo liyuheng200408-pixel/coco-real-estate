@@ -3284,13 +3284,45 @@ class RealEstateDB:
             v = s.query(Viewing).get(vid)
             return v.to_dict() if v else None
 
-    def list_viewings(self, customer_id=None, property_id=None, status=None, limit=50):
+    def list_viewings(self, customer_id=None, property_id=None, status=None, limit=50,
+                      with_total=False):
+        """带看记录（按带看时间倒序）
+
+        with_total=True 时返回 (本页明细, 符合条件总数) —— 总数走 SQL 聚合，别拿本页条数当总数
+        （2026-09-25 F196）。
+        `customer_name`/`property_title` 走**一次联表**取回：原先每条记录各懒加载一次客户与房源
+        （20 条 = 43 次查询，实测 F199），联表后与条数无关。
+        """
+        from sqlalchemy.orm import joinedload
         with self.get_session() as s:
-            q = s.query(Viewing)
+            q = (s.query(Viewing)
+                 .options(joinedload(Viewing.customer), joinedload(Viewing.property)))
             if customer_id: q = q.filter(Viewing.customer_id == customer_id)
             if property_id: q = q.filter(Viewing.property_id == property_id)
             if status: q = q.filter(Viewing.status == status)
-            return [v.to_dict() for v in q.order_by(Viewing.viewing_time.desc()).limit(limit).all()]
+            total = q.count() if with_total else None
+            rows = [v.to_dict() for v in
+                    q.order_by(Viewing.viewing_time.desc(), Viewing.id.desc()).limit(limit).all()]
+        return (rows, total) if with_total else rows
+
+    def find_followups_by_viewings(self, viewing_ids, followup_type='reminder'):
+        """一次取回"多条带看各自自动生成的记录" → {带看编号: 记录 dict}
+
+        列表页要给每条带看显示"已安排回访提醒"时用它 —— 别在循环里一条一查（N+1）。
+        """
+        ids = [int(i) for i in set(viewing_ids or []) if i is not None]
+        if not ids:
+            return {}
+        with self.get_session() as s:
+            rows = (s.query(Followup)
+                    .filter(Followup.source_viewing_id.in_(ids))
+                    .order_by(Followup.id.asc()).all())
+            out = {}
+            for row in rows:
+                if followup_type and row.type != followup_type:
+                    continue
+                out.setdefault(row.source_viewing_id, row.to_dict())
+            return out
 
     def find_scheduled_viewing(self, customer_id, property_id, viewing_time):
         """同一客户同一房源同一时间是否已约了还没完成的带看（用于「不重复登记」）"""
