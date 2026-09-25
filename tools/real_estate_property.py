@@ -269,6 +269,9 @@ def update_property(
     楼层没传时，只在**库里还没有楼层**的情况下按房号补一个（不会覆盖已有值）。
     fill_missing_only=True 时**只补空缺**：库里已有值的字段一律不动（合并重复房源时用这一档）。
     """
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     # 入参归一与校验（2026-09-24 加，与 add_property 同一套）：经纪人原话（"185万"）先换算成元/㎡，
     # 认不出的、非正面积的、非法状态/类型都挡在写库之前 —— 避免把库里已有数据改成坏值。
@@ -687,6 +690,9 @@ def get_property_detail(property_id: int = None, title: str = None, task_id: str
 
 def match_property(customer_id: int, top_n: int = 5, task_id: str = None) -> str:
     """根据客户需求智能匹配最合适的房源"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
@@ -938,6 +944,10 @@ def deduplicate_properties(dry_run: bool = True, keep: str = None, keep_id: int 
     merge=True 执行前**先把被删那条的独有信息并到保留项**（只补空缺、不覆盖），再删除。
     有关联带看/成交/跟进的一律跳过；带业主/图片而保留项没有、又没开 merge 的也跳过。
     """
+    if keep_id is not None:
+        keep_id, problem = norm_id(keep_id, '房源编号')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     result = db.remove_duplicate_properties(dry_run=dry_run, keep=keep, keep_id=keep_id, merge=merge)
     if result.get('dry_run'):
@@ -980,6 +990,9 @@ _PRICE_HISTORY_LIMIT_MAX = 200
 
 def price_history(property_id: int, limit: int = _PRICE_HISTORY_LIMIT_DEFAULT, task_id: str = None) -> str:
     """查询房源调价历史（limit 最多返回多少条明细；次数与累计变动始终按**全部**调价统计）"""
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     # 房源不存在要和"没调过价"区分开（2026-09-24）：否则模型会对不存在的房源说"这套房没调过价"
     prop = db.get_property(property_id)
@@ -1095,6 +1108,9 @@ _FIND_ALT_LIMIT_MAX = 20
 
 def find_alternatives(property_id: int, limit: int = _FIND_ALT_LIMIT_DEFAULT, task_id: str = None) -> str:
     """一键平替：客户看中的房被抢/下架时，按贴近度找替代房源（同用途内）"""
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     # 原房源不存在要和"没有够贴近的替代"区分开（2026-09-24）
     if not db.get_property(property_id):

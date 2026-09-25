@@ -8,6 +8,7 @@ Coco 房产工具 - 数据清理（彻底删除 / 批量清理）
 """
 import json
 
+from agent.real_estate_input import norm_id
 from tools.registry import registry
 
 
@@ -27,6 +28,10 @@ def delete_property(property_id: int = None, title: str = None, force: bool = Fa
     property_id 或 title 二选一；有关联带看/成交/跟进的默认拒删并说明原因，
     force=True 表示经纪人已明确要求"连历史一起删"；dry_run=True 只报告不动手。
     """
+    if property_id is not None:
+        property_id, problem = norm_id(property_id, '房源编号')
+        if problem:
+            return _dump({"success": False, "error": problem})
     if property_id is None and not title:
         return _dump({"success": False, "error": "请提供房源编号或房源标题"})
     return _dump(_get_db().delete_property(property_id=property_id, title=title,
@@ -40,6 +45,10 @@ def delete_customer(customer_id: int = None, name: str = None, phone: str = None
     customer_id，或 name（同名时再带 phone 区分）；有关联跟进/带看/成交/需求变更/
     转介绍记录的默认拒删并说明原因，force=True 才连带删除；dry_run=True 只报告不动手。
     """
+    if customer_id is not None:
+        customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+        if problem:
+            return _dump({"success": False, "error": problem})
     if customer_id is None and not name:
         return _dump({"success": False, "error": "请提供客户编号或客户姓名"})
     return _dump(_get_db().delete_customer(customer_id=customer_id, name=name, phone=phone,

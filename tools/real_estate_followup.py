@@ -4,7 +4,7 @@ Coco 房产工具 - 跟进管理
 import json
 from datetime import datetime
 from tools.registry import registry
-
+from agent.real_estate_input import norm_id
 
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
@@ -17,6 +17,13 @@ def add_followup(
     agent_id: str = None, task_id: str = None,
 ) -> str:
     """添加客户跟进记录"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if property_id is not None:
+        property_id, problem = norm_id(property_id, '房源编号')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     next_date_dt = None
     if next_date:
@@ -34,6 +41,9 @@ def add_followup(
 
 def get_followups(customer_id: int, limit: int = 20, task_id: str = None) -> str:
     """获取客户跟进历史"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     result = db.get_followups(customer_id, limit=limit)
     return json.dumps({"success": True, "followups": result, "count": len(result)}, ensure_ascii=False)
@@ -75,6 +85,9 @@ def stale_check(task_id: str = None) -> str:
 
 def schedule_reminder(customer_id: int, date: str, time: str, content: str = None, task_id: str = None) -> str:
     """设置客户跟进提醒"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:

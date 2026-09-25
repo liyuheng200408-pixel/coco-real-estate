@@ -4,8 +4,8 @@ Coco 房产工具 - 客户管理
 import json
 
 from agent.real_estate_input import (STAGES, STAGE_LABELS, clean_tags, norm_birthday,
-                                     norm_customer_type, norm_money, norm_phone, norm_stage,
-                                     norm_tags, norm_tier, stage_options_text)
+                                     norm_customer_type, norm_id, norm_money, norm_phone,
+                                     norm_stage, norm_tags, norm_tier, stage_options_text)
 from tools.registry import registry
 
 # "够不着"的硬冲突理由：匹配结果全是这些时，不能说"有 N 套可能符合需求"
@@ -291,6 +291,9 @@ def update_customer(
                    建档时没说清、后来确认了，用这个参数补上（改类型同样留痕）。
     status: active(在跟) / paused(暂缓) / closed(已关闭)——"这个客户不跟了"就传 closed。
     """
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     db = _get_db()
     old = db.get_customer(customer_id)
     if old is None:
@@ -445,6 +448,9 @@ def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT
     limit: 本次返回条数（默认 20，最多 200；传 0/负数按默认 20 处理，不会谎报"没有变更"、
            也不会被放大成拉全量）
     """
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
@@ -475,6 +481,9 @@ def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT
 
 def get_customer(customer_id: int, task_id: str = None) -> str:
     """获取客户详情（联系方式、等级、预算、偏好、来源、标签、阶段、状态、生日、备注、时间）"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     db = _get_db()
     result = db.get_customer(customer_id)
     if not result:
@@ -554,6 +563,9 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
 
 def update_tier(customer_id: int, tier: str, task_id: str = None) -> str:
     """调整客户等级（S高意向/A有需求/B培养/C初步接触）；每次调整记入变更历史"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     tier_value, ok = norm_tier(tier)
     if not ok:
         return _fail(_tier_error(tier))
@@ -695,6 +707,9 @@ def add_customer_tag(
     task_id: str = None,
 ) -> str:
     """添加客户标签（支持一次传多个；重复的不会重复添加，写法会归一）"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
@@ -724,6 +739,9 @@ def remove_customer_tag(
     task_id: str = None,
 ) -> str:
     """移除客户标签（写法会归一：库里带空格的旧标签也能按规范写法删掉）"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
@@ -751,6 +769,9 @@ def list_customer_tags(
     task_id: str = None,
 ) -> str:
     """查看客户标签"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
@@ -841,6 +862,9 @@ def update_customer_stage(customer_id: int, stage: str, task_id: str = None) -> 
            negotiating(谈判) / dealing(成交中) / maintain(售后维护) / lost(流失)；
            中文说法与大小写都认。
     """
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     db = _get_db()
     stage_value, ok = norm_stage(stage)
     if not ok:
@@ -900,6 +924,9 @@ def add_referral(referrer_customer_id: int, referred_name: str,
     登记前会认人（2026-09-24 加）：被介绍人若已在库里 → 复用他的档案，不新建重复客户；
     被介绍人手机号等于介绍人自己 → 拦下；同一介绍人已登记过同一位被介绍人 → 提示，不重复登记。
     """
+    referrer_customer_id, problem = norm_id(referrer_customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return _fail(problem)
     db = _get_db()
     referred_name = (referred_name or '').strip()
     if not referred_name:

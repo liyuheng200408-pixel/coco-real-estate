@@ -4,6 +4,7 @@ Coco 房产工具 - 生日/节日提醒
 import json
 from datetime import datetime
 from tools.registry import registry
+from agent.real_estate_input import norm_id
 
 
 def _get_db():
@@ -32,6 +33,9 @@ def birthday_check(task_id: str = None) -> str:
 
 def update_birthday(customer_id: int, birthday: str, task_id: str = None) -> str:
     """设置客户生日（YYYY-MM-DD）"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     from datetime import datetime as _dt
     try:
         _dt.strptime(birthday.strip(), "%Y-%m-%d")

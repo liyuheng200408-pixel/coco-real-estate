@@ -3,6 +3,7 @@ Coco 房产工具 - 房源图片管理
 """
 import json
 from tools.registry import registry
+from agent.real_estate_input import norm_id
 
 
 def _get_db():
@@ -12,6 +13,9 @@ def _get_db():
 
 def add_property_images(property_id: int, images: str, task_id: str = None) -> str:
     """为房源添加图片（多个用逗号分隔）"""
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     p = db.get_available_property(property_id)
     if p is None:
@@ -33,6 +37,9 @@ def add_property_images(property_id: int, images: str, task_id: str = None) -> s
 
 def list_property_images(property_id: int, task_id: str = None) -> str:
     """查看房源图片列表"""
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     p = db.get_available_property(property_id)
     if p is None:

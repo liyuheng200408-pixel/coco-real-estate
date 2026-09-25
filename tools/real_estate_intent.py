@@ -3,6 +3,7 @@ Coco 房产工具 - 竞品对比与客户意向度
 """
 import json
 from tools.registry import registry
+from agent.real_estate_input import norm_id
 
 
 def _get_db():
@@ -12,6 +13,9 @@ def _get_db():
 
 def compare_property(property_id: int, limit: int = 5, task_id: str = None) -> str:
     """同小区/同区域竞品对比：显示指定房源与周边在售房源的价格、面积、单价对比"""
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     result = db.compare_properties(property_id, limit)
     if result is None:
@@ -21,6 +25,9 @@ def compare_property(property_id: int, limit: int = 5, task_id: str = None) -> s
 
 def intent_score(customer_id: int, task_id: str = None) -> str:
     """客户意向度评分（0-100）：基于等级、带看次数、跟进活跃度、预算明确度"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     result = db.customer_intent_score(customer_id)
     if result is None:

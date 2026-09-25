@@ -4,7 +4,7 @@ Coco 房产工具 - 带看管理
 import json
 from datetime import datetime
 from tools.registry import registry
-
+from agent.real_estate_input import norm_id
 
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
@@ -28,6 +28,12 @@ def _parse_time(viewing_time: str):
 
 def schedule_viewing(customer_id: int, property_id: int, viewing_time: str, task_id: str = None) -> str:
     """预约带看：为指定客户安排指定房源的带看时间"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
@@ -46,6 +52,9 @@ def schedule_viewing(customer_id: int, property_id: int, viewing_time: str, task
 
 def record_viewing(viewing_id: int, status: str = None, result: str = None, feedback: str = None, task_id: str = None) -> str:
     """记录带看结果：status(scheduled/done/cancelled)、result(interested/not_interested/pending)、feedback(客户反馈)"""
+    viewing_id, problem = norm_id(viewing_id, '带看编号', '，可在带看记录列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     kwargs = {}
     if status:
@@ -102,6 +111,9 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
 
 def get_viewing(viewing_id: int, task_id: str = None) -> str:
     """查看带看详情"""
+    viewing_id, problem = norm_id(viewing_id, '带看编号', '，可在带看记录列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     result = db.get_viewing(viewing_id)
     if result:
@@ -111,6 +123,14 @@ def get_viewing(viewing_id: int, task_id: str = None) -> str:
 
 def list_viewings(customer_id: int = None, property_id: int = None, status: str = None, limit: int = 20, task_id: str = None) -> str:
     """列出带看记录，可按客户/房源/状态筛选"""
+    if customer_id is not None:
+        customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if property_id is not None:
+        property_id, problem = norm_id(property_id, '房源编号')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     result = db.list_viewings(customer_id=customer_id, property_id=property_id, status=status, limit=limit)
     return json.dumps({"success": True, "viewings": result, "count": len(result)}, ensure_ascii=False)
@@ -193,6 +213,9 @@ registry.register(
 
 def clear_defect_tag(property_id: int, tag: str, task_id: str = None) -> str:
     """房东整改后，经纪人手动清除某缺陷标签"""
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     ok = db.clear_defect_tag(property_id, tag)
     if ok:

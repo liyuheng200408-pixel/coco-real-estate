@@ -4,7 +4,7 @@ Coco 房产工具 - 成交/交易管理
 import json
 from datetime import datetime
 from tools.registry import registry
-
+from agent.real_estate_input import norm_id
 
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
@@ -32,6 +32,12 @@ def _parse_date(value: str, field_name: str):
 def start_deal(customer_id: int, property_id: int, price: int = None, deposit_amount: int = None,
                deposit_date: str = None, notes: str = None, task_id: str = None) -> str:
     """创建成交单：录入成交客户、房源、价格、定金，进入交易流程"""
+    customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
@@ -51,6 +57,9 @@ def start_deal(customer_id: int, property_id: int, price: int = None, deposit_am
 
 def advance_deal(deal_id: int, stage: str, date: str = None, notes: str = None, task_id: str = None) -> str:
     """推进交易阶段：deposit(定金)→signing(签约)→loan(贷款)→transfer(过户)→finalized(交房)"""
+    deal_id, problem = norm_id(deal_id, '成交单编号', '，可在成交列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     if stage not in STAGES:
         return json.dumps({"success": False, "error": f"阶段必须是 {'/'.join(STAGES)}"}, ensure_ascii=False)
     db = _get_db()
@@ -74,6 +83,9 @@ def advance_deal(deal_id: int, stage: str, date: str = None, notes: str = None, 
 
 def get_deal(deal_id: int, task_id: str = None) -> str:
     """查看成交详情"""
+    deal_id, problem = norm_id(deal_id, '成交单编号', '，可在成交列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     result = db.get_deal(deal_id)
     if result:

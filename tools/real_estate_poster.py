@@ -4,6 +4,8 @@ Coco 房产工具 - 房源海报/九宫格生成
 """
 import json
 import os
+
+from agent.real_estate_input import norm_id
 from tools.registry import registry
 
 
@@ -600,6 +602,10 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     allow_missing=True：经纪人明确说"先出图/信息就这些"时使用，缺的字段留空不编造。
     信息不齐时**不出图**，返回 missing 清单让 Coco 一次问清。
     """
+    if property_id is not None:
+        property_id, problem = norm_id(property_id, '房源编号')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     p = db.get_available_property(property_id) if property_id is not None else None
     if p is None and title:
@@ -763,6 +769,10 @@ def _render_legacy(p, qr_content, tpl: str) -> str:
 
 def suggest_poster_titles(property_id: int = None, title: str = None, task_id: str = None) -> str:
     """给经纪人挑的海报主标题候选（2~3 个）"""
+    if property_id is not None:
+        property_id, problem = norm_id(property_id, '房源编号')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     p = db.get_available_property(property_id) if property_id is not None else None
     if p is None and title:
@@ -793,8 +803,20 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, show_room_no
         return json.dumps({"success": False, "error": "缺少 Pillow 依赖，请执行 pip install Pillow"}, ensure_ascii=False)
 
     db = _get_db()
-    # 2026-09-18 修：九宫格原先只在前 50 条里找编号，房源一多就报"房源不存在"
-    ids = [int(x.strip()) for x in property_ids.split(',') if x.strip()][:9]
+    # 编号形态（2026-09-25）：schema 声明 property_ids 是数组，历史实现却按逗号串 `.split(',')` ——
+    # 模型照 schema 传数组时直接崩（AttributeError），只有传字符串才跑得通。两种写法都认，
+    # 每个编号过 norm_id（认不出的给中文提示，而不是"房源不存在"）。
+    raw_ids = (property_ids if isinstance(property_ids, (list, tuple))
+               else str(property_ids).split(','))
+    ids = []
+    for item in raw_ids:
+        if isinstance(item, str) and not item.strip():
+            continue
+        value, problem = norm_id(item, '房源编号')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+        ids.append(value)
+    ids = ids[:9]   # 九宫格最多 9 格
     by_id = {i: q for i in ids if (q := db.get_available_property(i)) is not None}
     if not ids:
         return json.dumps({"success": False, "error": "请提供房源ID列表（逗号分隔，最多9个）"}, ensure_ascii=False)

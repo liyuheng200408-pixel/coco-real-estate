@@ -4,6 +4,7 @@ Coco 房产工具 - 话术库沉淀
 """
 import json
 from tools.registry import registry
+from agent.real_estate_input import norm_id
 
 
 def _get_db():
@@ -41,6 +42,9 @@ def list_scripts(scenario: str = None, task_id: str = None) -> str:
 
 def delete_script(script_id: int, task_id: str = None) -> str:
     """删除话术"""
+    script_id, problem = norm_id(script_id, '话术编号', '，可在话术列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     if db.delete_script(script_id):
         return json.dumps({"success": True, "message": "话术已删除"}, ensure_ascii=False)

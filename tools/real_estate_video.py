@@ -4,6 +4,7 @@ Coco 房产工具 - 短视频口播脚本生成
 """
 import json
 from tools.registry import registry
+from agent.real_estate_input import norm_id
 
 
 def _get_db():
@@ -70,6 +71,9 @@ def generate_short_video_script(property_id: int, platform: str = "douyin", task
     platform: douyin(抖音，快节奏强悬念) / shipinhao(视频号，接地气重信任)
     结构：0-3s 钩子 → 3-20s 亮点 → 20-25s 价格 → 25-30s 行动号召
     """
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     p = db.get_available_property(property_id)
     if p is None:

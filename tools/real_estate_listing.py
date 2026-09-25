@@ -4,6 +4,7 @@ Coco 房产工具 - 房源发布文案生成
 """
 import json
 from tools.registry import registry
+from agent.real_estate_input import norm_id
 
 
 def _fmt_unit_price(value) -> str:
@@ -57,6 +58,9 @@ def generate_listing_copy(property_id: int, platform: str = "friends", task_id: 
 
     platform: friends(朋友圈) / beike(贝壳) / anjuke(安居客) / 58
     """
+    property_id, problem = norm_id(property_id, '房源编号')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     p = db.get_available_property(property_id)
     if p is None:
