@@ -62,7 +62,7 @@ def test_same_phone_second_registration_is_blocked_with_hint(tool_db):
     dup = call_add(name="王五（另一写法）", phone="138-0000-1111")
     assert dup["success"] is False and dup["duplicate"] is True, dup
     assert dup["existing_owner"]["id"] == first["owner"]["id"]
-    assert "该房东已在库里" in dup["error"] and "force=true" in dup["error"]
+    assert "该房东已在库里" in dup["error"] and "我另建一条" in dup["error"], dup["error"]
     assert owner_count(tool_db) == 1
 
 
@@ -108,7 +108,7 @@ def test_ciphertext_contact_refuses_to_deduplicate(tool_db):
     tool_db.add_owner(name="密钥坏了的房东", phone="gAAAAA" + "x" * 40)
     r = call_add(name="正常新房东", phone="13900008000")
     assert r["success"] is False and r["duplicate"] is False, r
-    assert "COCO_ENC_KEY" in r["error"], r
+    assert "Ava 检查密钥" in r["error"], r
 
 
 # ---------- ③ 列宽截断 ----------

@@ -85,7 +85,8 @@ def add_owner(name: str, phone: str = None, wechat: str = None,
             # 密钥不一致防御：不强行判重，提示先检查密钥
             return json.dumps({
                 "success": False, "duplicate": False, "warning": warn,
-                "error": "检测到房东字段可能因密钥不一致无法安全判重，请先检查 COCO_ENC_KEY 再操作。",
+                "error": "检测到加密密钥不一致，这次没法安全判重（可能把同一个房东的两条档案合错）。"
+                         "请让 Ava 检查密钥后再操作。",
             }, ensure_ascii=False)
         if dup:
             identical = (dup.get('name') == name
@@ -93,7 +94,7 @@ def add_owner(name: str, phone: str = None, wechat: str = None,
                                  (('phone', phone), ('wechat', wechat),
                                   ('trust_note', trust_note), ('notes', notes)) if v is not None))
             tail = ("同号同名，不用重复登记。" if identical else
-                    "如果其实是另一个人（或同一个人的另一个号），用 force=true 再登记一次。")
+                    "如果其实是另一个人（或同一个人的另一个号），跟我说一声我另建一条。")
             return json.dumps({
                 "success": False, "duplicate": True, "identical": identical,
                 "existing_owner": dup,
@@ -183,7 +184,7 @@ def find_person_by_name(name: str = None, limit: int = None, task_id: str = None
     """
     db = _get_db()
     if not (name or '').strip():
-        return json.dumps({"success": False, "error": "请提供要查询的姓名（name）"},
+        return json.dumps({"success": False, "error": "请提供要查询的姓名"},
                           ensure_ascii=False)
     limit = clamp_limit(limit, FIND_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     result = db.find_person_by_name(name, limit=limit)
@@ -204,8 +205,8 @@ def find_person_by_name(name: str = None, limit: int = None, task_id: str = None
     lines = [f"按姓名「{name}」检索到 客户 {total_customers} 人 / 业主 {total_owners} 人："]
     if truncated:
         lines.append(f"共命中 客户 {total_customers} 人 / 业主 {total_owners} 人，"
-                     f"本次各返回 客户 {len(customers)} / 业主 {len(owners)} 位（姓名子串匹配）。"
-                     f"要看得更全就把关键词写长一点，或把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+                     f"这里各列 客户 {len(customers)} / 业主 {len(owners)} 位（姓名含关键词即命中）。"
+                     f"要看得更全就把关键词写长一点，或跟我说一声我多列一些。")
     for c in customers:
         budget = '-'.join(filter(None, [str(fmt_budget(c.get('budget_min')) or ''),
                                         str(fmt_budget(c.get('budget_max')) or '')])) or '-'
@@ -270,8 +271,8 @@ def list_owners(limit: int = 50, task_id: str = None) -> str:
     payload = {"success": True, "owners": owners, "count": len(owners), "total": total,
                "truncated": bool(total > len(owners))}
     if payload["truncated"]:
-        payload["message"] = (f"共 {total} 位房东，本次返回 {len(owners)} 位（最新登记优先）。"
-                              f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+        payload["message"] = (f"共 {total} 位房东，这里列最近 {len(owners)} 位（最新登记优先）。"
+                              f"要我多列就说一声。")
     return json.dumps(attach_key_warning(payload, masked_fields, OWNER_KEY_MISMATCH_WARNING), ensure_ascii=False)
 
 
@@ -300,7 +301,7 @@ def owner_portfolio(owner_id: int, limit: int = None, task_id: str = None) -> st
         lines = [f"房东 {result['owner']['name']} 名下暂无房源"]
     if truncated:
         lines.append(f"共 {stats['total']} 套房源，这里列出最新登记的 {len(shown)} 套（最新登记优先）。"
-                     f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+                     f"要我多列就说一声。")
     for p in shown:
         # 展示口径复用共用实现：fmt_price（出租 → 元/月）/ _STATUS_LABELS（在售/已售/已租）
         viewing = f"，看房方式: {p['viewing_note']}" if p.get("viewing_note") else ""
@@ -339,7 +340,7 @@ def exclusive_expiring(days: int = 30, limit: int = None, task_id: str = None) -
     lines = [f"独家委托到期提醒（{days} 天内 {total} 套）"]
     if truncated:
         lines.append(f"共 {total} 套独家委托在未来 {days} 天内到期，这里列出最急的 {len(items)} 套。"
-                     f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+                     f"要我多列就说一声。")
     for it in items:
         when = "已过期" if it['days_remaining'] < 0 else f"还有 {it['days_remaining']} 天到期"
         lines.append(f"\n· {it['title']}（ID:{it['id']}）{fmt_price(it)} — {when}")

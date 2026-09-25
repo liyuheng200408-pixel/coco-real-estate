@@ -142,7 +142,7 @@ def test_huge_limit_capped_and_total_full(tool_db):
         _add(tool_db, f"大量独家房{i}", 1)
     r = _call(days=30, limit=100000)
     assert len(r["items"]) == 200 and r["total"] == 260 and r["truncated"] is True, r
-    assert "共 260 套独家委托" in r["message"] and "最多 200" in r["message"], r["message"].splitlines()[:2]
+    assert "共 260 套独家委托" in r["message"] and "要我多列就说一声" in r["message"], r["message"].splitlines()[:2]
 
 
 def test_shape_three_pieces(tool_db):

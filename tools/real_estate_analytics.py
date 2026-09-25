@@ -134,20 +134,20 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
         except Exception as e:
             news_items.append(f"· 联网检索暂不可用（{str(e)[:50]}），建议稍后重试")
     else:
-        news_items.append("· 未指定城市，跳过联网检索（传 city 参数可启用）")
+        news_items.append("· 未指定城市，这次跳过联网行情（告诉我城市名就能查）")
     news_section.extend(news_items or ["· 无结果"])
 
     # ③ 行动建议（基于自家数据生成）
     advice = ["\n三、本周行动建议"]
     if _brief_warning:
-        advice.append("· 自家盘况统计失败，本周建议暂依据人工判断（可稍后重跑本工具）")
+        advice.append("· 自家盘况统计这次没取到，本周建议先按人工判断（我稍后再试一次）")
     elif deals_week == 0 and viewings_week > 0:
-        advice.append("· 有带看无成交：回访本周带看客户，用 intent_score 找接近成交的推进")
+        advice.append("· 有带看无成交：回访本周带看客户，优先推进最接近成交的")
     if avail is not None and avail < 10:
-        advice.append("· 在售房源偏少：联系房东补盘，可用 exclusive_expiring 找委托到期房源谈续期")
+        advice.append("· 在售房源偏少：联系房东补盘，优先谈委托快到期的房东续期")
     high = db.churn_risk_customers(min_risk=60)
     if high:
-        advice.append(f"· {len(high)} 位客户流失风险高危，优先用 churn_warning 名单挽回")
+        advice.append(f"· {len(high)} 位客户流失风险高危，建议优先挽回（要我拉名单就说一声）")
     if len(advice) == 1:
         advice.append("· 节奏健康，按日常跟进计划执行即可")
 

@@ -77,8 +77,8 @@ class TestPagingShape:
                  created_at=now + timedelta(minutes=i))
         out = _call({"customer_id": cid})
         assert out["count"] == 20 and out["total"] == 25 and out["truncated"] is True, out
-        assert out["message"] == ("共 25 条跟进，本次返回最近 20 条（最新在前）。"
-                                 "要看得更全就把 limit 调大（最多 200）")
+        assert out["message"] == ("共 25 条跟进，这里列最近 20 条（最新在前）。"
+                                 "要我列全就说一声。")
 
     def test_no_message_when_everything_fits(self, wired, fixtures):
         cid = fixtures["customer"]["id"]

@@ -97,7 +97,7 @@ def test_total_is_library_count_not_page_size(tool_db):
     _bulk(tool_db, 64)
     r = _call()
     assert r["count"] == 50 and r["total"] == 64 and r["truncated"] is True, r
-    assert "共 64 位房东" in r["message"] and "本次返回 50 位" in r["message"], r
+    assert "共 64 位房东" in r["message"] and "这里列最近 50 位" in r["message"], r
 
 
 def test_no_message_when_not_truncated(tool_db):

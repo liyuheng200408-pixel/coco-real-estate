@@ -770,7 +770,8 @@ class RealEstateDB:
                 #（2026-09-24 修：原来的"含字母就当密文"启发式会把正常微信号/含字母的联系方式误判成密文，
                 #  导致库里一旦有微信客户，后续带微信的建档全被拦死）
                 if looks_like_ciphertext(v):
-                    warning = "检测到 phone 字段疑为密文、密钥可能不一致，未强行判重，请检查 COCO_ENC_KEY。"
+                    warning = ("检测到本机加密密钥与库里的不一致，未强行判重"
+                               "（可能把同一个人拆成两条、或把两个人合错）。请让 Ava 检查密钥。")
                     continue
                 if norm_phone(v) == probe:
                     if exclude_id is None or c['id'] != exclude_id:
@@ -784,7 +785,8 @@ class RealEstateDB:
                 if v is None:
                     continue
                 if looks_like_ciphertext(v):
-                    warning = warning or "检测到 wechat 字段疑为密文、密钥可能不一致，未强行判重，请检查 COCO_ENC_KEY。"
+                    warning = warning or ("检测到本机加密密钥与库里的不一致，未强行判重"
+                                          "（可能把同一个人拆成两条、或把两个人合错）。请让 Ava 检查密钥。")
                     continue
                 if str(v).strip() == probe:
                     if exclude_id is None or c['id'] != exclude_id:
@@ -1379,7 +1381,8 @@ class RealEstateDB:
                 if probe:
                     for oid, value in s.query(Owner.id, Owner.phone).all():
                         if looks_like_ciphertext(value):
-                            return (None, "检测到房东电话疑为密文、密钥可能不一致，未强行判重。")
+                            return (None, "检测到本机加密密钥与库里的不一致，未强行判重"
+                                          "（可能把同一个房东拆成两条、或把两位房东合错）。请让 Ava 检查密钥。")
                         if norm_phone(value) == probe:
                             o = s.query(Owner).get(oid)
                             return (o.to_dict() if o else None, None)
@@ -1389,7 +1392,8 @@ class RealEstateDB:
                 if probe:
                     for oid, value in s.query(Owner.id, Owner.wechat).all():
                         if looks_like_ciphertext(value):
-                            return (None, "检测到房东微信号疑为密文、密钥可能不一致，未强行判重。")
+                            return (None, "检测到本机加密密钥与库里的不一致，未强行判重"
+                                          "（可能把同一个房东拆成两条、或把两位房东合错）。请让 Ava 检查密钥。")
                         if str(value).strip() == probe:
                             o = s.query(Owner).get(oid)
                             return (o.to_dict() if o else None, None)

@@ -713,7 +713,7 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     if tpl == "CUSTOM":
         notes.extend(style_notes)
         if not photo:
-            notes.append("这套房源还没有照片：已用色块代替大图位；发给经纪人看效果时可说明")
+            notes.append("这套房源还没有照片：已用色块代替大图位")
     return json.dumps({
         "success": True,
         "property_id": property_id,

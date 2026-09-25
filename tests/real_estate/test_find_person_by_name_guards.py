@@ -119,7 +119,7 @@ def test_huge_limit_capped_and_totals_are_full(tool_db):
     r = _call(name="欧阳", limit=100000)
     assert r["count_customers"] == 200, r["count_customers"]
     assert r["total_customers"] == 261 and r["truncated"] is True, r
-    assert "共命中 客户 261 人" in r["message"] and "最多 200" in r["message"], r["message"].splitlines()[:2]
+    assert "共命中 客户 261 人" in r["message"] and "跟我说一声我多列一些" in r["message"], r["message"].splitlines()[:2]
 
 
 def test_no_truncation_note_when_few(tool_db):

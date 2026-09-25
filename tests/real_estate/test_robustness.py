@@ -41,7 +41,7 @@ class TestFailuresAreNotSwallowed:
                                          owner_name="某业主", owner_phone="13800138000"))
         assert out["success"] is True
         assert "warning_owner" in out, out
-        assert "业主信息登记失败" in out["warning_owner"]
+        assert "业主信息没登记上" in out["warning_owner"]
 
     def test_match_failure_is_surfaced(self, db, monkeypatch):
         """自动匹配失败也要带 warning_match，而不是悄悄返回"无客户" """

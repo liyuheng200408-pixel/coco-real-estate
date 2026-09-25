@@ -68,7 +68,7 @@ def test_total_is_full_count_not_page_size(tool_db):
     seed(tool_db, 26)
     r = call()
     assert r["count"] == 20 and r["total"] == 26 and r["truncated"] is True, r
-    assert "共 26 位" in r["message"] and "本次返回 20 位" in r["message"], r.get("message")
+    assert "共 26 位" in r["message"] and "这里列最近 20 位" in r["message"], r.get("message")
 
 
 def test_no_message_when_everything_returned(tool_db):

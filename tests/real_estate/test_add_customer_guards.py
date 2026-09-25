@@ -62,7 +62,7 @@ def test_real_ciphertext_contact_still_refuses_to_deduplicate(tool_db):
     tool_db.add_customer(name='密钥坏了的客户', phone='gAAAAA' + 'x' * 40, tier='C',
                          customer_type='unspecified', status='active')
     r = call_add(name='正常新客', phone='13900008000', customer_type='buy_second_hand')
-    assert r['success'] is False and 'COCO_ENC_KEY' in r['error'], r
+    assert r['success'] is False and 'Ava 检查密钥' in r['error'], r
 
 
 # ---------- ② 预算原话归一 ----------

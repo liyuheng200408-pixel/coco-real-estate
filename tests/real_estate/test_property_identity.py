@@ -358,4 +358,7 @@ def test_add_property_duplicate_returns_merge_preview(db, monkeypatch):
     assert "朝向" in preview["will_keep"], preview          # 库里独有 → 会保留
     assert preview["will_update"].get("装修"), preview       # 这次与库里不同 → 建议更新
     assert len(out["options"]) == 3, out["options"]
-    assert "fill_missing_only" in out["error"], out["error"]
+    assert "只补空缺" in out["error"], out["error"]
+    # 三档选项也是给人看的：中文说法，不带参数名
+    assert len(out["options"]) == 3, out["options"]
+    assert all("force" not in opt and "fill_missing_only" not in opt for opt in out["options"]), out["options"]

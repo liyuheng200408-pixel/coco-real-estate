@@ -75,7 +75,7 @@ class TestPropertyDetail:
         data = _detail(db, monkeypatch, property_id=p["id"])
         assert data["success"] is True
         assert data["owner"] is None
-        assert "未录入业主信息" in data["message"]
+        assert "还没录业主信息" in data["message"]
 
     def test_price_history_included(self, db, monkeypatch):
         """调过价的房源：详情里带最近一次调价记录"""
@@ -99,7 +99,7 @@ class TestPropertyDetail:
         """两个参数都没给 → 明确报错（不返回随机房源）"""
         data = _detail(db, monkeypatch)
         assert data["success"] is False
-        assert "property_id" in data["error"] or "title" in data["error"]
+        assert "房源编号" in data["error"] or "标题" in data["error"]
 
     def test_unknown_id(self, db, monkeypatch):
         """编号不存在 → not_found"""

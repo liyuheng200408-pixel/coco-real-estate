@@ -203,8 +203,8 @@ def get_followups(customer_id: int, limit: int = _LIST_LIMIT_DEFAULT, task_id: s
     if not total:
         payload["message"] = "这位客户还没有跟进记录"
     elif payload["truncated"]:
-        payload["message"] = (f"共 {total} 条跟进，本次返回最近 {len(items)} 条（最新在前）。"
-                              f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+        payload["message"] = (f"共 {total} 条跟进，这里列最近 {len(items)} 条（最新在前）。"
+                              f"要我列全就说一声。")
     return json.dumps(payload, ensure_ascii=False)
 
 

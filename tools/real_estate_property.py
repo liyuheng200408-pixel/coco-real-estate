@@ -85,10 +85,8 @@ def add_property(
                 "merge_preview": _merge_preview(dup, incoming),
                 "options": _MERGE_OPTIONS,
                 "error": (f"该房源已存在（id={dup['id']} {dup['title']}，{dup.get('price')}元 {dup.get('area')}平），"
-                          f"本次未重复录入。请让经纪人选："
-                          f"① 合并更新 → update_property(property_id={dup['id']}, 需改字段=新值)；"
-                          f"② 只补空缺 → update_property(property_id={dup['id']}, ..., fill_missing_only=true)；"
-                          f"③ 确实是另一套 → add_property(..., force=true)。"),
+                          f"本次未重复录入。请经纪人选：① 合并更新（用新值覆盖）"
+                          f"② 只补空缺（保留已有值，只补没填的）③ 这其实是另一套（另建一条）。"),
             }, ensure_ascii=False)
     # 合并 images 和 image_paths
     img_list = []
@@ -132,7 +130,7 @@ def add_property(
                               f"如果其实是同一个人，说一声我把它并过去。")
         except Exception as exc:
             owner = None
-            owner_warning = f"业主信息登记失败：{type(exc).__name__}: {exc}（房源已录入，可用 update_property 补录业主）"
+            owner_warning = f"业主信息没登记上：{type(exc).__name__}: {exc}（房源已录入，回头单独跟我说「补业主」即可）"
     # 房源反匹配：自动扫描匹配到的客户（失败同样要如实说，不能悄悄跳过）
     match_warning = None
     try:
@@ -351,8 +349,8 @@ def update_property(
                                      "（不对就直接说新值）")
     if kept_existing:
         response["kept_existing"] = kept_existing
-        response["note_kept"] = ("这些字段库里已有值，本次是「只补空缺」所以没有覆盖；"
-                                 "若确实要用新值覆盖，请再调一次 update_property（不带 fill_missing_only）")
+        response["note_kept"] = ("这些字段库里已有值，本次只补了空缺、没有覆盖；"
+                                 "要用新值覆盖就跟我说一声。")
     if owner:
         response["owner"] = owner
     if owner_note:
@@ -413,9 +411,9 @@ def search_property(
     response = {"success": True, "properties": result, "count": len(result), "total": total,
                 "truncated": bool(total and total > len(result))}
     if response["truncated"]:
-        response["message"] = (f"共匹配 {total} 套房源，本次返回 {len(result)} 套"
-                              f"（{_SEARCH_SORT_LABEL[filters['sort']]}）。要看得更全就缩小条件，"
-                              f"或把 limit 调大（最多 200）")
+        response["message"] = (f"共匹配 {total} 套房源，这里列最近 {len(result)} 套"
+                               f"（{_SEARCH_SORT_LABEL[filters['sort']]}）。要我多列，"
+                               f"或再收窄条件（价格/面积/区域）都行。")
     return json.dumps(response, ensure_ascii=False)
 
 
@@ -583,7 +581,7 @@ def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
             line += f"，看房方式 {prop['viewing_note']}"
         lines.append(line)
     else:
-        lines.append("【业主】该房源未录入业主信息（可用 update_property 传 owner_name/owner_phone/owner_wechat 补录）")
+        lines.append("【业主】该房源还没录业主信息（跟我说「补业主 + 姓名/电话」我来登记）")
     lines.append(f"【图片】{image_count} 张" if image_count else "【图片】未关联图片")
     if history:
         h = history[0]
@@ -613,7 +611,7 @@ def get_property_detail(property_id: int = None, title: str = None, task_id: str
     else:
         title = (title or "").strip()
         if not title:
-            return json.dumps({"success": False, "error": "请提供 property_id（房源编号）或 title（房源标题）"},
+            return json.dumps({"success": False, "error": "请提供房源编号或标题"},
                               ensure_ascii=False)
         found = db.find_property_by_title(title)
         hits = found["exact"] or found["contains"]
@@ -922,10 +920,7 @@ def deduplicate_properties(dry_run: bool = True, keep: str = None, keep_id: int 
     if result.get('dry_run'):
         message = (
             f"发现 {result['duplicate_groups']} 组重复房源，共 {result['duplicate_total']} 条可清理。"
-            f"明细见 groups（每组 keep_id / duplicate_ids / merge_plan=被删项的独有信息），跳过的见 skipped 及原因。"
-            f"请逐组把两条记录（编号/标题/价格/面积/状态/有无业主）列给经纪人，并给三个选项："
-            f"① 合并（先把独有信息并到保留项再删，信息不丢）② 只删不并 ③ 先不动；"
-            f"等他明确确认再调 deduplicate_properties(dry_run=False, merge=true/false)。"
+            f"下面逐组列出明细，你确认后我再动手。"
         )
     else:
         message = f"已清理 {len(result['removable'])} 条重复房源（{result['duplicate_groups']} 组）"
@@ -933,14 +928,14 @@ def deduplicate_properties(dry_run: bool = True, keep: str = None, keep_id: int 
             message += f"，其中 {result['merged_count']} 条先把独有信息（业主/图片等）并到保留项再删除"
         if result.get('skipped'):
             message += f"；跳过 {len(result['skipped'])} 条（原因见 skipped）"
-        message += "。请把每个保留项的完整信息回显给经纪人核对。"
+        message += "。每个保留项的完整信息我下面都列出来了，你核对无误我再执行删除。"
     return json.dumps({"success": True, "result": result, "message": message}, ensure_ascii=False)
 
 
 registry.register(
     name="deduplicate_properties",
     toolset="real_estate",
-    schema={"name": "deduplicate_properties", "description": "房源去重：按小区+房号+面积找出重复房源（标题写法不同也能认出）。默认保留 在售>在租>已售、信息最完整的那条。dry_run=True只统计，dry_run=False执行删除；merge=True时先把被删项的独有信息并到保留项再删。", "parameters": {
+    schema={"name": "deduplicate_properties", "description": "房源去重：按小区+房号+面积找出重复房源（标题写法不同也能认出）。默认保留 在售>在租>已售、信息最完整的那条。dry_run=True只统计，dry_run=False执行删除；merge=True时先把被删项的独有信息并到保留项再删。dry_run 返回后请逐组把两条记录（编号/标题/价格/面积/状态/有无业主）列给经纪人，并给三个选项 ① 合并（把独有信息并到保留项再删，信息不丢）② 只删不并 ③ 先不动；等他明确确认再调 deduplicate_properties(dry_run=false, merge=true/false)。", "parameters": {
         "type": "object",
         "properties": {
             "dry_run": {"type": "boolean", "description": "True只统计不删除（默认），False执行删除"},

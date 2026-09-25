@@ -61,14 +61,14 @@ def _tier_error(raw_tier):
 def _contact_conflict(label, dup, warn):
     """改联系方式前的查重：命中别人已在用的号/微信就给两条可执行路径（与建档同口径）"""
     if warn:
-        return _fail("检测到客户字段可能因密钥不一致无法安全判重，请先检查 COCO_ENC_KEY 再操作。")
+        return _fail("检测到加密密钥不一致，这次没法安全判重（可能把同一个人的两条档案合错）。"
+                     "请让 Ava 检查密钥后再操作。")
     if not dup:
         return None
     return json.dumps({
         "success": False, "duplicate": True, "existing_customer": dup,
         "error": (f"{label}已经是客户「{dup['name']}」（id={dup['id']}）在用。"
-                  f"如果是同一个人，请直接更新他（update_customer(customer_id={dup['id']}, ...)）；"
-                  f"如果是另一个人，请核对号码。"),
+                  f"如果是同一个人，我直接更新他的资料；如果是另一个人，请核对号码后跟我说一声。"),
     }, ensure_ascii=False)
 
 
@@ -177,7 +177,8 @@ def add_customer(
             # 密钥不一致防御：不强行判重，提示先检查 COCO_ENC_KEY
             return json.dumps({
                 "success": False, "duplicate": False, "warning": warn,
-                "error": "检测到客户字段可能因密钥不一致无法安全判重，请先检查 COCO_ENC_KEY 再操作。",
+                "error": "检测到加密密钥不一致，这次没法安全判重（可能把同一个人的两条档案合错）。"
+                         "请让 Ava 检查密钥后再操作。",
             }, ensure_ascii=False)
         if dup:
             # 判断本次录入与已存在客户的关键字段是否完全一致（2026-08-30 加）
@@ -192,8 +193,8 @@ def add_customer(
                     identical = False
                     break
             msg = ("信息完全一致，无需重复登记。" if identical else
-                   f"信息有差异，请先向老板确认：合并更新请用 update_customer(customer_id={dup['id']}, ...)；"
-                   f"确实要新增请用 add_customer(..., force=True)。")
+                   "信息有差异：是同一个人的话，我直接更新他的资料；"
+                   "确实是另一个人，我另建一条档案。请先说一声。")
             return json.dumps({
                 "success": False, "duplicate": True, "identical": identical, "existing_customer": dup,
                 "error": (f"该客户已存在（id={dup['id']} {dup['name']}，"
@@ -431,8 +432,8 @@ def customer_change_history(customer_id: int, limit: int = _CHANGE_LIMIT_DEFAULT
         "truncated": bool(total and total > len(changes)),
     }
     if payload["truncated"]:
-        payload["message"] = (f"共 {total} 条变更，本次返回最近 {len(changes)} 条（最新在前）。"
-                              f"要看更早的请把 limit 调大（最多 {_CHANGE_LIMIT_MAX}）")
+        payload["message"] = (f"共 {total} 条变更，这里列最近 {len(changes)} 条（最新在前）。"
+                              f"要看更早的跟我说一声。")
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -507,8 +508,8 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
     response = {"success": True, "customers": result, "count": len(result), "total": total,
                 "truncated": bool(total > len(result)), "count_scope": scope}
     if response["truncated"]:
-        response["message"] = (f"共 {total} 位{scope}，本次返回 {len(result)} 位（最新录入优先）。"
-                               f"要看得更全就缩小条件，或把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+        response["message"] = (f"共 {total} 位{scope}，这里列最近 {len(result)} 位（最新录入优先）。"
+                               f"要我多列，或再收窄条件（等级/类型/标签）都行。")
     return json.dumps(attach_key_warning(response, masked_fields), ensure_ascii=False)
 
 
@@ -838,8 +839,7 @@ def update_customer_stage(customer_id: int, stage: str, task_id: str = None) -> 
     if db.customer_has_deal(customer_id) and _stage_before(stage_value, old.get('stage')):
         warnings.append("该客户有成交记录，阶段回退请确认")
     if stage_value == 'lost' and old.get('status') != 'closed':
-        warnings.append("该客户状态仍是「在跟」；如不再跟进，请把状态改为 closed"
-                        "（update_customer(status='closed')）")
+        warnings.append("该客户状态仍是「在跟」；如果不再跟进了，说一声我把他改成已关闭")
 
     updated, masked = mask_contacts(updated)
     payload = {
@@ -948,8 +948,8 @@ def referral_stats(limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str
                      f"介绍 {row['referrals']} 人，其中 {row['deals_from_referrals']} 人成交")
     payload["message"] = "\n".join(lines)
     if payload["truncated"]:
-        payload["message"] += (f"\n共 {total} 位介绍人，这里列前 {len(board)} 位"
-                               f"（要看更多请把 limit 调大，最多 {_LIST_LIMIT_MAX}）")
+        payload["message"] += (f"\n共 {total} 位介绍人，这里列前 {len(board)} 位。"
+                               f"要我列全就说一声。")
     return json.dumps(payload, ensure_ascii=False)
 
 
