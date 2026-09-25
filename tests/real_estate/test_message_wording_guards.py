@@ -14,6 +14,8 @@
 import json
 import re
 from datetime import datetime, timedelta
+
+from sqlalchemy import text
 from types import SimpleNamespace
 
 import pytest
@@ -257,6 +259,20 @@ def case_stale_check(w):
             "warnings": (out.get("warnings") or [])}
 
 
+def case_stage_stagnation(w):
+    """阶段滞留的提醒句：25 位 → 名单被截断 + 阶段用中文"""
+    for i in range(25):
+        c = w.db.add_customer(name=f"滞留客户{i}", tier="A", customer_type="rent")
+        w.db.update_customer(c["id"], stage="strong")
+        with w.db.get_session() as s:
+            s.execute(text("UPDATE re_customer_changes SET created_at = :t "
+                           "WHERE customer_id = :i AND field = 'stage'"),
+                      {"t": datetime.now() - timedelta(days=30), "i": c["id"]})
+            s.commit()
+    out = _load(w.fu.stage_stagnation())
+    return {"message": out.get("message") or "", "warnings": (out.get("warnings") or [])}
+
+
 def case_market_brief(w):
     _customers(w.db, 3)
     return _load(w.an.market_brief())
@@ -285,6 +301,7 @@ SCENARIOS = [
     ("daily_report 说明句", case_daily_report),
     ("midday_check 说明句", case_midday_check),
     ("stale_check 说明句", case_stale_check),
+    ("stage_stagnation 说明句", case_stage_stagnation),
 ]
 
 

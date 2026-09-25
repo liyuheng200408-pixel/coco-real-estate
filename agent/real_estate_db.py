@@ -1051,29 +1051,34 @@ class RealEstateDB:
     }
 
     def stage_stagnation_report(self):
-        """阶段滞留清单：strong/viewed/negotiating 停留超时的客户"""
+        """阶段滞留清单：strong/viewed/negotiating 停留超时的客户
+
+        2026-09-25（F174b）：原先对**每一位客户**单独查一条阶段变更（1.2 万客户 = 12003 次 SQL ≈ 7.3 秒），
+        改成**一次聚合**拿回"每位客户、每个阶段最近一次变更时间"再在内存里查表 —— 判定口径一行未改
+        （有变更记录按变更时间、没有的按客户创建时间兜底）；顺带只取判断要用的四列，不再拉整行客户对象。
+        """
         from datetime import datetime
         now = datetime.now()
         alerts = []
         with self.get_session() as s:
+            from sqlalchemy import func
+            latest_change = {(row[0], row[1]): row[2] for row in
+                             s.query(CustomerChange.customer_id, CustomerChange.new_value,
+                                     func.max(CustomerChange.created_at))
+                             .filter(CustomerChange.field == 'stage')
+                             .group_by(CustomerChange.customer_id, CustomerChange.new_value).all()}
             for stage, (max_days, hint) in self.STAGE_TIMEOUT_RULES.items():
-                customers = s.query(Customer).filter(
-                    Customer.status == 'active', Customer.stage == stage).all()
-                for c in customers:
-                    # 找该客户 stage 变为当前阶段的变更时间
-                    change = s.query(CustomerChange).filter(
-                        CustomerChange.customer_id == c.id,
-                        CustomerChange.field == 'stage',
-                        CustomerChange.new_value == stage,
-                    ).order_by(CustomerChange.created_at.desc()).first()
-                    # 没有变更记录（初始就是该阶段）用客户创建时间兜底
-                    since = change.created_at if change else c.created_at
+                customers = (s.query(Customer.id, Customer.name, Customer.tier, Customer.created_at)
+                             .filter(Customer.status == 'active', Customer.stage == stage).all())
+                for cid, name, tier, created_at in customers:
+                    # 该客户 stage 变为当前阶段的最近一次变更时间；没有变更记录（初始就是该阶段）用创建时间兜底
+                    since = latest_change.get((cid, stage)) or created_at
                     if not since:
                         continue
                     days = (now - since).days
                     if days > max_days:
                         alerts.append({
-                            'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                            'customer_id': cid, 'name': name, 'tier': tier,
                             'stage': stage, 'days_in_stage': days,
                             'hint': hint,
                         })

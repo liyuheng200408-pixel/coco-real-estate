@@ -6,7 +6,8 @@ import re
 from datetime import datetime
 from tools.registry import registry
 from agent.real_estate_display import attach_key_warning, mask_contacts
-from agent.real_estate_input import clamp_limit, clean_text, clip_text, norm_date, norm_id
+from agent.real_estate_input import (STAGE_LABELS, clamp_limit, clean_text, clip_text,
+                                       norm_date, norm_id)
 
 # 列表分页口径（与 list_customers/list_owners 同一套：默认 20、上限 200、≤0 与非数字按默认）
 _LIST_LIMIT_DEFAULT = 20
@@ -17,8 +18,9 @@ AGENT_ID_MAX = 100
 
 # 逾期清单：默认在对话里列 50 条；limit 不设上限（老板 2026-09-25：要看全部走文档，别塞对话）
 OVERDUE_LIMIT_DEFAULT = 50
-# 每日早报里的流失名单最多列几位（老板 2026-09-25 定 20：早报要能一眼看完，总数另给 stale_total）
-DAILY_STALE_LIMIT = 20
+# 本模块"名单类"返回的默认展示条数（流失名单、阶段滞留名单；老板 2026-09-25 定 20：
+# 这类清单要能一眼看完，总数另给 total / stale_total）—— 改它等于同时改所有名单的上限
+LIST_SHOW_LIMIT = 20
 # 生成的清单文档只保留最近 N 份（每天早报都可能生成，不清理会越堆越多）
 OVERDUE_DOC_KEEP = 20
 
@@ -316,7 +318,7 @@ def stale_check(task_id: str = None) -> str:
     """流失预警检查：自动降级长期无互动客户并返回预警名单
 
     S级>5天无互动→降A，A级>10天→降B，B级>30天→降C（**同一天最多降一级**）；降级写入变更历史，
-    名单里带降级依据（该等级的阈值）。预警名单默认只列最久的 `DAILY_STALE_LIMIT` 位，
+    名单里带降级依据（该等级的阈值）。预警名单默认只列最久的 `LIST_SHOW_LIMIT` 位，
     总数在 `total`（老字段 `still_stale_count` 保留 = 总数），被截断时 `truncated` 为真。
     空态分三种说法：没有客户 / 没有需要降级的 / 降了但没有仍超期的。
     """
@@ -326,7 +328,7 @@ def stale_check(task_id: str = None) -> str:
     downgrade = db.auto_downgrade_stale_customers(stale=stale)
     downgraded = len(downgrade.get('downgrades') or [])
     total = len(stale)
-    shown = stale[:DAILY_STALE_LIMIT]
+    shown = stale[:LIST_SHOW_LIMIT]
     if not db.count_customers():
         message = "库里还没有客户，先登记客户再看流失情况"
     elif downgraded:
@@ -421,7 +423,7 @@ def daily_report(task_id: str = None) -> str:
     """生成每日早报（今天要跟进的客户 / 今天到期与已逾期的跟进 / 客户与房源概览 / 流失预警）
 
     会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），降级名单在 `report.downgrades` 里如实说明
-    （含降级前后的等级、多久没互动、该等级的阈值）。流失名单只列最久的 `DAILY_STALE_LIMIT` 位，
+    （含降级前后的等级、多久没互动、该等级的阈值）。流失名单只列最久的 `LIST_SHOW_LIMIT` 位，
     总数在 `report.stale_total`；今天要跟进的只列前 `TODAY_TASK_LIMIT` 位，总数在 `report.today_followups`。
     """
     db = _get_db()
@@ -440,9 +442,9 @@ def daily_report(task_id: str = None) -> str:
             notes.append(f"今天要跟进 {report['today_followups']} 位，这里列前 {shown_tasks} 位")
     if stale:
         report['stale_total'] = len(stale)
-        report['stale_customers'] = stale[:DAILY_STALE_LIMIT]
-        if len(stale) > DAILY_STALE_LIMIT:
-            notes.append(f"共 {len(stale)} 位客户长期无互动，这里列最久的 {DAILY_STALE_LIMIT} 位"
+        report['stale_customers'] = stale[:LIST_SHOW_LIMIT]
+        if len(stale) > LIST_SHOW_LIMIT:
+            notes.append(f"共 {len(stale)} 位客户长期无互动，这里列最久的 {LIST_SHOW_LIMIT} 位"
                          f"（要我列全就说一声）")
     payload = {"success": True, "report": report}
     if notes:
@@ -455,7 +457,7 @@ def midday_check(task_id: str = None) -> str:
 
     逾期明细带客户名与等级（客户已被删的给「已删除客户（id=N）」标注）；只列最急的 5 条，总数在
     `check.overdue_count`。会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），
-    降级名单在 `check.downgrades` 里如实说明；流失名单只列最久的 `DAILY_STALE_LIMIT` 位，
+    降级名单在 `check.downgrades` 里如实说明；流失名单只列最久的 `LIST_SHOW_LIMIT` 位，
     总数在 `check.stale_total`。
     """
     db = _get_db()
@@ -482,9 +484,9 @@ def midday_check(task_id: str = None) -> str:
         check['downgrades'] = downgrade['downgrades']
     if stale:
         check['stale_total'] = len(stale)
-        check['stale_customers'] = stale[:DAILY_STALE_LIMIT]
-        if len(stale) > DAILY_STALE_LIMIT:
-            notes.append(f"共 {len(stale)} 位客户长期无互动，这里列最久的 {DAILY_STALE_LIMIT} 位"
+        check['stale_customers'] = stale[:LIST_SHOW_LIMIT]
+        if len(stale) > LIST_SHOW_LIMIT:
+            notes.append(f"共 {len(stale)} 位客户长期无互动，这里列最久的 {LIST_SHOW_LIMIT} 位"
                          f"（要我列全就说一声）")
     payload = {"success": True, "check": check}
     if notes:
@@ -625,22 +627,43 @@ registry.register(
 
 
 def stage_stagnation(task_id: str = None) -> str:
-    """阶段滞留清单：强意向/已看房/谈判阶段停留超时的客户"""
+    """阶段滞留清单：强意向超7天 / 已看房超14天 / 谈判超7天无推进的客户（按停留天数，最久在前）
+
+    阶段一律给中文名（条目里 `stage` 保留原值、`stage_label` 是中文）；
+    默认只列最久的 `LIST_SHOW_LIMIT` 位，总数在 `total`；空态区分"没有客户"与"没有滞留"。
+    """
     db = _get_db()
     alerts = db.stage_stagnation_report()
-    if not alerts:
-        return json.dumps({"success": True, "message": "无阶段滞留客户，节奏健康", "alerts": []}, ensure_ascii=False)
-    lines = [f"⏰ 阶段滞留提醒：{len(alerts)} 位客户停留超时"]
-    for a in alerts:
-        lines.append(f"\n· {a['name']}（{a['tier']}级）在「{a['stage']}」已停留 {a['days_in_stage']} 天")
-        lines.append(f"  建议: {a['hint']}")
-    return json.dumps({"success": True, "alerts": alerts, "message": "\n".join(lines)}, ensure_ascii=False)
+    total = len(alerts)
+    shown = alerts[:LIST_SHOW_LIMIT]
+    if not db.count_customers():
+        message = "库里还没有客户，先登记客户再看阶段滞留"
+    elif not total:
+        message = "无阶段滞留客户，节奏健康"
+    else:
+        lines = [f"阶段滞留提醒：{total} 位客户停留超时"]
+        for a in shown:
+            label = STAGE_LABELS.get(a['stage'], a['stage'])
+            lines.append(f"\n· {a['name']}（{a['tier']}级）在「{label}」已停留 {a['days_in_stage']} 天")
+            lines.append(f"  建议: {a['hint']}")
+        message = "\n".join(lines)
+    items = []
+    for a in shown:
+        row = dict(a)
+        row['stage_label'] = STAGE_LABELS.get(a['stage'], a['stage'])
+        items.append(row)
+    payload = {"success": True, "alerts": items, "count": len(items), "total": total,
+               "truncated": total > len(items), "message": message}
+    if payload["truncated"]:
+        payload["message"] += (f"\n共 {total} 位客户阶段停留超时，这里列最久的 {len(items)} 位"
+                              f"（要我列全就说一声）")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 registry.register(
     name="stage_stagnation",
     toolset="real_estate",
-    schema={"name": "stage_stagnation", "description": "阶段滞留清单：强意向超7天/已看房超14天/谈判超7天无推进的客户", "parameters": {
+    schema={"name": "stage_stagnation", "description": "阶段滞留清单：强意向超7天/已看房超14天/谈判超7天无推进的客户（按停留天数，最久在前）。返回 total=滞留客户总数、count=本次返回条数、truncated，名单默认只列最久的 20 位。", "parameters": {
         "type": "object",
         "properties": {},
     }},
