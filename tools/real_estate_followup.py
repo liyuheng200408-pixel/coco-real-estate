@@ -2,14 +2,18 @@
 Coco 房产工具 - 跟进管理
 """
 import json
+import re
 from datetime import datetime
 from tools.registry import registry
 from agent.real_estate_display import attach_key_warning, mask_contacts
-from agent.real_estate_input import clamp_limit, norm_id
+from agent.real_estate_input import clamp_limit, clean_text, clip_text, norm_date, norm_id
 
 # 列表分页口径（与 list_customers/list_owners 同一套：默认 20、上限 200、≤0 与非数字按默认）
 _LIST_LIMIT_DEFAULT = 20
 _LIST_LIMIT_MAX = 200
+
+# re_followups 的列宽：PostgreSQL 上 varchar 超长会让整单失败（sqlite 只是照存）
+AGENT_ID_MAX = 100
 
 
 def _get_db():
@@ -17,12 +21,108 @@ def _get_db():
     return get_real_estate_db()
 
 
+# 跟进类型：内部存英文枚举（schema 里那 5 档），对外一律说中文
+FOLLOWUP_TYPE_LABELS = {
+    'call': '电话', 'visit': '带看', 'deal': '成交', 'note': '备注', 'reminder': '提醒',
+}
+_TYPE_ALIASES = {
+    '电话': 'call', '打电话': 'call', '去电': 'call', '回访': 'call', 'phone': 'call',
+    '带看': 'visit', '看房': 'visit', '到访': 'visit',
+    '成交': 'deal', '签约': 'deal',
+    '备注': 'note', '记录': 'note', '其他': 'note',
+    '提醒': 'reminder', '待办': 'reminder',
+}
+
+
+def norm_followup_type(value):
+    """跟进类型归一 → (枚举值, 提示或 None)。认英文枚举与常见中文说法，认不出不猜"""
+    if value is None or str(value).strip() == '':
+        return 'note', None
+    text = str(value).strip().lower()
+    if text in FOLLOWUP_TYPE_LABELS:
+        return text, None
+    if text in _TYPE_ALIASES:
+        return _TYPE_ALIASES[text], None
+    options = "、".join(f"{k}（{v}）" for k, v in FOLLOWUP_TYPE_LABELS.items())
+    return None, f"跟进类型没能识别：收到的是「{value}」。可用：{options}"
+
+
+def norm_followup_time(value):
+    """跟进时间归一 → ('HH:MM' 或 None, 提示或 None)。认 9:00 / 09:00 / 9点30 / 9点 / 0930 / 09:30:00"""
+    if value is None:
+        return None, None
+    text = str(value).strip().replace('：', ':').replace('点', ':').replace('分', '').rstrip(':')
+    if not text:
+        return None, None
+    if text.isdigit() and len(text) == 4:
+        text = text[:2] + ':' + text[2:]
+    if text.isdigit():
+        text = text + ':00'
+    matched = re.match(r'^(\d{1,2})(?::(\d{1,2}))?', text)
+    if not matched or (':' in text and not matched.group(2)):
+        return None, _time_problem(value)
+    hour, minute = int(matched.group(1)), int(matched.group(2) or 0)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None, _time_problem(value)
+    return f"{hour:02d}:{minute:02d}", None
+
+
+def _time_problem(value):
+    return f"下次跟进时间没能识别：收到的是「{value}」。请用 09:30 这类写法"
+
+
+def _split_time_part(value):
+    """从日期参数里拆出可能夹带的时刻 → (日期部分, 时刻部分或 None)
+
+    模型常把整个 datetime 塞进 next_date（2026-09-28T14:30:00 / 2026-09-28 14:30），
+    原先走 fromisoformat 能认，归一后必须照样认，不然后退成"日期格式错误"。
+    """
+    if value is None:
+        return None, None
+    if isinstance(value, datetime):
+        has_time = bool(value.hour or value.minute)
+        return value.date().isoformat(), (value.strftime('%H:%M:%S') if has_time else None)
+    text = str(value).strip()
+    for sep in ('T', 't', ' '):
+        head, found, tail = text.partition(sep)
+        if found and tail.strip():
+            return head, tail
+    return text, None
+
+
+def norm_followup_when(date_value, time_value):
+    """下次跟进时间归一 → (datetime 或 None, 'HH:MM' 或 None, 提示或 None)
+
+    日期认 2026-12-31 / 2026/12/31 / 2026.12.31 / 2026年12月31日 / 12月31日，
+    也认日期里夹带时刻的写法；显式传的 time 优先于日期里带的时刻。
+    给了时刻就并进 datetime —— 与「设置提醒」「带看后自动提醒」同一口径。
+    """
+    date_part, embedded = _split_time_part(date_value)
+    day, problem = norm_date(date_part, '下次跟进日期')
+    if problem:
+        return None, None, problem
+    time_text, problem = norm_followup_time(
+        time_value if str(time_value or '').strip() else embedded)
+    if problem:
+        return None, None, problem
+    if day and time_text:
+        hour, minute = (int(part) for part in time_text.split(':'))
+        day = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return day, time_text, None
+
+
 def add_followup(
     customer_id: int, content: str, property_id: int = None,
     type: str = 'note', next_date: str = None, next_time: str = None,
     agent_id: str = None, task_id: str = None,
 ) -> str:
-    """添加客户跟进记录"""
+    """添加客户跟进记录
+
+    写入前先认人认房：客户或房源不存在就如实说明，不写孤儿记录（孤儿跟进会被
+    逾期列表/午间检查当成真客户报出来，经纪人只看到一个查不到的编号）。
+    下次跟进日期支持 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日 等写法；
+    给了时间就把时刻并进 next_date（与设置提醒、带看后自动提醒同一口径）。
+    """
     customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
@@ -30,19 +130,42 @@ def add_followup(
         property_id, problem = norm_id(property_id, '房源编号')
         if problem:
             return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    content = clean_text(content)
+    if not content:
+        return json.dumps({"success": False, "error": "跟进内容不能为空，请写一句这次沟通的情况"}, ensure_ascii=False)
+    type_value, problem = norm_followup_type(type)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    next_date_dt, next_time_text, problem = norm_followup_when(next_date, next_time)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    warnings = []
+    agent_id, clipped = clip_text(clean_text(agent_id), AGENT_ID_MAX)
+    if clipped:
+        warnings.append("经纪人编号" + clipped + "。")
+
     db = _get_db()
-    next_date_dt = None
-    if next_date:
-        try:
-            next_date_dt = datetime.fromisoformat(next_date)
-        except ValueError:
-            return json.dumps({"success": False, "error": "日期格式错误，请使用 ISO 格式"}, ensure_ascii=False)
+    customer = db.get_customer(customer_id)
+    if not customer:
+        return json.dumps({"success": False, "error": "客户不存在，请先在客户列表里核对编号"}, ensure_ascii=False)
+    if property_id is not None and not db.get_property(property_id):
+        return json.dumps({"success": False, "error": "房源不存在，请核对房源编号"}, ensure_ascii=False)
     result = db.add_followup(
-        customer_id=customer_id, property_id=property_id, type=type,
-        content=content, next_date=next_date_dt, next_time=next_time,
+        customer_id=customer_id, property_id=property_id, type=type_value,
+        content=content, next_date=next_date_dt, next_time=next_time_text,
         agent_id=agent_id,
     )
-    return json.dumps({"success": True, "followup": result}, ensure_ascii=False)
+    label = FOLLOWUP_TYPE_LABELS.get(type_value, '跟进')
+    tail = ""
+    if next_date_dt:
+        when = next_date_dt.strftime('%Y-%m-%d %H:%M') if next_time_text else next_date_dt.strftime('%Y-%m-%d')
+        tail = f"，下次跟进 {when}"
+    payload = {"success": True,
+               "message": f"已记录「{customer.get('name')}」的{label}跟进{tail}",
+               "followup": result}
+    if warnings:
+        payload["warnings"] = warnings
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def get_followups(customer_id: int, limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
