@@ -352,6 +352,16 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _readable_time(value):
+    """ISO/库值 → `2026-09-26 01:40`（认不出就原样返回，绝不返回 None 字面量）"""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace(' ', 'T')[:19]).strftime('%Y-%m-%d %H:%M')
+    except ValueError:
+        return str(value)
+
+
 def _viewing_display(row):
     """带看记录 → 给经纪人看的形态：状态/意向中文、时间可读、孤儿客户与房源给可读标注
 
@@ -365,14 +375,7 @@ def _viewing_display(row):
     result = item.get('result')
     item['status_label'] = _VIEWING_STATUS_LABELS.get(status, status) if status else None
     item['result_label'] = _VIEWING_RESULT_LABELS.get(result, result) if result else None
-    when = item.get('viewing_time')
-    item['viewing_time_label'] = None
-    if when:
-        try:
-            item['viewing_time_label'] = datetime.fromisoformat(
-                str(when).replace(' ', 'T')[:19]).strftime('%Y-%m-%d %H:%M')
-        except ValueError:
-            item['viewing_time_label'] = str(when)
+    item['viewing_time_label'] = _readable_time(item.get('viewing_time'))
     if not item.get('customer_name'):
         item['customer_name'] = f"已删除客户（id={item.get('customer_id')}）"
     if not item.get('property_title'):
@@ -386,6 +389,8 @@ def get_viewing(viewing_id: int, task_id: str = None) -> str:
     用于记完结果后核对，或经纪人问"这套房谁看过、看得怎么样"；按带看编号查（编号来自预约回执或带看列表）。
     状态与意向同时给原值与中文（`status_label`/`result_label`），时间给可读的 `viewing_time_label`；
     客户或房源已被删掉的存量记录给可读标注，不回 null。
+    带看完成后自动安排过回访提醒的，还会给出 `reminder`（提醒本身）与 `reminder_label`
+    （如「已安排回访提醒（2026-09-26 01:40）」）—— 那句话有据可查，不是空承诺。
     """
     viewing_id, problem = norm_id(viewing_id, '带看编号', '，可在带看记录列表里查')
     if problem:
@@ -393,8 +398,12 @@ def get_viewing(viewing_id: int, task_id: str = None) -> str:
     db = _get_db()
     result = db.get_viewing(viewing_id)
     if result:
-        return json.dumps({"success": True, "viewing": _viewing_display(result)},
-                          ensure_ascii=False)
+        item = _viewing_display(result)
+        reminder = db.find_followup_by_viewing(viewing_id, followup_type='reminder')
+        if reminder:
+            item['reminder'] = reminder
+            item['reminder_label'] = f"已安排回访提醒（{_readable_time(reminder.get('next_date'))}）"
+        return json.dumps({"success": True, "viewing": item}, ensure_ascii=False)
     return json.dumps({"success": False, "error": "带看记录不存在，请在带看记录列表里核对编号"},
                       ensure_ascii=False)
 
@@ -475,7 +484,8 @@ registry.register(
     toolset="real_estate",
     schema={"name": "get_viewing", "description":
             "查看一次带看的详情：客户、房源、带看时间（还给了给人看的 viewing_time_label）、"
-            "带看状态与客户意向（原值 + 中文 status_label/result_label）、客户反馈、记录时间。"
+            "带看状态与客户意向（原值 + 中文 status_label/result_label）、客户反馈、记录时间；"
+            "带看完成后安排过回访提醒的会给出 reminder_label（如「已安排回访提醒（2026-09-26 01:40）」）。"
             "用于记完结果后核对，或经纪人问「这套房谁看过、看得怎么样」；按带看编号查（编号来自预约回执或带看列表）。",
             "parameters": {
         "type": "object",

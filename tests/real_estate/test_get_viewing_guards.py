@@ -181,6 +181,52 @@ class TestReadBack:
         assert v["feedback"] == "临街吵", v
 
 
+# ==================== ⑦ 回访提醒可见（有据可查） ====================
+class TestReminderVisible:
+    def test_done_viewing_shows_reminder(self, wired, cid, pid):
+        """带看完成后自动安排了回访提醒 → 详情里给提醒本身与一句可读说明"""
+        vid = _schedule(cid, pid)
+        _record(viewing_id=vid, status="已完成", result="感兴趣")
+        v = _call(viewing_id=vid)["viewing"]
+        assert v.get("reminder"), v
+        label = v.get("reminder_label") or ""
+        assert label.startswith("已安排回访提醒（") and label.endswith("）"), label
+        assert "None" not in label, label
+        assert len(v["reminder"]["next_date"]) >= 16, v["reminder"]
+
+    def test_reminder_time_matches_row(self, wired, cid, pid):
+        vid = _schedule(cid, pid)
+        _record(viewing_id=vid, status="已完成")
+        v = _call(viewing_id=vid)["viewing"]
+        when = v["reminder"]["next_date"].replace(" ", "T")[:16]
+        assert v["reminder_label"] == f"已安排回访提醒（{when.replace('T', ' ')}）", v["reminder_label"]
+
+    def test_no_reminder_for_scheduled(self, wired, cid, pid):
+        """还没完成的带看不该说有回访提醒"""
+        vid = _schedule(cid, pid)
+        v = _call(viewing_id=vid)["viewing"]
+        assert "reminder" not in v and "reminder_label" not in v, v
+
+    def test_no_reminder_after_cancel(self, wired, cid, pid):
+        vid = _schedule(cid, pid)
+        _record(viewing_id=vid, status="已取消")
+        v = _call(viewing_id=vid)["viewing"]
+        assert "reminder" not in v and "reminder_label" not in v, v
+
+    def test_reminder_is_the_same_row_as_followups(self, wired, cid, pid):
+        """详情里的提醒 == 客户跟进历史里那条提醒（同一行，不是另编一句）"""
+        import tools.real_estate_followup as f
+
+        vid = _schedule(cid, pid)
+        _record(viewing_id=vid, status="已完成")
+        v = _call(viewing_id=vid)["viewing"]
+        with wired.get_session() as s:
+            row = s.execute(text("SELECT id, type, next_date FROM re_followups"
+                                 " WHERE source_viewing_id = :v AND type = 'reminder'"),
+                            {"v": vid}).fetchone()
+        assert row and v["reminder"]["id"] == row[0], (row, v["reminder"])
+
+
 # ==================== ⑥ 描述给模型的能力说明 ====================
 class TestSchema:
     def test_description_states_ability(self):
