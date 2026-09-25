@@ -313,20 +313,42 @@ def get_overdue(limit: int = OVERDUE_LIMIT_DEFAULT, document: bool = False,
 
 
 def stale_check(task_id: str = None) -> str:
-    """流失预警检查：自动降级长期无互动客户并返回预警列表
+    """流失预警检查：自动降级长期无互动客户并返回预警名单
 
-    S级>5天无互动→降A，A级>10天→降B，B级>30天→降C；降级写入变更历史。
+    S级>5天无互动→降A，A级>10天→降B，B级>30天→降C（**同一天最多降一级**）；降级写入变更历史，
+    名单里带降级依据（该等级的阈值）。预警名单默认只列最久的 `DAILY_STALE_LIMIT` 位，
+    总数在 `total`（老字段 `still_stale_count` 保留 = 总数），被截断时 `truncated` 为真。
+    空态分三种说法：没有客户 / 没有需要降级的 / 降了但没有仍超期的。
     """
     db = _get_db()
-    downgrade = db.auto_downgrade_stale_customers()
+    # 先算一份流失快照，降级复用同一份（原先各扫一遍全库）
     stale = db.get_stale_customers()
-    return json.dumps({
+    downgrade = db.auto_downgrade_stale_customers(stale=stale)
+    downgraded = len(downgrade.get('downgrades') or [])
+    total = len(stale)
+    shown = stale[:DAILY_STALE_LIMIT]
+    if not db.count_customers():
+        message = "库里还没有客户，先登记客户再看流失情况"
+    elif downgraded:
+        message = f"本次自动降级 {downgraded} 位客户"
+        if total:
+            message += f"；还有 {total} 位仍长期无互动"
+    else:
+        message = f"本次没有需要降级的客户；仍有 {total} 位长期无互动" if total else "没有客户需要降级"
+    payload = {
         "success": True,
-        "downgrades": downgrade['downgrades'],
-        "still_stale": stale,
-        "still_stale_count": len(stale),
-        "message": f"本次自动降级 {len(downgrade['downgrades'])} 位客户" if downgrade['downgrades'] else "无客户需要降级",
-    }, ensure_ascii=False)
+        "downgrades": downgrade.get('downgrades') or [],
+        "still_stale": shown,
+        "count": len(shown),
+        "total": total,
+        "truncated": total > len(shown),
+        "still_stale_count": total,       # 老字段保留：口径 = 流失客户总数
+        "message": message,
+    }
+    if payload["truncated"]:
+        payload["message"] += (f"。共 {total} 位客户长期无互动，这里列最久的 {len(shown)} 位"
+                               f"（要我列全就说一声）")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def schedule_reminder(customer_id: int, date: str, time: str = None, content: str = None,
@@ -510,7 +532,7 @@ TOOLS = [
     {"name": "midday_check", "description": "午间检查（今天的到期跟进与逾期情况 / 客户与房源概览 / 流失预警）。会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），降级名单在 check.downgrades 里如实说明；check.stale_total 是流失客户总数，check.stale_customers 只列最久的 20 位。", "parameters": {
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: midday_check()},
-    {"name": "stale_check", "description": "流失预警检查：自动降级长期无互动客户（S级>5天→A，A级>10天→B，B级>30天→C）并返回预警列表", "parameters": {
+    {"name": "stale_check", "description": "流失预警检查：自动降级长期无互动客户（S级>5天→A，A级>10天→B，B级>30天→C，同一天最多降一级）并返回预警名单。降级名单在 downgrades 里（含降级前后的等级、多久没互动、该等级的阈值）；报告 total=流失客户总数、count=本次返回条数、truncated，名单默认只列最久的 20 位。", "parameters": {
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: stale_check()},
 ]
@@ -554,7 +576,7 @@ registry.register(
 registry.register(
     name="stale_check",
     toolset="real_estate",
-    schema={"name": "stale_check", "description": "流失预警检查：自动降级长期无互动客户（S级>5天→A，A级>10天→B，B级>30天→C）并返回预警列表", "parameters": TOOLS[6]["parameters"]},
+    schema={"name": "stale_check", "description": "流失预警检查：自动降级长期无互动客户（S级>5天→A，A级>10天→B，B级>30天→C，同一天最多降一级）并返回预警名单。降级名单在 downgrades 里（含降级前后的等级、多久没互动、该等级的阈值）；报告 total=流失客户总数、count=本次返回条数、truncated，名单默认只列最久的 20 位。", "parameters": TOOLS[6]["parameters"]},
     handler=TOOLS[6]["handler"],
 )
 

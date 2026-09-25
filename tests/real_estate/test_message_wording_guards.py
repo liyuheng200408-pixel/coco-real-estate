@@ -247,6 +247,16 @@ def case_midday_check(w):
             "warnings": (out.get("warnings") or [])}
 
 
+def case_stale_check(w):
+    """流失检查的说明句：降级 + 仍超期 + 名单被截断"""
+    for i in range(25):
+        c = w.db.add_customer(name=f"久未联系{i}", tier="C", customer_type="rent",
+                              created_at=datetime.now() - timedelta(days=120))
+    out = _load(w.fu.stale_check())
+    return {"message": out.get("message") or "",
+            "warnings": (out.get("warnings") or [])}
+
+
 def case_market_brief(w):
     _customers(w.db, 3)
     return _load(w.an.market_brief())
@@ -274,6 +284,7 @@ SCENARIOS = [
     ("schedule_reminder 话术", case_schedule_reminder),
     ("daily_report 说明句", case_daily_report),
     ("midday_check 说明句", case_midday_check),
+    ("stale_check 说明句", case_stale_check),
 ]
 
 
