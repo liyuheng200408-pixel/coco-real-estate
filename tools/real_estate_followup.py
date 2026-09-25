@@ -17,6 +17,8 @@ AGENT_ID_MAX = 100
 
 # 逾期清单：默认在对话里列 50 条；limit 不设上限（老板 2026-09-25：要看全部走文档，别塞对话）
 OVERDUE_LIMIT_DEFAULT = 50
+# 生成的清单文档只保留最近 N 份（每天早报都可能生成，不清理会越堆越多）
+OVERDUE_DOC_KEEP = 20
 
 
 def _get_db():
@@ -206,10 +208,54 @@ def get_followups(customer_id: int, limit: int = _LIST_LIMIT_DEFAULT, task_id: s
     return json.dumps(payload, ensure_ascii=False)
 
 
-def get_overdue(limit: int = OVERDUE_LIMIT_DEFAULT, task_id: str = None) -> str:
-    """查看逾期跟进清单（按"每位客户最新一条跟进"的下次跟进时间是否已过判定）
+def _write_overdue_document(rows, labels, total):
+    """把逾期清单写成一份完整 Markdown 文档 → 返回文件绝对路径（写不出返回 None）
 
-    逾期最久在前；默认在对话里列 50 条，`limit` 不设上限（要看全部走文档，别把大 limit 塞进对话）。
+    条数多时（>50）由 Coco 用 `MEDIA:路径` 把这份文档发给经纪人 —— 工具本身不发送，
+    只为默认保留最近 20 份，避免每天早报都在磁盘上堆文件。
+    """
+    try:
+        from hermes_constants import get_hermes_home
+        doc_dir = get_hermes_home() / "doc_cache"
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now()
+        path = doc_dir / f"逾期跟进_{stamp.strftime('%Y%m%d_%H%M%S')}.md"
+        lines = [f"# 逾期跟进清单（共 {total} 条）", "",
+                 f"生成时间：{stamp.strftime('%Y-%m-%d %H:%M')}｜按逾期最久排序", ""]
+        for row in rows:
+            label = labels.get(row.get('customer_id')) or {}
+            name = label.get('name') or f"已删除客户（id={row.get('customer_id')}）"
+            type_label = FOLLOWUP_TYPE_LABELS.get(row.get('type'), row.get('type'))
+            content = (row.get('content') or '').replace('\n', ' ')
+            if len(content) > 200:
+                content = content[:200] + '…'
+            when = ''
+            if row.get('next_date'):
+                try:
+                    days = (stamp - datetime.fromisoformat(row['next_date'])).days
+                    when = f"逾期 {days} 天" if days > 0 else "今天到期"
+                except ValueError:
+                    when = ''
+            tail = f"｜{content}" if content else ""
+            lines.append(f"- **{name}**（{label.get('tier') or '-'}级）{when}｜{type_label}{tail}")
+        path.write_text("\n".join(lines) + "\n", encoding='utf-8')
+        for old_doc in sorted(doc_dir.glob('逾期跟进_*.md'))[:-OVERDUE_DOC_KEEP]:
+            try:
+                old_doc.unlink()
+            except OSError:
+                pass
+        return str(path)
+    except Exception:
+        return None
+
+
+def get_overdue(limit: int = OVERDUE_LIMIT_DEFAULT, document: bool = False,
+                task_id: str = None) -> str:
+    """查看逾期跟进清单（按「每位客户最新一条跟进」的下次跟进时间是否已过判定）
+
+    逾期最久在前；默认在对话里列 50 条（`limit` 不设上限，但对话里不宜塞太多）。
+    条数多于 50 时：`document=true` 生成含**全部条目**的 Markdown 清单 → 返回 document_path，
+    由 Coco 用 `MEDIA:路径` 发给经纪人（工具本身不发送）。
     返回 total=逾期总条数、count=本次返回条数、truncated。每条带客户名与中文类型；
     客户已被删（存量孤儿）给"已删除客户（id=N）"标注而不是裸编号。
     本工具还会顺手把长期无互动的客户**自动降一级**（S→A→B→C，同一天最多降一次），
@@ -222,7 +268,8 @@ def get_overdue(limit: int = OVERDUE_LIMIT_DEFAULT, task_id: str = None) -> str:
     # 流失预警：先取一次快照，降级复用同一份（原先这里全库扫描两遍）
     stale = db.get_stale_customers()
     downgrade = db.auto_downgrade_stale_customers(stale=stale)
-    labels = db.get_customer_labels([r.get('customer_id') for r in rows[:limit]])
+    wanted = rows if document else rows[:limit]
+    labels = db.get_customer_labels([r.get('customer_id') for r in wanted])
     page = []
     for row in rows[:limit]:
         item = dict(row)
@@ -244,6 +291,16 @@ def get_overdue(limit: int = OVERDUE_LIMIT_DEFAULT, task_id: str = None) -> str:
         message = "库里还没有客户，先登记客户再设跟进"
     response = {"success": True, "overdue": page, "count": len(page), "total": total,
                 "truncated": bool(total > len(page)), "message": message}
+    if document and total:
+        doc_path = _write_overdue_document(rows, labels, total)
+        if doc_path:
+            response["document_path"] = doc_path
+            response["message"] = f"完整清单已生成（共 {total} 条），我把它发给你"
+        else:
+            response["message"] = message + "（清单文档没生成成功，先按上面这些跟进吧）"
+    elif response["truncated"]:
+        response["message"] = (f"共 {total} 条逾期跟进，这里先列逾期最久的 {len(page)} 条。"
+                              f"要看全部跟我说一声，我会生成一份 Markdown 清单（含全部条目）发给你")
     if downgrade.get('downgrades'):
         response['downgrades'] = downgrade['downgrades']
         response['message'] = message + f"；{len(downgrade['downgrades'])} 位客户长期无互动已自动降级"
@@ -334,9 +391,10 @@ TOOLS = [
             "limit": {"type": "integer", "description": "本次返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
         }, "required": ["customer_id"],
     }, "handler": lambda args, **kw: get_followups(**args)},
-    {"name": "get_overdue", "description": "获取逾期跟进列表", "parameters": {
+    {"name": "get_overdue", "description": "查看逾期跟进清单（按「每位客户最新一条跟进」的下次跟进时间是否已过判定；逾期最久在前；默认在对话里列 50 条，limit 不设上限）。返回 total=逾期总条数、count=本次返回条数、truncated。条数多于 50 时用 document=true 生成完整 Markdown 清单（返回 document_path，用 MEDIA:路径 发给经纪人）。本工具会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天只降一级），降级名单在 downgrades 里如实说明。", "parameters": {
         "type": "object", "properties": {
             "limit": {"type": "integer", "description": "本次返回条数（默认 50，不设上限；传 0/负数/非数字按默认 50）"},
+            "document": {"type": "boolean", "description": "要不要生成完整清单文档（含全部条目，不受条数限制）；返回 document_path，用 MEDIA:路径 发给经纪人。默认 false"},
         },
     }, "handler": lambda args, **kw: get_overdue(**args)},
     {"name": "schedule_reminder", "description": "设置客户跟进提醒", "parameters": {
@@ -371,7 +429,7 @@ registry.register(
 registry.register(
     name="get_overdue",
     toolset="real_estate",
-    schema={"name": "get_overdue", "description": "获取逾期跟进列表", "parameters": TOOLS[2]["parameters"]},
+    schema={"name": "get_overdue", "description": "查看逾期跟进清单（按「每位客户最新一条跟进」的下次跟进时间是否已过判定；逾期最久在前；默认在对话里列 50 条，limit 不设上限）。返回 total=逾期总条数、count=本次返回条数、truncated。条数多于 50 时用 document=true 生成完整 Markdown 清单（返回 document_path，用 MEDIA:路径 发给经纪人）。本工具会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天只降一级），降级名单在 downgrades 里如实说明。", "parameters": TOOLS[2]["parameters"]},
     handler=TOOLS[2]["handler"],
 )
 registry.register(

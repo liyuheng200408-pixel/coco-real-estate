@@ -2688,14 +2688,21 @@ class RealEstateDB:
             return query.count()
 
     def get_customer_labels(self, customer_ids):
-        """批量取客户的姓名与等级 → {id: {name, tier}}（只取展示要用的两列，缺号不补）"""
+        """批量取客户的姓名与等级 → {id: {name, tier}}（只取展示要用的两列，缺号不补）
+
+        分批查询：`IN` 里的变量数在 sqlite 上有上限（999），万级清单一次塞进去会报错。
+        """
         ids = [int(i) for i in set(customer_ids or []) if i is not None]
         if not ids:
             return {}
+        labels = {}
         with self.get_session() as s:
-            return {row[0]: {'name': row[1], 'tier': row[2]} for row in
-                    s.query(Customer.id, Customer.name, Customer.tier)
-                    .filter(Customer.id.in_(ids)).all()}
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                for row in (s.query(Customer.id, Customer.name, Customer.tier)
+                            .filter(Customer.id.in_(chunk)).all()):
+                    labels[row[0]] = {'name': row[1], 'tier': row[2]}
+        return labels
     
     # ---------- 数据清理（彻底删除 / 归档 / 恢复，2026-09-23 加） ----------
     # 背景：经纪人要求"删除/清空"数据时，系统此前只能把状态改成已售/已租/已关闭，

@@ -18,6 +18,8 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import text
 
+from tools.real_estate_followup import OVERDUE_DOC_KEEP
+
 
 @pytest.fixture
 def wired(db, monkeypatch):
@@ -241,3 +243,112 @@ class TestReadToolSideEffects:
         assert after["tier"] == "A"
         for key in ("name", "stage", "status", "customer_type"):
             assert before[key] == after[key], key
+
+
+# ==================== ⑦ 完整清单文档（老板 2026-09-25 定：>50 条走文档）====================
+
+def _overdue_customers(db, n, start=0):
+    for i in range(start, start + n):
+        cid = _add_customer(db, f"逾期客户{i}", tier="B")
+        _add_followup(db, cid, days_ago=3, next_days_ago=3)
+    return n
+
+
+def _doc_dir():
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / "doc_cache"
+
+
+class TestDocumentExport:
+    def test_default_does_not_write_any_file(self, wired):
+        _overdue_customers(wired, 55)
+        out = _call()
+        assert "document_path" not in out
+        assert not list(_doc_dir().glob("逾期跟进_*.md"))
+
+    def test_document_contains_every_row(self, wired):
+        _overdue_customers(wired, 55)
+        out = _call({"document": True})
+        assert out["document_path"], out
+        from pathlib import Path
+
+        doc_text = Path(out["document_path"]).read_text(encoding="utf-8")
+        assert "共 55 条" in doc_text.splitlines()[0]
+        rows = [line for line in doc_text.splitlines() if line.startswith("- **")]
+        assert len(rows) == 55, len(rows)          # 不受 limit 限制，含全部条目
+        assert "逾期 3 天" in rows[0]
+
+    def test_document_still_caps_the_chat_reply(self, wired):
+        _overdue_customers(wired, 55)
+        out = _call({"document": True})
+        assert out["count"] == 50 and out["total"] == 55 and out["truncated"] is True
+
+    def test_truncation_message_is_agent_facing(self, wired):
+        """截断那句话是 Coco 说给经纪人听的：不能出现参数名/工具名（老板 2026-09-25 实测指出）"""
+        _overdue_customers(wired, 55)
+        msg = _call()["message"]
+        assert msg == ("共 55 条逾期跟进，这里先列逾期最久的 50 条。"
+                       "要看全部跟我说一声，我会生成一份 Markdown 清单（含全部条目）发给你"), msg
+        for internal in ("document", "limit", "truncated", "total", "get_overdue", "参数"):
+            assert internal not in msg, (internal, msg)
+
+    def test_document_message_is_agent_facing(self, wired):
+        _overdue_customers(wired, 55)
+        msg = _call({"document": True})["message"]
+        assert msg == "完整清单已生成（共 55 条），我把它发给你", msg
+
+    def test_document_not_generated_when_nothing_overdue(self, wired):
+        cid = _add_customer(wired, "正常客户", tier="B")
+        _add_followup(wired, cid, days_ago=0)
+        out = _call({"document": True})
+        assert "document_path" not in out and out["message"] == "暂无逾期跟进"
+
+    def test_keeps_only_recent_documents(self, wired):
+        _overdue_customers(wired, 3)
+        doc_dir = _doc_dir()
+        doc_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(OVERDUE_DOC_KEEP + 5):
+            (doc_dir / f"逾期跟进_202001{i:02d}_000000.md").write_text("旧文档", encoding="utf-8")
+        out = _call({"document": True})
+        assert out["document_path"]
+        kept = list(doc_dir.glob("逾期跟进_*.md"))
+        assert len(kept) == OVERDUE_DOC_KEEP, len(kept)
+        assert any(p.name == out["document_path"].split("/")[-1] for p in kept)
+
+    def test_deleted_customer_shows_in_document(self, wired):
+        cid = _add_customer(wired, "会被删的客户", tier="B")
+        _add_followup(wired, cid, days_ago=2, next_days_ago=2)
+        with wired.get_session() as s:
+            s.execute(text("DELETE FROM re_customers WHERE id = :i"), {"i": cid})
+            s.commit()
+        from pathlib import Path
+
+        doc_text = Path(_call({"document": True})["document_path"]).read_text(encoding="utf-8")
+        assert f"已删除客户（id={cid}）" in doc_text
+
+
+# ==================== ⑧ 描述 ====================
+
+class TestOverdueDescription:
+    def test_description_states_capabilities(self):
+        from tools.registry import registry
+
+        desc = registry.get_entry("get_overdue").schema["description"]
+        assert len(desc) >= 40, desc
+        for word in ("逾期", "逾期最久在前", "document", "MEDIA:", "自动降一"):
+            assert word in desc, (word, desc)
+
+    def test_description_not_written_twice_with_drift(self):
+        from tools.registry import registry
+        import tools.real_estate_followup as m
+
+        assert registry.get_entry("get_overdue").schema["description"] == m.TOOLS[2]["description"]
+
+    def test_params_declared(self):
+        from tools.registry import registry
+
+        props = registry.get_entry("get_overdue").schema["parameters"]["properties"]
+        assert set(props) == {"limit", "document"}
+        assert "50" in props["limit"]["description"]
+        assert "MEDIA:" in props["document"]["description"]
