@@ -107,9 +107,10 @@ class TestWhenNormalization:
 
 class TestRejections:
     def test_unknown_date_points_at_date(self, wired, cid):
-        out = _call(customer_id=cid, date="明天", time="09:00")
+        # 「明天/下周三」这类相对说法已支持（见 test_relative_dates.py），这里用仍认不出的说法
+        out = _call(customer_id=cid, date="月底", time="09:00")
         assert out["success"] is False
-        assert out["error"] == "提醒日期没能识别：收到的是「明天」。请用 2026-12-31 或 12月31日 这类写法"
+        assert out["error"] == "提醒日期没能识别：收到的是「月底」。请用 2026-12-31 或 12月31日 这类写法"
         assert _rows(wired, cid) == []
 
     def test_unknown_time_points_at_time_not_date(self, wired, cid):

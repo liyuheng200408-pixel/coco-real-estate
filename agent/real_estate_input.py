@@ -274,11 +274,67 @@ def norm_id(value, label="编号", hint=""):
 
 # ==================== 日期 ====================
 
+# 相对日期的说法（2026-09-25 加，老板要求「经纪人怎么说都能认」）：
+# 今天/明天/后天/大后天、周X/星期X/礼拜X（未来最近的那个）、本周X/这周X、下周X/下个星期X、
+# N天后/N天以后/N周后/N个星期后（数字与中文数字都认）、下个月N号。
+_REL_DAY_OFFSETS = {'今天': 0, '今日': 0, '明天': 1, '明日': 1, '后天': 2, '大后天': 3}
+_WEEKDAY_NAMES = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4, '六': 5, '日': 6, '天': 6}
+_WEEKDAY_RE = re.compile(r'^(下|下个|本|这)?(?:周|星期|礼拜)([一二三四五六日天])$')
+_DAYS_LATER_RE = re.compile(r'^([0-9]+|[零一二两三四五六七八九十]+)\s*(?:天|日|周|个?星期)(?:以)?后$')
+_NEXT_MONTH_RE = re.compile(r'^下个?月([0-9]+|[零一二两三四五六七八九十]+)[号日]$')
+
+
+def _cn_int(text):
+    """数字或中文数字 → int（认不出返回 None）。`两` 按 2 认（口语常见）"""
+    if text.isdigit():
+        return int(text)
+    return cn_number(text) if cn_number(text) is not None else cn_number(text.replace('两', '二'))
+
+
+def _parse_relative_date(text):
+    """相对日期 → date 或 None（只认上面那几类说法，认不出交给绝对日期解析）"""
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    today = _date.today()
+    if text in _REL_DAY_OFFSETS:
+        return today + _td(days=_REL_DAY_OFFSETS[text])
+    matched = _WEEKDAY_RE.match(text)
+    if matched:
+        prefix, weekday = matched.group(1), _WEEKDAY_NAMES[matched.group(2)]
+        if prefix in ('下', '下个'):
+            days_to_next_monday = 7 - today.weekday() or 7   # 今天就是周一 → 下周一是 7 天后
+            return today + _td(days=days_to_next_monday + weekday)
+        delta = (weekday - today.weekday()) % 7              # 本/这/裸说法都取「未来最近的那个」（今天算）
+        return today + _td(days=delta)
+    matched = _DAYS_LATER_RE.match(text)
+    if matched:
+        count = _cn_int(matched.group(1))
+        if count is not None:
+            unit = matched.group(0)
+            days = count if ('天' in unit or '日' in unit) else count * 7
+            return today + _td(days=days)
+    matched = _NEXT_MONTH_RE.match(text)
+    if matched:
+        day = _cn_int(matched.group(1))
+        if day and day <= 31:
+            year, month = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+            # 下个月没有那一天就取下个月最后一天（如 1月31日 → 2月28/29日）
+            for candidate_day in range(min(day, 31), 0, -1):
+                try:
+                    return _date(year, month, candidate_day)
+                except ValueError:
+                    continue
+    return None
+
+
 def norm_date(value, label="日期", sample="2026-12-31"):
     """日期归一 → (datetime 或 None, 提示或 None)。
 
-    接受 `2026-12-31` / `2026/12/31` / `2026.12.31` / `2026年12月31日`；
+    绝对写法：`2026-12-31` / `2026/12/31` / `2026.12.31` / `2026年12月31日`；
     只有月日（`12月31日` / `12-31`）时按**当年**算，若当年那天已过按**次年**（到期日总是指未来）。
+    相对写法（2026-09-25 加）：`今天/明天/后天/大后天`、`周三/星期三/礼拜三`（未来最近的那个）、
+    `本周五/这周三`、`下周三/下个星期三`、`3天后/三天以后/2周后`、`下个月5号`。
     认不出返回 (None, 中文提示) —— 不猜、也不静默存错。
     `sample` 是提示里给的写法示例（调用方按场景换，不要手改文案）。
     """
@@ -290,6 +346,10 @@ def norm_date(value, label="日期", sample="2026-12-31"):
     text = str(value).strip()
     if not text:
         return None, None
+    compact = re.sub(r'[\s\u3000]+', '', text)         # 「下周 三」也认
+    relative = _parse_relative_date(compact)
+    if relative is not None:
+        return _dt.combine(relative, _dt.min.time()), None
     text = (text.replace('年', '-').replace('月', '-').replace('日', '')
                 .replace('/', '-').replace('.', '-'))
     parts = [p for p in text.split('-') if p != '']

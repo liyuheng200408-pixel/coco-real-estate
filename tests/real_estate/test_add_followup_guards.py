@@ -156,9 +156,11 @@ class TestNextDate:
         assert stored.date() >= today.date()
 
     def test_unknown_date_rejected(self, wired, fixtures):
-        out = _call({"customer_id": fixtures["customer"]["id"], "content": "x", "next_date": "明天"})
+        # 2026-09-25 起「明天/下周三」这类相对说法已支持（见 test_relative_dates.py），
+        # 这里改用仍认不出的说法来钉「不猜」
+        out = _call({"customer_id": fixtures["customer"]["id"], "content": "x", "next_date": "月底"})
         assert out["success"] is False
-        assert out["error"] == "下次跟进日期没能识别：收到的是「明天」。请用 2026-12-31 这类写法"
+        assert out["error"] == "下次跟进日期没能识别：收到的是「月底」。请用 2026-12-31 这类写法"
 
     @pytest.mark.parametrize("raw,expect", [
         ("2027-03-05T14:30:00", datetime(2027, 3, 5, 14, 30)),

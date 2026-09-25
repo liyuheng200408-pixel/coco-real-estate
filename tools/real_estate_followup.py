@@ -126,7 +126,7 @@ def add_followup(
 
     写入前先认人认房：客户或房源不存在就如实说明，不写孤儿记录（孤儿跟进会被
     逾期列表/午间检查当成真客户报出来，经纪人只看到一个查不到的编号）。
-    下次跟进日期支持 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日 等写法；
+    下次跟进日期支持 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日 等写法，也认 明天/后天/周三/下周三/3天后；
     给了时间就把时刻并进 next_date（与设置提醒、带看后自动提醒同一口径）。
     """
     customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
@@ -332,7 +332,8 @@ def schedule_reminder(customer_id: int, date: str, time: str = None, content: st
     """设置客户跟进提醒（到点会出现在逾期提醒与早报里）
 
     日期/时间复用 add_followup 那套归一（`norm_followup_when`）：认 2026-12-31 / 2026/12/31 /
-    2026年12月31日 / 12月31日，时间认 09:30 / 9点30 / 0930，不传时间按 09:00；认不出分别提示日期/时间。
+    2026年12月31日 / 12月31日（也认 明天/后天/周三/下周三/3天后），时间认 09:30 / 9点30 / 0930，
+    不传时间按 09:00；认不出分别提示日期/时间。
     同一客户同一时刻的提醒不重复建（内容变了就把那条改掉）。返回 `reminder` 结构化记录供回显核对。
     """
     customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
@@ -427,7 +428,7 @@ TOOLS = [
             "type": {"type": "string", "enum": ["call", "visit", "deal", "note", "reminder"],
                      "description": "跟进类型（call 电话 / visit 带看 / deal 成交 / note 备注 / reminder 提醒，也认中文写法）"},
             "next_date": {"type": "string",
-                          "description": "下次跟进日期（2026-12-31 / 2026/12/31 / 2026年12月31日 都认；给了时间会并到这一刻）"},
+                          "description": "下次跟进日期（2026-12-31 / 2026/12/31 / 2026年12月31日；也认 明天/后天/周三/下周三/3天后 这类相对说法；给了时间会并到这一刻）"},
             "next_time": {"type": "string", "description": "下次跟进时间，如 09:30（也认 9点30 / 0930）"},
         }, "required": ["customer_id", "content"],
     }, "handler": lambda args, **kw: add_followup(**args)},
@@ -443,11 +444,11 @@ TOOLS = [
             "document": {"type": "boolean", "description": "要不要生成完整清单文档（含全部条目，不受条数限制）；返回 document_path，用 MEDIA:路径 发给经纪人。默认 false"},
         },
     }, "handler": lambda args, **kw: get_overdue(**args)},
-    {"name": "schedule_reminder", "description": "设置客户跟进提醒（到点会出现在逾期提醒与早报里）。日期认 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日，时间认 09:30 / 9点30 / 0930（不传时间按 09:00）。返回 reminder=新建（或已有）的提醒记录；同一客户同一时间的提醒不重复建。", "parameters": {
+    {"name": "schedule_reminder", "description": "设置客户跟进提醒（到点会出现在逾期提醒与早报里）。日期认 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日（也认 明天/后天/周三/下周三/3天后），时间认 09:30 / 9点30 / 0930（不传时间按 09:00）。返回 reminder=新建（或已有）的提醒记录；同一客户同一时间的提醒不重复建。", "parameters": {
         "type": "object", "properties": {
             "customer_id": {"type": "integer", "description": "客户ID"},
             "date": {"type": "string",
-                     "description": "提醒日期（2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日 都认）"},
+                     "description": "提醒日期（2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日；也认 明天/后天/周三/下周三/3天后 这类相对说法）"},
             "time": {"type": "string", "description": "提醒时间（如 09:30；也认 9点30 / 0930；不传按 09:00）"},
             "content": {"type": "string", "description": "提醒内容（不传默认「跟进客户 X」）"},
         }, "required": ["customer_id", "date"],
@@ -484,7 +485,7 @@ registry.register(
 registry.register(
     name="schedule_reminder",
     toolset="real_estate",
-    schema={"name": "schedule_reminder", "description": "设置客户跟进提醒（到点会出现在逾期提醒与早报里）。日期认 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日，时间认 09:30 / 9点30 / 0930（不传时间按 09:00）。返回 reminder=新建（或已有）的提醒记录；同一客户同一时间的提醒不重复建。", "parameters": TOOLS[3]["parameters"]},
+    schema={"name": "schedule_reminder", "description": "设置客户跟进提醒（到点会出现在逾期提醒与早报里）。日期认 2026-12-31 / 2026/12/31 / 2026年12月31日 / 12月31日（也认 明天/后天/周三/下周三/3天后），时间认 09:30 / 9点30 / 0930（不传时间按 09:00）。返回 reminder=新建（或已有）的提醒记录；同一客户同一时间的提醒不重复建。", "parameters": TOOLS[3]["parameters"]},
     handler=TOOLS[3]["handler"],
 )
 registry.register(
