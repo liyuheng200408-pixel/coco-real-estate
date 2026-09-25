@@ -232,6 +232,21 @@ def case_daily_report(w):
             "warnings": (out.get("warnings") or []) + (empty.get("warnings") or [])}
 
 
+def case_midday_check(w):
+    """午间检查的说明句：逾期被截断 / 流失名单被截断"""
+    for i in range(7):
+        c = w.db.add_customer(name=f"逾期客户{i}", customer_type="rent")
+        w.db.add_followup(customer_id=c["id"], type="note", content=f"第{i}条",
+                          created_at=datetime.now() - timedelta(days=3),
+                          next_date=datetime.now() - timedelta(days=3), next_time="09:00")
+    for i in range(25):
+        w.db.add_customer(name=f"久未联系{i}", tier="C", customer_type="rent",
+                          created_at=datetime.now() - timedelta(days=120))
+    out = _load(w.fu.midday_check())
+    return {"message": out.get("message") or "",
+            "warnings": (out.get("warnings") or [])}
+
+
 def case_market_brief(w):
     _customers(w.db, 3)
     return _load(w.an.market_brief())
@@ -258,6 +273,7 @@ SCENARIOS = [
     ("market_brief 简报", case_market_brief),
     ("schedule_reminder 话术", case_schedule_reminder),
     ("daily_report 说明句", case_daily_report),
+    ("midday_check 说明句", case_midday_check),
 ]
 
 

@@ -429,16 +429,45 @@ def daily_report(task_id: str = None) -> str:
 
 
 def midday_check(task_id: str = None) -> str:
-    """午间检查（附带流失预警）"""
+    """午间检查（今天的到期跟进与逾期情况 / 客户与房源概览 / 流失预警）
+
+    逾期明细带客户名与等级（客户已被删的给「已删除客户（id=N）」标注）；只列最急的 5 条，总数在
+    `check.overdue_count`。会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），
+    降级名单在 `check.downgrades` 里如实说明；流失名单只列最久的 `DAILY_STALE_LIMIT` 位，
+    总数在 `check.stale_total`。
+    """
     db = _get_db()
     check = db.midday_check()
-    downgrade = db.auto_downgrade_stale_customers()
+    # 先算一份流失快照，降级复用同一份（原先各扫一遍全库）
     stale = db.get_stale_customers()
+    downgrade = db.auto_downgrade_stale_customers(stale=stale)
+    rows = check.get('overdue_customers') or []
+    labels = db.get_customer_labels([r.get('customer_id') for r in rows])
+    for row in rows:
+        label = labels.get(row.get('customer_id'))
+        if label:
+            row['customer_name'] = label['name']
+            row['customer_tier'] = label['tier']
+        else:
+            row['customer_name'] = f"已删除客户（id={row.get('customer_id')}）"
+            row['customer_missing'] = True
+    notes = []
+    if not check.get('total_customers'):
+        notes.append("库里还没有客户，先登记客户再看午间情况")
+    elif (check.get('overdue_count') or 0) > len(rows):
+        notes.append(f"当前有 {check['overdue_count']} 条逾期跟进，这里列最急的 {len(rows)} 条")
     if downgrade.get('downgrades'):
         check['downgrades'] = downgrade['downgrades']
     if stale:
-        check['stale_customers'] = stale
-    return json.dumps({"success": True, "check": check}, ensure_ascii=False)
+        check['stale_total'] = len(stale)
+        check['stale_customers'] = stale[:DAILY_STALE_LIMIT]
+        if len(stale) > DAILY_STALE_LIMIT:
+            notes.append(f"共 {len(stale)} 位客户长期无互动，这里列最久的 {DAILY_STALE_LIMIT} 位"
+                         f"（要我列全就说一声）")
+    payload = {"success": True, "check": check}
+    if notes:
+        payload["message"] = "；".join(notes)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 TOOLS = [
@@ -478,7 +507,7 @@ TOOLS = [
     {"name": "daily_report", "description": "生成每日早报（今天要跟进的客户 / 今天到期与已逾期的跟进 / 客户与房源概览 / 流失预警）。会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），降级名单在 report.downgrades 里如实说明；report.stale_total 是流失客户总数，report.stale_customers 只列最久的 20 位。", "parameters": {
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: daily_report()},
-    {"name": "midday_check", "description": "午间检查", "parameters": {
+    {"name": "midday_check", "description": "午间检查（今天的到期跟进与逾期情况 / 客户与房源概览 / 流失预警）。会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），降级名单在 check.downgrades 里如实说明；check.stale_total 是流失客户总数，check.stale_customers 只列最久的 20 位。", "parameters": {
         "type": "object", "properties": {},
     }, "handler": lambda args, **kw: midday_check()},
     {"name": "stale_check", "description": "流失预警检查：自动降级长期无互动客户（S级>5天→A，A级>10天→B，B级>30天→C）并返回预警列表", "parameters": {
@@ -519,7 +548,7 @@ registry.register(
 registry.register(
     name="midday_check",
     toolset="real_estate",
-    schema={"name": "midday_check", "description": "午间检查", "parameters": TOOLS[5]["parameters"]},
+    schema={"name": "midday_check", "description": "午间检查（今天的到期跟进与逾期情况 / 客户与房源概览 / 流失预警）。会顺手把长期无互动的客户自动降一级（S→A→B→C，同一天最多降一级），降级名单在 check.downgrades 里如实说明；check.stale_total 是流失客户总数，check.stale_customers 只列最久的 20 位。", "parameters": TOOLS[5]["parameters"]},
     handler=TOOLS[5]["handler"],
 )
 registry.register(

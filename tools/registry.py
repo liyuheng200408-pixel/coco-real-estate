@@ -837,6 +837,15 @@ class ToolRegistry:
         if _missing:
             _req = ", ".join(_missing)
             return tool_error(f"缺少必填参数：{_req}。请补齐这些参数后重新调用 {name}。")
+        # 不声明参数的工具收到参数（COCO-PATCH 2026-09-25）：这类工具注册成
+        # `lambda args, **kw: fn()`（压根不看 args），永远不会抛 TypeError —— 于是"参数名写错"
+        # 那条提示（下面的 except 分支）永远不生效：模型给 `midday_check` 传 `period='week'`，
+        # 工具会**静默按全量跑还返回成功**，模型以为真按周统计了（实测 18 个无参工具里 10 个）。
+        # 这里只对"schema 一个参数都没声明"的工具做事前拦截（零误伤：它本来就没有可传参数）；
+        # 有参数的工具仍走异常后的提示 —— 框架层预过滤会误伤签名里带 schema 未声明同义参数的 handler。
+        _no_param_hint = self._no_param_args_hint(name, entry, args)
+        if _no_param_hint:
+            return tool_error(_no_param_hint)
         # 整数参数形态归一（COCO-PATCH 2026-09-25）：`limit` 传 "12"、编号传 true 这类形态在
         # 实测里 10 个读类工具全中 —— `owner_id=true` 会被当成 1、返回 id=1 那条记录（把**别人的
         # 资料**当成这位客户的资料念出来），数字串则依赖数据库的隐式转换（SQLite 与 PostgreSQL
@@ -1046,6 +1055,46 @@ class ToolRegistry:
             declared = []
         listing = "、".join(declared) if declared else "（该工具没有可传参数）"
         return (f"参数名不对：{name} 不认识参数「{bad}」。可用参数：{listing}。"
+                f"请按可用参数重新调用。")
+
+    @staticmethod
+    def _handler_reads_args(entry) -> bool:
+        """handler 的注册写法是否**真的读** args（不看 args 的才会把多余参数静默吞掉）
+
+        用字节码判断而不是靠猜：`lambda args, **kw: fn()` 里没有 `LOAD_FAST args`（完全不看），
+        而 `lambda args, **kw: fn(**args)` / `args.get('chat_id')` 会读 —— 后者可能是在收 schema
+        未声明的参数（实测 `enable_cron` 的 chat_id 就走 args），必须放行。
+        认不出（拿不到字节码）时按"读 args"处理，宁可不拦。
+        """
+        import dis
+        try:
+            instructions = list(dis.get_instructions(entry.handler))
+        except Exception:
+            return True
+        return any(ins.opname in ("LOAD_FAST", "LOAD_DEREF") and ins.argval == "args"
+                   for ins in instructions)
+
+    @staticmethod
+    def _no_param_args_hint(name, entry, args):
+        """schema 一个参数都没声明 + handler 确实不看 args、却收到了参数 → 中文提示；否则 None
+
+        COCO-PATCH 2026-09-25：这类工具（实测 10 个：daily_report / midday_check / stale_check /
+        customer_stats …）注册成 `lambda args, **kw: fn()`，永远不会抛 TypeError，于是
+        `_unexpected_param_hint`（异常后提示）永不生效 —— 模型传 `period='week'` 会**静默按全量跑
+        还返回成功**。两个条件都满足才拦，保证零误伤。
+        """
+        if not isinstance(args, dict) or not args:
+            return None
+        try:
+            params = (entry.schema or {}).get("parameters") or {}
+        except Exception:
+            return None
+        if params.get("properties") or params.get("required"):
+            return None
+        if ToolRegistry._handler_reads_args(entry):
+            return None
+        bad = sorted(args.keys())[0]
+        return (f"参数名不对：{name} 不认识参数「{bad}」。可用参数：（该工具没有可传参数）。"
                 f"请按可用参数重新调用。")
 
     @staticmethod
