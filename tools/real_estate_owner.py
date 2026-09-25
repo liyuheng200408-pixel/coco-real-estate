@@ -114,6 +114,109 @@ def add_owner(name: str, phone: str = None, wechat: str = None,
     return json.dumps(payload, ensure_ascii=False)
 
 
+# 房东可改字段的中文名（回显"改了哪几项"用）
+_OWNER_FIELD_LABELS = {'name': '姓名', 'phone': '手机号', 'wechat': '微信号',
+                       'id_masked': '身份证', 'trust_note': '信任度备注', 'notes': '备注'}
+
+
+def update_owner(owner_id: int, name: str = None, phone: str = None, wechat: str = None,
+                 id_number: str = None, trust_note: str = None, notes: str = None,
+                 task_id: str = None) -> str:
+    """修改房东（业主）资料：姓名 / 手机号 / 微信号 / 身份证（只存脱敏）/ 信任度备注 / 备注
+
+    改手机号或微信号前**先查重（排除自己）**：命中另一位房东就拦下给提示，不悄悄改
+    （合并两位房东是另一件事，本轮只提示）。每次改动写一条变更留痕，加密字段只留掩码。
+    名下的房源关联不受影响（房源挂的是 owner_id）。
+    """
+    owner_id, problem = norm_id(owner_id, '房东编号', '，可在房东列表里查')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if all(v is None or str(v).strip() == ''
+           for v in (name, phone, wechat, id_number, trust_note, notes)):
+        return json.dumps({"success": False, "error": "没看到要改的内容 —— 说一下改哪一项？"
+                          "（姓名/手机号/微信号/身份证/信任度备注/备注）"}, ensure_ascii=False)
+    db = _get_db()
+    existing = db.get_owner(owner_id)
+    if not existing:
+        return json.dumps({"success": False, "error": "房东不存在，请先在房东列表里核对编号"},
+                          ensure_ascii=False)
+    warnings = []
+    updates = {}
+    if name is not None and str(name).strip():
+        name, clipped = clip_text(str(name).strip(), NAME_MAX)
+        if clipped:
+            warnings.append("房东姓名" + clipped + "。")
+        updates['name'] = name
+    if phone is not None and str(phone).strip():
+        updates['phone'] = norm_phone(phone)
+    if wechat is not None and str(wechat).strip():
+        updates['wechat'] = clean_text(wechat)
+    if id_number is not None and str(id_number).strip():
+        updates['id_masked'] = _mask_id(id_number)
+    if trust_note is not None:
+        trust_note, clipped = clip_text(clean_text(trust_note), TRUST_NOTE_MAX)
+        if clipped:
+            warnings.append("信任度备注" + clipped + "（其余内容可放进备注里）。")
+        updates['trust_note'] = trust_note
+    if notes is not None:
+        updates['notes'] = clean_text(notes)
+    if not updates:
+        return json.dumps({"success": False, "error": "没看到要改的内容 —— 说一下改哪一项？"
+                          "（姓名/手机号/微信号/身份证/信任度备注/备注）"}, ensure_ascii=False)
+
+    # 改联系方式先查重（排除自己）：命中另一位房东 → 拦下给提示，不悄悄改
+    if 'phone' in updates or 'wechat' in updates:
+        dup, warn = db.find_duplicate_owner(phone=updates.get('phone'),
+                                            wechat=updates.get('wechat'),
+                                            exclude_id=owner_id)
+        if warn:
+            return json.dumps({
+                "success": False, "duplicate": False, "warning": warn,
+                "error": "检测到加密密钥不一致，这次没法安全查重（可能把同一个房东拆成两条、"
+                         "或把两位房东合错）。请让 Ava 检查密钥。",
+            }, ensure_ascii=False)
+        if dup:
+            return json.dumps({
+                "success": False, "duplicate": True, "existing_owner": dup,
+                "error": (f"这个号码已经是另一位房东（id={dup.get('id')} {dup.get('name')}，"
+                          f"电话 {safe_contact(dup.get('phone')) or '未填'}）在用。"
+                          f"如果其实是同一个人，说一声我把他并过来；如果是另一个人，请核对号码。"),
+            }, ensure_ascii=False)
+
+    result = db.update_owner(owner_id, **updates)
+    if not result:
+        return json.dumps({"success": False, "error": "房东不存在，请先在房东列表里核对编号"},
+                          ensure_ascii=False)
+    changed = "、".join(_OWNER_FIELD_LABELS.get(k, k) for k in updates)
+    result, masked = mask_contacts(result)
+    payload = {"success": True,
+               "message": f"房东 {result.get('name')} 的资料已更新（{changed}）",
+               "owner": result}
+    if warnings:
+        payload["warnings"] = warnings
+    return json.dumps(attach_key_warning(payload, masked, OWNER_KEY_MISMATCH_WARNING),
+                      ensure_ascii=False)
+
+
+registry.register(
+    name="update_owner",
+    toolset="real_estate",
+    schema={"name": "update_owner", "description": "修改房东（业主）资料：姓名/手机号/微信号/身份证（只存脱敏）/信任度备注/备注。改名或改号前会先查重（排除自己）—— 命中别的房东会提示核对，不会悄悄改。返回 owner 与本次改动的字段清单。", "parameters": {
+        "type": "object",
+        "properties": {
+            "owner_id": {"type": "integer", "description": "房东ID（数字，如 12；不确定就先列房东列表查）"},
+            "name": {"type": "string", "description": "姓名（要改成什么）"},
+            "phone": {"type": "string", "description": "手机号（改写法的号也算改；改前会查重）"},
+            "wechat": {"type": "string", "description": "微信号（加密存储；改前会查重）"},
+            "id_number": {"type": "string", "description": "身份证号（只存脱敏版，原号不落库）"},
+            "trust_note": {"type": "string", "description": "信任度备注（如 价格坚挺/可议价）"},
+            "notes": {"type": "string", "description": "备注"},
+        }, "required": ["owner_id"],
+    }},
+    handler=lambda args, **kw: update_owner(**args),
+)
+
+
 def get_property_owners(property_ids: list = None, task_id: str = None) -> str:
     """按房源 ID 批量查询业主信息（房源→业主反向查询，最多 3 套）。
 

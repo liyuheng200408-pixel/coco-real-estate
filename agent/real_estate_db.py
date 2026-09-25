@@ -492,6 +492,7 @@ class Owner(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     properties = relationship("Property")
+    changes = relationship("OwnerChange", back_populates="owner")
 
     def to_dict(self):
         return {
@@ -585,6 +586,35 @@ class Reminder(Base):
         Index('re_idx_reminder_type', 'type'),
         Index('re_idx_reminder_enabled', 'enabled'),
     )
+
+
+class OwnerChange(Base):
+    """房东资料变更留痕（2026-09-25 加，配合 update_owner）
+
+    与客户侧的 `re_customer_changes` 同一口径：加密字段（手机号/微信）**只留掩码**，
+    否则加密等于白做（备份、导出、看库的人都能读到明文）。
+    """
+    __tablename__ = 're_owner_changes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_id = Column(Integer, ForeignKey('re_owners.id'))
+    field = Column(String(50), nullable=False)
+    old_value = Column(Text)
+    new_value = Column(Text)
+    created_at = Column(DateTime, default=datetime.now)
+
+    owner = relationship("Owner", back_populates="changes")
+
+    __table_args__ = (
+        Index('re_idx_owner_change_owner', 'owner_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'owner_id': self.owner_id, 'field': self.field,
+            'old_value': self.old_value, 'new_value': self.new_value,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
 
 
 class Setting(Base):
@@ -1389,7 +1419,7 @@ class RealEstateDB:
                 return rows, s.query(Owner).count()
             return rows
 
-    def find_duplicate_owner(self, phone=None, wechat=None):
+    def find_duplicate_owner(self, phone=None, wechat=None, exclude_id=None):
         """房东查重：手机号（归一后，主）> 微信号（次）。返回 (命中房东dict或None, 警告文本或None)。
 
         **姓名不参与判重**：房东没有"客户类型"那样的维度，同名不同号的两个人必须各建一条
@@ -1403,6 +1433,8 @@ class RealEstateDB:
                 probe = norm_phone(phone)
                 if probe:
                     for oid, value in s.query(Owner.id, Owner.phone).all():
+                        if exclude_id is not None and oid == exclude_id:
+                            continue          # 改自己的号时排除自己（2026-09-25 update_owner）
                         if looks_like_ciphertext(value):
                             return (None, "检测到本机加密密钥与库里的不一致，未强行判重"
                                           "（可能把同一个房东拆成两条、或把两位房东合错）。请让 Ava 检查密钥。")
@@ -1414,6 +1446,8 @@ class RealEstateDB:
                 probe = str(wechat).strip()
                 if probe:
                     for oid, value in s.query(Owner.id, Owner.wechat).all():
+                        if exclude_id is not None and oid == exclude_id:
+                            continue          # 改自己的号时排除自己（2026-09-25 update_owner）
                         if looks_like_ciphertext(value):
                             return (None, "检测到本机加密密钥与库里的不一致，未强行判重"
                                           "（可能把同一个房东拆成两条、或把两位房东合错）。请让 Ava 检查密钥。")
@@ -2748,6 +2782,28 @@ class RealEstateDB:
                         })
             s.commit()
         return {'downgrades': downgrades, 'still_stale': len(stale) - len(downgrades)}
+
+    def update_owner(self, owner_id, **kwargs):
+        """改房东资料（每次改动写一条留痕；加密字段只留掩码）→ 更新后的 dict，房东不存在返回 None
+
+        与客户侧 `update_customer` 同一套口径：只写传进来的字段、值没变就不留痕。
+        """
+        with self.get_session() as s:
+            o = s.query(Owner).get(owner_id)
+            if not o:
+                return None
+            for k, v in kwargs.items():
+                if not hasattr(o, k):
+                    continue
+                old = getattr(o, k)
+                if old != v:
+                    s.add(OwnerChange(owner_id=owner_id, field=k,
+                                      old_value=_change_trace_value(Owner, k, old),
+                                      new_value=_change_trace_value(Owner, k, v)))
+                setattr(o, k, v)
+            s.commit()
+            s.refresh(o)
+            return o.to_dict()
 
     def count_customers(self, status=None):
         """客户数（轻量 count，空态判断用）"""

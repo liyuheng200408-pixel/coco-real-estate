@@ -64,7 +64,7 @@ STATIC_TOOLS = [
     "generate_property_poster","generate_poster_grid","suggest_poster_titles",
     "save_agent_card","get_agent_card","save_agent_brand","get_agent_brand","get_coco_version",
     "enable_cron","disable_cron",
-    "add_owner","get_owner","list_owners","owner_portfolio","exclusive_expiring","get_property_owners","find_person_by_name",
+    "add_owner","update_owner","get_owner","list_owners","owner_portfolio","exclusive_expiring","get_property_owners","find_person_by_name",
     # 2026-09-18：此前注册了却没进工具集（模型看不到），补进清单一起冒烟
     "price_history","price_drop_alerts","update_customer_stage","stage_stagnation",
     "churn_warning","find_alternatives","clear_defect_tag","add_referral","referral_stats",
@@ -235,6 +235,7 @@ CASES = [
     ("get_owner", {"owner_id":oid}),
     ("list_owners", {}),
     ("owner_portfolio", {"owner_id":oid}),
+    ("update_owner", {"owner_id":oid, "trust_note":"价格坚挺，可议价"}),
     ("exclusive_expiring", {"days":30}),
     ("get_property_owners", {"property_ids":[pid2]}),
     ("get_property_owners", {"property_ids":[pid]}),   # 该房源未录业主 => owner=None 不崩
