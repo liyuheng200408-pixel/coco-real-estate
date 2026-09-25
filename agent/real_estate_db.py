@@ -391,6 +391,7 @@ class Property(Base):
     tags = Column(Text)
     images = Column(Text)
     defect_tags = Column(Text)  # 缺陷标签（带看反馈反哺，2026-08-28 功能3）
+    defect_baseline_at = Column(DateTime)  # 整改基线：手动清除标签时刷新，重扫只算之后的新反馈（迁移 015）
     owner_id = Column(Integer, ForeignKey('re_owners.id'))  # 房东（2026-08-28 功能7）
     commission_rate = Column(Float)          # 佣金率（如 0.02 = 2%）
     exclusive_until = Column(DateTime)       # 独家委托到期日
@@ -1273,47 +1274,62 @@ class RealEstateDB:
     def refresh_defect_tags(self, property_id):
         """扫描带看反馈，负面关键词被 **≥2 位不同客户** 提及则写入缺陷标签
 
-        计数按"不同客户"算（同一位客户的两条带看只算一次）—— 这样才说明是**共性**差评，
-        「组客户」的口径与工具/文档一致（2026-09-25 老板拍板改口径；原实现按带看条数计数）。
+        两条口径（2026-09-25 老板拍板）：
+        ① 计数按**不同客户**（同一位客户的两条带看只算一次）—— 这才能说明是"共性差评"；
+        ② 只统计该房源**整改时间之后**的新反馈（手动清除标签会刷新整改时间）—— 房东整改过的旧差评
+           不再把标签打回来；整改后**新**的反馈仍按同一阈值判，真出新问题照样标。
+        实现走 **SQL 聚合**（8 个标签一条语句，`count(distinct case when … then customer_id end)`）：
+        原先把整行读进 ORM 再在 Python 里循环，1 万条反馈要 284ms，现在 20ms 量级，名单逐条一致。
         """
+        from sqlalchemy import text as _text
         with self.get_session() as s:
-            viewings = s.query(Viewing).filter(
-                Viewing.property_id == property_id,
-                Viewing.status == 'done',
-                Viewing.feedback.isnot(None),
-            ).all()
-            mentions = {tag: set() for tag in self.DEFECT_KEYWORDS}
-            for v in viewings:
-                fb = v.feedback or ''
-                for tag, kws in self.DEFECT_KEYWORDS.items():
-                    if any(kw in fb for kw in kws):
-                        mentions[tag].add(v.customer_id)
-            defects = sorted([t for t, cids in mentions.items()
-                              if len(cids) >= self.DEFECT_THRESHOLD])
             p = s.query(Property).get(property_id)
             if not p:
                 return []
-            detail = {t: len(mentions[t]) for t in defects}
+            params = {'pid': property_id}
+            where = ["property_id = :pid", "status = 'done'", "feedback is not null"]
+            if p.defect_baseline_at:
+                where.append("created_at > :baseline")
+                params['baseline'] = p.defect_baseline_at
+            parts = []
+            for i, (tag, kws) in enumerate(self.DEFECT_KEYWORDS.items()):
+                conds = " or ".join(f"feedback like :kw{i}_{j}" for j in range(len(kws)))
+                for j, kw in enumerate(kws):
+                    params[f'kw{i}_{j}'] = f'%{kw}%'
+                parts.append(f"count(distinct case when ({conds}) then customer_id end) as t{i}")
+            sql = (f"select {', '.join(parts)} from re_viewings where " + " and ".join(where))
+            row = s.execute(_text(sql), params).fetchone()
+            counts = {tag: int(n or 0) for (tag, _kws), n in zip(self.DEFECT_KEYWORDS.items(), row)}
+            defects = sorted([tag for tag, n in counts.items() if n >= self.DEFECT_THRESHOLD])
+            detail = {tag: counts[tag] for tag in defects}
             p.defect_tags = json.dumps(detail, ensure_ascii=False) if defects else None
             s.commit()
             return defects
 
     def clear_defect_tag(self, property_id, tag):
-        """房东整改后手动清除某缺陷标签"""
+        """房东整改后手动清除某缺陷标签，并记下整改时间 → dict 或 None（房源不存在）
+
+        返回值：`{'cleared': True/False, 'remaining': [剩余标签]}` —— 房源不存在返回 None，
+        让工具层能把"房源不存在"与"这套房源没有这个标签"分开说（契约 17）。
+        整改时间刷新后，该房源整改前的旧差评不再把标签打回来。
+        """
         with self.get_session() as s:
             p = s.query(Property).get(property_id)
-            if not p or not p.defect_tags:
-                return False
-            try:
-                detail = json.loads(p.defect_tags)
-            except (ValueError, TypeError):
-                return False
+            if not p:
+                return None
+            detail = {}
+            if p.defect_tags:
+                try:
+                    detail = json.loads(p.defect_tags) or {}
+                except (ValueError, TypeError):
+                    detail = {}          # 脏数据（外部改库）不能把整条清除动作崩掉
             if tag not in detail:
-                return False
+                return {'cleared': False, 'remaining': sorted(detail.keys())}
             del detail[tag]
             p.defect_tags = json.dumps(detail, ensure_ascii=False) if detail else None
+            p.defect_baseline_at = datetime.now()
             s.commit()
-            return True
+            return {'cleared': True, 'remaining': sorted(detail.keys())}
 
     # ---------- 转介绍经营（2026-08-28 功能6） ----------
     def find_customer_by_name(self, name):

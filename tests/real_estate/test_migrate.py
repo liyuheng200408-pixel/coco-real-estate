@@ -23,7 +23,7 @@ def sqlite_db(tmp_path):
     import sqlite3
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE re_customers (id INTEGER PRIMARY KEY, name TEXT, tags TEXT)")
-    conn.execute("CREATE TABLE re_properties (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("CREATE TABLE re_properties (id INTEGER PRIMARY KEY, name TEXT)")   # 003/015 需要
     conn.execute("CREATE TABLE re_deals (id INTEGER PRIMARY KEY, name TEXT)")
     conn.execute("CREATE TABLE re_customer_changes (id INTEGER PRIMARY KEY, customer_id INTEGER,"
                  " field TEXT, old_value TEXT, new_value TEXT)")
@@ -245,6 +245,25 @@ class TestMigrate:
         conn.close()
         assert "source_viewing_id" in cols, cols
         assert got == [("reminder", "存量提醒", None)], got
+
+    def test_015_adds_defect_baseline_column(self, sqlite_db):
+        """015 迁移：房源补 defect_baseline_at（存量行为 NULL），重跑安全"""
+        import sqlite3
+        db_path = sqlite_db.replace("sqlite:///", "")
+        conn = sqlite3.connect(db_path)
+        conn.execute("INSERT INTO re_properties (id, name) VALUES (1, '存量房源')")
+        conn.commit()
+        conn.close()
+
+        assert run_migrate(sqlite_db).returncode == 0
+        assert run_migrate(sqlite_db).returncode == 0        # 再跑一遍：ADD COLUMN 自动跳过
+
+        conn = sqlite3.connect(db_path)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(re_properties)")]
+        got = conn.execute("SELECT name, defect_baseline_at FROM re_properties").fetchall()
+        conn.close()
+        assert "defect_baseline_at" in cols, cols
+        assert got == [("存量房源", None)], got
 
     def test_add_column_idempotent_despite_sql_like_comment(self, sqlite_db, tmp_path):
         """注释里出现 SQL 字样（如 ALTER TABLE ... ADD COLUMN）不该影响幂等判定

@@ -135,14 +135,55 @@ class TestClearDefect:
             import json as _json
             prop.defect_tags = _json.dumps({"采光差": 3}, ensure_ascii=False)
             s.commit()
-        assert db.clear_defect_tag(p["id"], "采光差") is True
+        out = db.clear_defect_tag(p["id"], "采光差")
+        assert out["cleared"] is True and out["remaining"] == [], out   # 新形状：dict（2026-09-25 契约变更）
         props = db.search_properties(limit=100)
         target = [x for x in props if x["id"] == p["id"]][0]
         assert not target["defect_tags"]  # None 或空均算已清空
 
     def test_clear_nonexistent_tag(self, db):
         p = make_property(db)
-        assert db.clear_defect_tag(p["id"], "不存在的") is False
+        out = db.clear_defect_tag(p["id"], "不存在的")
+        assert out["cleared"] is False, out
+
+    def test_clear_unknown_property_returns_none(self, db):
+        assert db.clear_defect_tag(999999, "采光差") is None
+
+
+# ==================== 整改基线（2026-09-25 F203） ====================
+
+class TestDefectBaseline:
+    def test_cleared_tag_not_brought_back_by_new_feedback(self, db):
+        """清过标签的房源：整改前的旧反馈不再把标签打回来"""
+        import json as _json
+        p = make_property(db)
+        _view_and_feedback(db, "客户甲", p["id"], "采光差，白天要开灯")
+        _view_and_feedback(db, "客户乙", p["id"], "采光不好")
+        assert "采光差" in db.refresh_defect_tags(p["id"])
+        assert db.clear_defect_tag(p["id"], "采光差")["cleared"] is True
+        _view_and_feedback(db, "客户丙", p["id"], "房东整改后这次看采光还行")
+        assert db.refresh_defect_tags(p["id"]) == []          # 不再被打回
+
+    def test_new_feedback_after_baseline_can_tag_again(self, db):
+        """整改之后的**新**反馈仍按同一阈值判：真出新问题照样标上"""
+        p = make_property(db)
+        _view_and_feedback(db, "客户甲", p["id"], "采光差")
+        _view_and_feedback(db, "客户乙", p["id"], "采光差")
+        db.clear_defect_tag(p["id"], "采光差")
+        for name in ("客户丁", "客户戊"):
+            _view_and_feedback(db, name, p["id"], "还是采光差，一点没改")
+        assert "采光差" in db.refresh_defect_tags(p["id"])
+
+    def test_baseline_recorded_on_clear(self, db):
+        from agent.real_estate_db import Property
+        p = make_property(db)
+        with db.get_session() as s:
+            import json as _json
+            s.query(Property).get(p["id"]).defect_tags = _json.dumps({"采光差": 2})
+            s.commit()
+        assert db.clear_defect_tag(p["id"], "采光差")["cleared"] is True
+        with db.get_session() as s:
+            assert s.query(Property).get(p["id"]).defect_baseline_at is not None
 
 
 # ==================== 工具层 ====================

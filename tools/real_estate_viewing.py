@@ -621,21 +621,43 @@ registry.register(
 
 
 def clear_defect_tag(property_id: int, tag: str, task_id: str = None) -> str:
-    """房东整改后，经纪人手动清除某缺陷标签"""
+    """房东整改后手动清除某缺陷标签（清完记下整改时间，整改前的旧差评不会再打回来）
+
+    清除成功后：这条房源**整改之前**的旧差评不再把该标签打回来；整改之后的新反馈仍按
+    「≥2 位不同客户提及」判定 —— 真出新问题照样会重新标上。标签名去首尾空白；空标签给提示；
+    "房源不存在"与"这套房源没有这个标签"分开说。返回剩余标签，方便经纪人核对。
+    """
     property_id, problem = norm_id(property_id, '房源编号')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    tag = clean_text(tag)
+    if not tag:
+        return json.dumps({"success": False, "error":
+                           "标签不能为空，说一下要清哪个标签（如 采光差）"}, ensure_ascii=False)
     db = _get_db()
-    ok = db.clear_defect_tag(property_id, tag)
-    if ok:
-        return json.dumps({"success": True, "message": f"已清除缺陷标签: {tag}"}, ensure_ascii=False)
-    return json.dumps({"success": False, "error": f"清除失败：该房源没有标签 {tag}"}, ensure_ascii=False)
+    result = db.clear_defect_tag(property_id, tag)
+    if result is None:
+        return json.dumps({"success": False, "error": "房源不存在，请核对房源编号"},
+                          ensure_ascii=False)
+    if not result.get('cleared'):
+        payload = {"success": False, "error": f"这套房源没有「{tag}」这个标签"}
+        if result.get('remaining'):
+            payload["defect_tags"] = result['remaining']
+        return json.dumps(payload, ensure_ascii=False)
+    return json.dumps({
+        "success": True, "defect_tags": result.get('remaining') or [],
+        "message": f"已清除缺陷标签：{tag}（已记下整改时间，整改前的旧差评不会再把这个标签打回来）",
+    }, ensure_ascii=False)
 
 
 registry.register(
     name="clear_defect_tag",
     toolset="real_estate",
-    schema={"name": "clear_defect_tag", "description": "清除房源缺陷标签（房东整改后由经纪人手动操作，不自动清除）", "parameters": {
+    schema={"name": "clear_defect_tag", "description":
+            "清除房源缺陷标签（房东整改后由经纪人手动操作）：清完会记下这条房源的整改时间，"
+            "整改之前的旧差评不会再把这个标签打回来；整改之后的新反馈仍按「≥2 位不同客户提及」判定 —— "
+            "真出新问题照样会标上。标签名认库里已有的中文标签（如 采光差、临街吵、漏水）。"
+            "返回剩余标签便于核对；「房源不存在」与「这套房源没有这个标签」分开说。", "parameters": {
         "type": "object",
         "properties": {
             "property_id": {"type": "integer", "description": "房源ID"},
