@@ -245,3 +245,25 @@ class TestMigrate:
         conn.close()
         assert "source_viewing_id" in cols, cols
         assert got == [("reminder", "存量提醒", None)], got
+
+    def test_add_column_idempotent_despite_sql_like_comment(self, sqlite_db, tmp_path):
+        """注释里出现 SQL 字样（如 ALTER TABLE ... ADD COLUMN）不该影响幂等判定
+
+        2026-09-25 实测：判定是按正则 search 整段文本，注释里的假语句会被当真语句去判重，
+        于是真语句的"列已存在则跳过"失效 → 全新库上报 duplicate column name。
+        """
+        import sqlite3
+        db_path = sqlite_db.replace("sqlite:///", "")
+        conn = sqlite3.connect(db_path)
+        conn.execute("ALTER TABLE re_customers ADD COLUMN phone2 VARCHAR(20)")   # 模拟"结构已是最新"
+        conn.commit()
+        conn.close()
+        f = write_migration(tmp_path, "909_test_comment_trap.sql",
+                            "-- 写法说明：ALTER TABLE ... ADD COLUMN 由框架自动跳过已存在的列\n"
+                            "ALTER TABLE re_customers ADD COLUMN phone2 VARCHAR(20);\n")
+        try:
+            r = run_migrate(sqlite_db)
+            assert r.returncode == 0, r.stderr
+            assert "跳过" in r.stdout, r.stdout
+        finally:
+            f.unlink(missing_ok=True)

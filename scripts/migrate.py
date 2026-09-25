@@ -159,6 +159,18 @@ def _split_statements(sql_text):
     return stmts
 
 
+def _strip_comment_lines(sql_text):
+    """去掉"整行都是注释"的行 —— 幂等/形态判定只看真 SQL
+
+    背景（2026-09-25 实测）：判定用的是正则 search **整段文本**，注释里出现的 SQL 字样
+    会被当成真语句 —— 某迁移在注释里写了 `ALTER TABLE ... ADD COLUMN` 当说明，
+    于是真语句的"列已存在则跳过"判定失效，全新库上报 duplicate column name
+    （存量库反而正常，最容易被漏掉）。
+    """
+    return "\n".join(line for line in sql_text.splitlines()
+                     if not line.strip().startswith("--"))
+
+
 def validate_sql(sql_text, filename):
     """安全检查：禁止破坏性语句 + 禁止'给已有表加 NOT NULL 无默认值列'（无损更新红线）
 
@@ -201,28 +213,33 @@ def apply_migration(conn, seq, path):
             stmt = statement.strip()
             if not stmt:
                 continue
+            # 幂等/形态判定只看真 SQL（注释里的 SQL 字样不当真，见 _strip_comment_lines）
+            probe = _strip_comment_lines(stmt).strip()
+            if not probe:
+                continue
             # PostgreSQL 兼容：把 SQLite 的 AUTOINCREMENT 换成 SERIAL
             if dialect == "postgresql":
                 stmt = re.sub(r"INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT", "SERIAL PRIMARY KEY", stmt, flags=re.I)
                 stmt = re.sub(r"\bAUTOINCREMENT\b", "", stmt, flags=re.I)
             # ALTER ADD COLUMN 幂等：列已存在则跳过（对已是最新结构的库安全，不报错）
-            m = _ALTER_ADD_COL_RE.search(stmt)
+            m = _ALTER_ADD_COL_RE.search(probe)
             if m:
                 table_name, col_name = m.group(1), m.group(2)
                 if _column_exists(conn, table_name, col_name):
                     print(f"    跳过（列 {table_name}.{col_name} 已存在）")
                     continue
             # DROP COLUMN 幂等：列已不存在则跳过（重跑/已删过的库安全，SQLite 不支持 DROP COLUMN IF EXISTS）
-            m = _DROP_COL_RE.search(stmt)
+            m = _DROP_COL_RE.search(probe)
             if m:
                 table_name, col_name = m.group(1), m.group(2)
                 if not _column_exists(conn, table_name, col_name):
                     print(f"    跳过（列 {table_name}.{col_name} 不存在）")
                     continue
             # CREATE INDEX 幂等：索引引用的列不存在则跳过（对"只有部分结构"的库安全）
-            _body = re.sub(r"(?m)^\s*--.*$", "", stmt).strip().upper()
+            _body = probe.upper()
+
             if _body.startswith("CREATE INDEX") or _body.startswith("CREATE UNIQUE INDEX"):
-                mi = _INDEX_RE.search(stmt)
+                mi = _INDEX_RE.search(probe)
                 if mi:
                     tbl, cols_raw = mi.group(1), mi.group(2)
                     cols = [c.strip().split()[0].strip('"') for c in cols_raw.split(",") if c.strip()]
