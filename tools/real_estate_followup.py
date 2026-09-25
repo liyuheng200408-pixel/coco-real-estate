@@ -15,6 +15,9 @@ _LIST_LIMIT_MAX = 200
 # re_followups 的列宽：PostgreSQL 上 varchar 超长会让整单失败（sqlite 只是照存）
 AGENT_ID_MAX = 100
 
+# 逾期清单：默认在对话里列 50 条；limit 不设上限（老板 2026-09-25：要看全部走文档，别塞对话）
+OVERDUE_LIMIT_DEFAULT = 50
+
 
 def _get_db():
     from agent.real_estate_db import get_real_estate_db
@@ -203,15 +206,44 @@ def get_followups(customer_id: int, limit: int = _LIST_LIMIT_DEFAULT, task_id: s
     return json.dumps(payload, ensure_ascii=False)
 
 
-def get_overdue(task_id: str = None) -> str:
-    """获取逾期跟进列表 + 流失预警（超期无互动客户自动降级）"""
+def get_overdue(limit: int = OVERDUE_LIMIT_DEFAULT, task_id: str = None) -> str:
+    """查看逾期跟进清单（按"每位客户最新一条跟进"的下次跟进时间是否已过判定）
+
+    逾期最久在前；默认在对话里列 50 条，`limit` 不设上限（要看全部走文档，别把大 limit 塞进对话）。
+    返回 total=逾期总条数、count=本次返回条数、truncated。每条带客户名与中文类型；
+    客户已被删（存量孤儿）给"已删除客户（id=N）"标注而不是裸编号。
+    本工具还会顺手把长期无互动的客户**自动降一级**（S→A→B→C，同一天最多降一次），
+    降级名单在 downgrades 字段里如实说明。
+    """
+    limit = clamp_limit(limit, OVERDUE_LIMIT_DEFAULT, None)
     db = _get_db()
-    result = db.get_overdue()
-    # 流失预警：自动降级长期无互动客户（S>5天→A，A>10天→B，B>30天→C）
-    downgrade = db.auto_downgrade_stale_customers()
+    rows = db.get_overdue()
+    total = len(rows)
+    # 流失预警：先取一次快照，降级复用同一份（原先这里全库扫描两遍）
     stale = db.get_stale_customers()
-    message = f"有 {len(result)} 条跟进已逾期" if result else "暂无逾期跟进"
-    response = {"success": True, "overdue": result, "count": len(result), "message": message}
+    downgrade = db.auto_downgrade_stale_customers(stale=stale)
+    labels = db.get_customer_labels([r.get('customer_id') for r in rows[:limit]])
+    page = []
+    for row in rows[:limit]:
+        item = dict(row)
+        item['type_label'] = FOLLOWUP_TYPE_LABELS.get(row.get('type'), row.get('type'))
+        cid = row.get('customer_id')
+        label = labels.get(cid)
+        if label:
+            item['customer_name'] = label['name']
+            item['customer_tier'] = label['tier']
+        else:
+            item['customer_name'] = f"已删除客户（id={cid}）"
+            item['customer_missing'] = True
+        page.append(item)
+    if total:
+        message = f"有 {total} 条跟进已逾期（逾期最久在前）"
+    elif db.count_customers():
+        message = "暂无逾期跟进"
+    else:
+        message = "库里还没有客户，先登记客户再设跟进"
+    response = {"success": True, "overdue": page, "count": len(page), "total": total,
+                "truncated": bool(total > len(page)), "message": message}
     if downgrade.get('downgrades'):
         response['downgrades'] = downgrade['downgrades']
         response['message'] = message + f"；{len(downgrade['downgrades'])} 位客户长期无互动已自动降级"
@@ -303,8 +335,10 @@ TOOLS = [
         }, "required": ["customer_id"],
     }, "handler": lambda args, **kw: get_followups(**args)},
     {"name": "get_overdue", "description": "获取逾期跟进列表", "parameters": {
-        "type": "object", "properties": {},
-    }, "handler": lambda args, **kw: get_overdue()},
+        "type": "object", "properties": {
+            "limit": {"type": "integer", "description": "本次返回条数（默认 50，不设上限；传 0/负数/非数字按默认 50）"},
+        },
+    }, "handler": lambda args, **kw: get_overdue(**args)},
     {"name": "schedule_reminder", "description": "设置客户跟进提醒", "parameters": {
         "type": "object", "properties": {
             "customer_id": {"type": "integer"}, "date": {"type": "string"},

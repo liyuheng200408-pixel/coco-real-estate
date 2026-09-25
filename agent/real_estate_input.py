@@ -247,6 +247,8 @@ def clamp_limit(value, default, maximum=200):
         return default
     if value <= 0:
         return default
+    if maximum is None:      # 调用方明确要求"不设上限"
+        return value
     return min(value, maximum)
 
 

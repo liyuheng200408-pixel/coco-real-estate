@@ -2579,18 +2579,30 @@ class RealEstateDB:
         只用 now 当截止会漏掉——2026-09-23 加）。
         """
         with self.get_session() as s:
-            # 全量取出按创建时间升序，Python 聚合每组取最新（避免 PG 专有函数）
-            all_fu = s.query(Followup).order_by(Followup.created_at.asc()).all()
-            latest_by_customer = {}
-            for f in all_fu:
-                if f.customer_id is not None:
-                    latest_by_customer[f.customer_id] = f
-            overdue = []
+            # 2026-09-25（F140c）：改成 SQL 侧取"每位客户最新一条跟进"（created_at 最大、
+            # 同一时刻按 id 最大），不再把全表跟进读进内存再聚合（1.2 万客户 + 3.6 万跟进：
+            # 0.6s → 预计 0.05s）。口径与原来一致：每客户只看最新一条。
+            from sqlalchemy import func
+            from sqlalchemy.orm import aliased
+            other = aliased(Followup)
+            max_created = (s.query(func.max(other.created_at))
+                           .filter(other.customer_id == Followup.customer_id)
+                           .scalar_subquery())
+            max_id = (s.query(func.max(other.id))
+                      .filter(other.customer_id == Followup.customer_id,
+                              other.created_at == Followup.created_at)
+                      .scalar_subquery())
             now = before or datetime.now()
-            for f in latest_by_customer.values():
-                if f.next_date is not None and f.next_date < now:
-                    overdue.append(f)
-            return [f.to_dict() for f in overdue]
+            rows = (s.query(Followup)
+                    .filter(Followup.customer_id.isnot(None),
+                            Followup.created_at == max_created,
+                            Followup.id == max_id,
+                            Followup.next_date.isnot(None),
+                            Followup.next_date < now)
+                    # 逾期最久在前（同一时刻按 id 升序，顺序确定）—— 工具层直接照此展示
+                    .order_by(Followup.next_date.asc(), Followup.id.asc())
+                    .all())
+            return [f.to_dict() for f in rows]
     
     def get_stale_customers(self):
         """流失预警：按最后互动时间计算超期客户
@@ -2599,35 +2611,59 @@ class RealEstateDB:
         最后互动时间 = 最后一条跟进记录时间；无跟进则取客户创建时间。
         """
         with self.get_session() as s:
+            # 2026-09-25（F140a）：原先"每位活跃客户单独查一次最新跟进"= 1.2 万次查询（≈7.7 秒），
+            # 改成一次 group by 聚合取每客户最新跟进时间再合并（≈0.05 秒），口径不变。
+            from sqlalchemy import func
+            last_followup = {row[0]: row[1] for row in
+                             s.query(Followup.customer_id, func.max(Followup.created_at))
+                             .filter(Followup.customer_id.isnot(None))
+                             .group_by(Followup.customer_id).all()}
             now = datetime.now()
             result = []
-            for c in s.query(Customer).filter(Customer.status == 'active').all():
-                last_fu = s.query(Followup).filter(Followup.customer_id == c.id) \
-                    .order_by(Followup.created_at.desc()).first()
-                last_time = last_fu.created_at if (last_fu and last_fu.created_at) else c.created_at
+            # 只取判断要用的四列：拉整行 Customer 会把 1.2 万个手机号解密一遍（≈0.7 秒）
+            for cid, name, tier, created_at in (s.query(Customer.id, Customer.name,
+                                                        Customer.tier, Customer.created_at)
+                                                .filter(Customer.status == 'active').all()):
+                last_time = last_followup.get(cid) or created_at
                 if not last_time:
                     continue
                 days = (now - last_time).days
-                threshold = {'S': 5, 'A': 10, 'B': 30}.get(c.tier, 60)
+                threshold = {'S': 5, 'A': 10, 'B': 30}.get(tier, 60)
                 if days > threshold:
                     result.append({
-                        'customer_id': c.id, 'name': c.name, 'tier': c.tier,
+                        'customer_id': cid, 'name': name, 'tier': tier,
                         'days_inactive': days, 'threshold': threshold,
                         'last_contact': last_time.isoformat() if last_time else None,
                     })
             return result
     
-    def auto_downgrade_stale_customers(self):
-        """流失自动降级：S级超5天→A，A级超10天→B，B级超30天→C
+    def auto_downgrade_stale_customers(self, stale=None):
+        """流失自动降级：S级超5天→A，A级超10天→B，B级超30天→C（**同一天最多降一级**）
         
         降级同时写入变更历史。返回降级明细和仍超期的客户数。
+
+        2026-09-25 两处修复：
+        - **F141 一天最多降一级**：原先每次调用都按"当前等级"重算阈值，而早报、午间检查、
+          经纪人手动查逾期都会调它 → 同一个客户一天内 S→A→B→C 连降三级（等级是给经纪人看的
+          优先级别，掉了会直接影响跟进排序）。现在该客户**今天已经有一次等级变更**
+          （自动降级或人工调整都算）就不再降。
+        - **F140b 复用快照**：可传入已算好的 stale 列表，避免同一次请求里重复全库扫描。
         """
-        stale = self.get_stale_customers()
+        stale = self.get_stale_customers() if stale is None else stale
         downgrades = []
+        today = datetime.now().date()
         with self.get_session() as s:
+            from sqlalchemy import func
+            last_tier_change = {row[0]: row[1] for row in
+                                s.query(CustomerChange.customer_id, func.max(CustomerChange.created_at))
+                                .filter(CustomerChange.field == 'tier')
+                                .group_by(CustomerChange.customer_id).all()}
             for item in stale:
                 c = s.query(Customer).get(item['customer_id'])
                 if not c:
+                    continue
+                changed_at = last_tier_change.get(c.id)
+                if changed_at and changed_at.date() == today:
                     continue
                 mapping = {'S': 'A', 'A': 'B', 'B': 'C'}
                 new_tier = mapping.get(c.tier)
@@ -2642,6 +2678,24 @@ class RealEstateDB:
                     })
             s.commit()
         return {'downgrades': downgrades, 'still_stale': len(stale) - len(downgrades)}
+
+    def count_customers(self, status=None):
+        """客户数（轻量 count，空态判断用）"""
+        with self.get_session() as s:
+            query = s.query(Customer)
+            if status:
+                query = query.filter(Customer.status == status)
+            return query.count()
+
+    def get_customer_labels(self, customer_ids):
+        """批量取客户的姓名与等级 → {id: {name, tier}}（只取展示要用的两列，缺号不补）"""
+        ids = [int(i) for i in set(customer_ids or []) if i is not None]
+        if not ids:
+            return {}
+        with self.get_session() as s:
+            return {row[0]: {'name': row[1], 'tier': row[2]} for row in
+                    s.query(Customer.id, Customer.name, Customer.tier)
+                    .filter(Customer.id.in_(ids)).all()}
     
     # ---------- 数据清理（彻底删除 / 归档 / 恢复，2026-09-23 加） ----------
     # 背景：经纪人要求"删除/清空"数据时，系统此前只能把状态改成已售/已租/已关闭，
