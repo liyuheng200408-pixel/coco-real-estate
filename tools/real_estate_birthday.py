@@ -4,6 +4,7 @@ Coco 房产工具 - 生日/节日提醒
 import json
 from datetime import datetime
 from tools.registry import registry
+from agent.real_estate_display import attach_key_warning, mask_contacts
 from agent.real_estate_input import norm_id
 
 
@@ -44,7 +45,12 @@ def update_birthday(customer_id: int, birthday: str, task_id: str = None) -> str
     db = _get_db()
     result = db.update_customer(customer_id, birthday=birthday.strip())
     if result:
-        return json.dumps({"success": True, "customer": result, "message": f"已设置客户生日 {birthday}"}, ensure_ascii=False)
+        # 联系方式展示防御（2026-09-25）：返回体里带着整行客户资料，密钥不一致时
+        # 结构体里的 phone/wechat 就是密文（update_customer/update_tier 早就做了，这里漏了）
+        result, masked = mask_contacts(result)
+        return json.dumps(attach_key_warning(
+            {"success": True, "customer": result, "message": f"已设置客户生日 {birthday}"},
+            masked), ensure_ascii=False)
     return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
 
 

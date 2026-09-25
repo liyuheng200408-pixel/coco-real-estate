@@ -3,6 +3,7 @@ Coco 房产工具 - 客户管理
 """
 import json
 
+from agent.real_estate_display import attach_key_warning, mask_contacts, safe_contact
 from agent.real_estate_input import (STAGES, STAGE_LABELS, clamp_limit, clean_tags,
                                      norm_birthday, norm_customer_type, norm_id, norm_money,
                                      norm_phone, norm_stage, norm_tags, norm_tier,
@@ -42,40 +43,6 @@ def _norm_status(value):
 
 def _fail(message: str) -> str:
     return json.dumps({"success": False, "error": message}, ensure_ascii=False)
-
-
-# 联系方式读不出来时的口径（读路径与写入路径共用，避免各写一套）
-KEY_MISMATCH_WARNING = (
-    "客户联系方式读不出来：库里的加密内容用当前密钥解不开"
-    "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
-    "在此之前不要把这条联系方式给客户。")
-
-
-def _mask_customer_contacts(row):
-    """把客户行里的联系方式做展示防御，返回 (row, 被掩码的字段列表)。
-
-    密钥不一致时 EncryptedString 会把密文原样返回 —— 读详情、列客户、改等级/改阶段等
-    **所有会把客户数据交给上层的路径**都必须过这里（2026-09-24 收口：原先只有建判重的
-    提示做过，读/写路径都直接把 gAAAA… 交出去了）。
-    """
-    masked = []
-    for key in ("phone", "wechat"):
-        before = row.get(key)
-        if before is None:
-            continue
-        after = _safe_contact(before)
-        if after != before:
-            masked.append(key)
-        row[key] = after
-    return row, masked
-
-
-def _attach_key_warning(payload, masked):
-    """命中密文时给返回体补 warning 与 cipher_fields（让 Coco 如实转述，不静默）"""
-    if masked:
-        payload["warning_key_mismatch"] = KEY_MISMATCH_WARNING
-        payload["cipher_fields"] = sorted(set(masked))
-    return payload
 
 
 def _stage_before(new_stage, old_stage):
@@ -128,14 +95,6 @@ def _match_message(matches, budget_max):
             extra = ""
         parts.append(f"{m.get('title') or '房源'} {price_txt}{extra}")
     return f"客户已添加。库里暂无符合需求的房源，最接近的 {len(matches)} 套仅供参考（{'；'.join(parts)}）"
-
-
-def _safe_contact(value):
-    """联系方式展示：空 → None；疑似密钥不一致的密文 → 可读提示（绝不把乱码丢给经纪人）"""
-    if not value:
-        return None
-    from agent.real_estate_db import KEY_MISMATCH_HINT, looks_like_ciphertext
-    return KEY_MISMATCH_HINT if looks_like_ciphertext(value) else value
 
 
 def _get_db():
@@ -237,7 +196,7 @@ def add_customer(
             return json.dumps({
                 "success": False, "duplicate": True, "identical": identical, "existing_customer": dup,
                 "error": (f"该客户已存在（id={dup['id']} {dup['name']}，"
-                          f"手机 {_safe_contact(dup.get('phone')) or '未填'}）。" + msg),
+                          f"手机 {safe_contact(dup.get('phone')) or '未填'}）。" + msg),
             }, ensure_ascii=False)
     result = db.add_customer(
         name=name, phone=phone, wechat=wechat, tier=tier_value,
@@ -392,13 +351,13 @@ def update_customer(
             'message': f"意向区域从「{old['location']}」变更为「{kwargs['location']}」，留意需求方向变化。",
         })
 
-    result, masked = _mask_customer_contacts(result)
+    result, masked = mask_contacts(result)
     response = {"success": True, "customer": result}
     if warnings:
         response['warnings'] = warnings
     if alerts:
         response['alerts'] = alerts
-    return json.dumps(_attach_key_warning(response, masked), ensure_ascii=False)
+    return json.dumps(attach_key_warning(response, masked), ensure_ascii=False)
 
 
 # 变更历史展示口径（2026-09-24 加，F76）：历史里原本只有英文键与裸数字，
@@ -485,8 +444,8 @@ def get_customer(customer_id: int, task_id: str = None) -> str:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
     # 联系方式展示防御（2026-09-24 加，与房源详情 F16 同口径）：密钥不一致时读出来是密文，
     # 绝不能把 gAAAA… 当客户手机号说给经纪人，也不能默默咽掉（要给 warning 让 Coco 如实转述）。
-    result, masked = _mask_customer_contacts(result)
-    return json.dumps(_attach_key_warning({"success": True, "customer": result}, masked),
+    result, masked = mask_contacts(result)
+    return json.dumps(attach_key_warning({"success": True, "customer": result}, masked),
                       ensure_ascii=False)
 
 
@@ -536,7 +495,7 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
     # 联系方式展示防御（2026-09-24 加，与 get_customer / 房源详情 F16 同口径）
     masked_fields = []
     for row in result:
-        _, row_masked = _mask_customer_contacts(row)
+        _, row_masked = mask_contacts(row)
         masked_fields.extend(row_masked)
     scope = "按指定状态" if status else ("含已关闭" if include_closed else "在跟客户（活跃+暂缓）")
     if tag_values:
@@ -547,7 +506,7 @@ def list_customers(tier: str = None, status: str = None, customer_type: str = No
     if response["truncated"]:
         response["message"] = (f"共 {total} 位{scope}，本次返回 {len(result)} 位（最新录入优先）。"
                                f"要看得更全就缩小条件，或把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
-    return json.dumps(_attach_key_warning(response, masked_fields), ensure_ascii=False)
+    return json.dumps(attach_key_warning(response, masked_fields), ensure_ascii=False)
 
 
 def update_tier(customer_id: int, tier: str, task_id: str = None) -> str:
@@ -562,9 +521,9 @@ def update_tier(customer_id: int, tier: str, task_id: str = None) -> str:
     result = db.update_customer(customer_id, tier=tier_value)
     if not result:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
-    result, masked = _mask_customer_contacts(result)
+    result, masked = mask_contacts(result)
     payload = {"success": True, "customer": result, "message": f"已将客户等级调整为 {tier_value}"}
-    return json.dumps(_attach_key_warning(payload, masked), ensure_ascii=False)
+    return json.dumps(attach_key_warning(payload, masked), ensure_ascii=False)
 
 
 def customer_stats(task_id: str = None) -> str:
@@ -879,7 +838,7 @@ def update_customer_stage(customer_id: int, stage: str, task_id: str = None) -> 
         warnings.append("该客户状态仍是「在跟」；如不再跟进，请把状态改为 closed"
                         "（update_customer(status='closed')）")
 
-    updated, masked = _mask_customer_contacts(updated)
+    updated, masked = mask_contacts(updated)
     payload = {
         "success": True,
         "message": f"{updated['name']} 生命周期阶段已更新为: {STAGE_LABELS[stage_value]}",
@@ -887,7 +846,7 @@ def update_customer_stage(customer_id: int, stage: str, task_id: str = None) -> 
     }
     if warnings:
         payload["warnings"] = warnings
-    return json.dumps(_attach_key_warning(payload, masked), ensure_ascii=False)
+    return json.dumps(attach_key_warning(payload, masked), ensure_ascii=False)
 
 
 registry.register(

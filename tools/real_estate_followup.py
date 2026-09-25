@@ -4,6 +4,7 @@ Coco 房产工具 - 跟进管理
 import json
 from datetime import datetime
 from tools.registry import registry
+from agent.real_estate_display import attach_key_warning, mask_contacts
 from agent.real_estate_input import clamp_limit, norm_id
 
 # 列表分页口径（与 list_customers/list_owners 同一套：默认 20、上限 200、≤0 与非数字按默认）
@@ -216,24 +217,34 @@ registry.register(
 )
 
 
+# 挽回话术模板的中文说法（对外只说人话，内部模板键留在 customers[] 里给 Coco 用）
+_WINBACK_LABELS = {"winback_long_absence": "长期未联系", "winback_after_viewing": "看房后没下文"}
+
+
 def churn_warning(min_risk: int = 40, task_id: str = None) -> str:
     """流失预警：找出"快凉了但还能救"的客户，附挽回建议"""
     db = _get_db()
     rows = db.churn_risk_customers(min_risk=min_risk)
     if not rows:
         return json.dumps({"success": True, "message": "当前无流失风险客户，保持节奏", "customers": []}, ensure_ascii=False)
+    # 联系方式展示防御（2026-09-25）：customers[] 里带着 phone，密钥不一致时是密文（原先直出）
+    masked_fields = []
+    for r in rows:
+        _, m = mask_contacts(r)
+        masked_fields.extend(m)
     high = [r for r in rows if r["risk_level"] == "高危"]
     lines = [f"⚠️ 流失预警：{len(rows)} 位客户有流失风险（高危 {len(high)} 位）"]
     for r in rows[:10]:
         lines.append(f"\n· {r['name']}（{r['tier']}级，风险{r['risk_score']}分[{r['risk_level']}]）")
         lines.append(f"  信号: {'、'.join(r['signals'])}")
-        lines.append(f"  建议: 调用 use_template 模板 {r['winback_script']} 生成挽回话术")
-    return json.dumps({
+        label = _WINBACK_LABELS.get(r["winback_script"], "挽回")
+        lines.append(f"  建议: 用「{label}」挽回模板生成话术")
+    return json.dumps(attach_key_warning({
         "success": True,
         "summary": {"total": len(rows), "high_risk": len(high)},
         "customers": rows,
         "message": "\n".join(lines),
-    }, ensure_ascii=False)
+    }, masked_fields), ensure_ascii=False)
 
 
 registry.register(

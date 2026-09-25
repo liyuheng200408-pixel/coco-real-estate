@@ -103,9 +103,10 @@ def test_write_path_no_warning_on_normal_data(tool_db):
 
 
 def test_read_paths_share_the_same_warning_text():
-    """读路径与写入路径共用同一句警告（避免以后又各写一套）"""
-    assert mod.KEY_MISMATCH_WARNING.startswith("客户联系方式读不出来")
-    assert "密钥文件" in mod.KEY_MISMATCH_WARNING
+    """读路径与写入路径共用同一句警告（2026-09-25 起收在 agent/real_estate_display.py）"""
+    from agent.real_estate_display import CUSTOMER_KEY_MISMATCH_WARNING
+    assert CUSTOMER_KEY_MISMATCH_WARNING.startswith("客户联系方式读不出来")
+    assert "密钥文件" in CUSTOMER_KEY_MISMATCH_WARNING
 
 
 # ---------- ③ 描述 ----------

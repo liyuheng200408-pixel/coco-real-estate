@@ -4,6 +4,7 @@ Coco 房产工具 - 房源管理
 import json
 import re
 
+from agent.real_estate_display import OWNER_KEY_MISMATCH_WARNING, attach_key_warning, mask_contacts, safe_contact
 from agent.real_estate_input import (clamp_limit, cn_number, norm_customer_type, norm_date, norm_id,
                                      norm_money)
 from tools.registry import registry
@@ -524,9 +525,6 @@ def _norm_orientation(value):
 _STATUS_LABELS = {"available": "在售", "sold": "已售", "rented": "已租"}
 
 
-from agent.real_estate_db import KEY_MISMATCH_HINT  # noqa: E402  密钥不一致时的展示提示
-
-
 def _fmt_price(prop: dict) -> str:
     """价格展示（系统存元）：二手/一手房 → '28.37万'，出租 → '1000元/月'"""
     price = prop.get("price")
@@ -554,14 +552,6 @@ def _fmt_area(value) -> str:
         return "未录入"
     area = float(value)
     return f"{area:.0f}" if area == int(area) else f"{area:g}"
-
-
-def _safe_contact(value):
-    """联系方式展示：空 → None；疑似密钥不一致的密文 → 给可读提示（绝不把乱码丢给经纪人）"""
-    if not value:
-        return None
-    from agent.real_estate_db import looks_like_ciphertext
-    return KEY_MISMATCH_HINT if looks_like_ciphertext(value) else value
 
 
 def _prop_brief(prop: dict) -> dict:
@@ -599,8 +589,8 @@ def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
         lines.append(f"租客要求 {prop['tenant_requirements']}")
     if owner:
         line = (f"【业主】{owner.get('name') or '未填姓名'}，"
-                f"电话 {_safe_contact(owner.get('phone')) or '未录入'}")
-        _wechat = _safe_contact(owner.get("wechat"))
+                f"电话 {safe_contact(owner.get('phone')) or '未录入'}")
+        _wechat = safe_contact(owner.get("wechat"))
         if _wechat:
             line += f"，微信 {_wechat}"
         if prop.get("viewing_note"):
@@ -664,12 +654,11 @@ def get_property_detail(property_id: int = None, title: str = None, task_id: str
     owner = rows[0].get("owner") if rows else None
     image_count = len([x for x in (prop.get("images") or "").split(",") if x.strip()])
     history = db.get_price_history(pid, limit=3)
-    from agent.real_estate_db import looks_like_ciphertext
-    key_warning = None
-    if owner and any(looks_like_ciphertext(owner.get(k)) for k in ("phone", "wechat")):
-        key_warning = ("业主联系方式读不出来：库里的加密内容用当前密钥解不开"
-                       "（常见于换了机器、或恢复备份时没带上密钥文件）。先用备份里的密钥文件恢复，"
-                       "在此之前不要把这条联系方式给客户。")
+    # 联系方式展示防御（2026-09-25 收口）：message 那句一直走了 safe_contact，**结构体漏了** ——
+    # 密钥不一致时 owner 里就是 gAAAA…，照同一套过一遍再交出去（房东批 F101 之后又一个同族漏点）。
+    masked_fields = []
+    if owner:
+        owner, masked_fields = mask_contacts(owner)
     response = {
         "success": True,
         "property": prop,
@@ -678,9 +667,8 @@ def get_property_detail(property_id: int = None, title: str = None, task_id: str
         "price_history": history,
         "message": _detail_message(prop, owner, image_count, history),
     }
-    if key_warning:
-        response["warning_key_mismatch"] = key_warning
-    return json.dumps(response, ensure_ascii=False)
+    return json.dumps(attach_key_warning(response, masked_fields, OWNER_KEY_MISMATCH_WARNING),
+                      ensure_ascii=False)
 
 
 def match_property(customer_id: int, top_n: int = 5, task_id: str = None) -> str:
