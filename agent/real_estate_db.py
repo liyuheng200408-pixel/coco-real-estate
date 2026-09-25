@@ -2542,11 +2542,28 @@ class RealEstateDB:
             s.add(f); s.commit(); s.refresh(f)
             return f.to_dict()
     
-    def get_followups(self, customer_id, limit=20):
+    def get_followups(self, customer_id, limit=20, with_total=False):
+        """某位客户的跟进历史（最新在前）
+
+        with_total=True 时返回 (本页明细, 该客户跟进总条数) —— 总数走 SQL 聚合，
+        别拿本页条数当总数（2026-09-25 F136）。同一秒写入的多条按 id 兜底排序，保证顺序确定。
+        """
         with self.get_session() as s:
-            return [f.to_dict() for f in s.query(Followup)
-                .filter(Followup.customer_id == customer_id)
-                .order_by(Followup.created_at.desc()).limit(limit).all()]
+            query = (s.query(Followup)
+                     .filter(Followup.customer_id == customer_id)
+                     .order_by(Followup.created_at.desc(), Followup.id.desc()))
+            total = query.count() if with_total else None
+            items = [f.to_dict() for f in query.limit(limit).all()]
+        return (items, total) if with_total else items
+
+    def get_property_titles(self, property_ids):
+        """按 id 批量取房源标题 → {id: 标题}（只取要展示的两列，缺号不补占位）"""
+        ids = [int(i) for i in set(property_ids or []) if i is not None]
+        if not ids:
+            return {}
+        with self.get_session() as s:
+            return {row[0]: row[1] for row in
+                    s.query(Property.id, Property.title).filter(Property.id.in_(ids)).all()}
     
     def get_overdue(self, before=None):
         """逾期跟进：按客户取最新一条跟进，其 next_date 已过期才算逾期

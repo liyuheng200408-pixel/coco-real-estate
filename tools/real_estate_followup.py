@@ -169,14 +169,38 @@ def add_followup(
 
 
 def get_followups(customer_id: int, limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
-    """获取客户跟进历史"""
+    """查看某位客户的跟进历史（最新的在前；默认 20 条、最多 200）
+
+    返回 total=该客户跟进总条数、count=本次返回条数、truncated；被截断时给一句说明。
+    "客户不存在"与"客户存在但没有跟进"分开说 —— 前者多半是编号打错了。
+    每条带 type_label 中文类型与 property_title 关联房源标题（房源已删则给可读标注）。
+    """
     limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
-    result = db.get_followups(customer_id, limit=limit)
-    return json.dumps({"success": True, "followups": result, "count": len(result)}, ensure_ascii=False)
+    if not db.get_customer(customer_id):
+        return json.dumps({"success": False, "error": "客户不存在，请先在客户列表里核对编号"},
+                          ensure_ascii=False)
+    result, total = db.get_followups(customer_id, limit=limit, with_total=True)
+    titles = db.get_property_titles([f.get('property_id') for f in result])
+    items = []
+    for row in result:
+        item = dict(row)
+        item['type_label'] = FOLLOWUP_TYPE_LABELS.get(row.get('type'), row.get('type'))
+        pid = row.get('property_id')
+        if pid is not None:
+            item['property_title'] = titles.get(pid) or f"已删除房源（id={pid}）"
+        items.append(item)
+    payload = {"success": True, "followups": items, "count": len(items), "total": total,
+               "truncated": bool(total and total > len(items))}
+    if not total:
+        payload["message"] = "这位客户还没有跟进记录"
+    elif payload["truncated"]:
+        payload["message"] = (f"共 {total} 条跟进，本次返回最近 {len(items)} 条（最新在前）。"
+                              f"要看得更全就把 limit 调大（最多 {_LIST_LIMIT_MAX}）")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def get_overdue(task_id: str = None) -> str:
@@ -272,10 +296,10 @@ TOOLS = [
             "next_time": {"type": "string", "description": "下次跟进时间，如 09:30（也认 9点30 / 0930）"},
         }, "required": ["customer_id", "content"],
     }, "handler": lambda args, **kw: add_followup(**args)},
-    {"name": "get_followups", "description": "获取客户跟进历史", "parameters": {
+    {"name": "get_followups", "description": "查看某位客户的跟进历史（最新的在前；默认返回 20 条、最多 200）。返回 total=该客户跟进总条数、count=本次返回条数、truncated；客户不存在会如实说明", "parameters": {
         "type": "object", "properties": {
-            "customer_id": {"type": "integer"},
-            "limit": {"type": "integer", "description": "返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
+            "customer_id": {"type": "integer", "description": "客户ID"},
+            "limit": {"type": "integer", "description": "本次返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
         }, "required": ["customer_id"],
     }, "handler": lambda args, **kw: get_followups(**args)},
     {"name": "get_overdue", "description": "获取逾期跟进列表", "parameters": {
@@ -307,7 +331,7 @@ registry.register(
 registry.register(
     name="get_followups",
     toolset="real_estate",
-    schema={"name": "get_followups", "description": "获取客户跟进历史", "parameters": TOOLS[1]["parameters"]},
+    schema={"name": "get_followups", "description": "查看某位客户的跟进历史（最新的在前；默认返回 20 条、最多 200）。返回 total=该客户跟进总条数、count=本次返回条数、truncated；客户不存在会如实说明", "parameters": TOOLS[1]["parameters"]},
     handler=TOOLS[1]["handler"],
 )
 registry.register(
