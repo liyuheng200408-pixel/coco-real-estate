@@ -309,6 +309,26 @@ def norm_date(value, label="日期"):
     return None, f"{label}没能识别：收到的是「{value}」。请用 2026-12-31 这类写法"
 
 
+# ==================== 列宽 / 文本入库 ====================
+
+def clip_text(value, max_len):
+    """按列宽截断文本 → (截断后的值, 提示或 None)。截断必须告知，不静默丢内容
+
+    生产是 PostgreSQL，varchar 超长会让**整单失败**（sqlite 只是照存），
+    所以凡是写进定长列的文本都要先过这里（2026-09-25 F87）。
+    """
+    if not isinstance(value, str) or len(value) <= max_len:
+        return value, None
+    return value[:max_len], f"超过 {max_len} 字，只保留了前 {max_len} 字"
+
+
+def clean_text(value):
+    """文本参数去首尾空白；空串按"未填"（None），避免库里空串与未填两种形态并存"""
+    if value is None:
+        return None
+    return str(value).strip() or None
+
+
 # ==================== 客户标签 ====================
 
 TAG_MAX_LEN = 20

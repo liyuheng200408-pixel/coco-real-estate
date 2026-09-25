@@ -8,7 +8,7 @@ from datetime import datetime
 
 from agent.real_estate_display import (OWNER_KEY_MISMATCH_WARNING, PERSON_KEY_MISMATCH_WARNING,
                                        attach_key_warning, mask_contacts, safe_contact)
-from agent.real_estate_input import clamp_limit, norm_id, norm_phone
+from agent.real_estate_input import clamp_limit, clean_text, clip_text, norm_id, norm_phone
 from agent.real_estate_money import fmt_budget, fmt_price
 from tools.real_estate_property import _STATUS_LABELS
 from tools.registry import registry
@@ -55,20 +55,6 @@ def _norm_days(value, default=30):
     return max(value, 0)
 
 
-def _clip(value, max_len):
-    """按列宽截断文本 → (截断后的值, 提示或 None)。截断必须告知，不静默丢内容"""
-    if not isinstance(value, str) or len(value) <= max_len:
-        return value, None
-    return value[:max_len], f"超过 {max_len} 字，只保留了前 {max_len} 字"
-
-
-def _clean_text(value):
-    """文本参数去首尾空白；空串按"未填"（None），避免库里空串与未填两种形态并存"""
-    if value is None:
-        return None
-    return str(value).strip() or None
-
-
 def add_owner(name: str, phone: str = None, wechat: str = None,
               id_number: str = None, trust_note: str = None,
               notes: str = None, force: bool = False, task_id: str = None) -> str:
@@ -82,15 +68,15 @@ def add_owner(name: str, phone: str = None, wechat: str = None,
     if not name:
         return json.dumps({"success": False, "error": "房东姓名不能为空"}, ensure_ascii=False)
     warnings = []
-    name, _clipped = _clip(name, NAME_MAX)
+    name, _clipped = clip_text(name, NAME_MAX)
     if _clipped:
         warnings.append("房东姓名" + _clipped + "。")
-    trust_note, _clipped = _clip(_clean_text(trust_note), TRUST_NOTE_MAX)
+    trust_note, _clipped = clip_text(clean_text(trust_note), TRUST_NOTE_MAX)
     if _clipped:
         warnings.append("信任度备注" + _clipped + "（其余内容可放进备注里）。")
     phone = norm_phone(phone)
-    wechat = _clean_text(wechat)
-    notes = _clean_text(notes)
+    wechat = clean_text(wechat)
+    notes = clean_text(notes)
     db = _get_db()
 
     if not force and (phone or wechat):
@@ -103,7 +89,7 @@ def add_owner(name: str, phone: str = None, wechat: str = None,
             }, ensure_ascii=False)
         if dup:
             identical = (dup.get('name') == name
-                         and all(_clean_text(dup.get(k)) == v for k, v in
+                         and all(clean_text(dup.get(k)) == v for k, v in
                                  (('phone', phone), ('wechat', wechat),
                                   ('trust_note', trust_note), ('notes', notes)) if v is not None))
             tail = ("同号同名，不用重复登记。" if identical else
