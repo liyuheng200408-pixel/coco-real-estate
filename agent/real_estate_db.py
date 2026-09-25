@@ -1096,17 +1096,36 @@ class RealEstateDB:
         now = datetime.now()
         result = []
         with self.get_session() as s:
-            customers = s.query(Customer).filter(Customer.status == 'active').all()
-            for c in customers:
-                if self.customer_has_deal(c.id):
+            from sqlalchemy import func
+            # 2026-09-25（F177）：原先对**每一位客户**单独查 3~4 次（有无成交 / 最新跟进 / 带看数 / 带看后跟进数）
+            # —— 1.2 万客户 = 36001 次 SQL ≈ 21 秒。这里改成四次聚合一次性拿回，**信号与权重一行未改**：
+            #   ① 有成交的客户集合 ② 每客户最后跟进时间 ③ 每客户已完成带看数 ④ 每客户最后一次已完成带看时间
+            customers = (s.query(Customer.id, Customer.name, Customer.tier, Customer.phone)
+                         .filter(Customer.status == 'active').all())
+            if not customers:      # 没有在跟客户就别去跑那四次聚合（空库/新装实例的快路径）
+                return []
+            dealt_ids = {row[0] for row in s.query(Deal.customer_id).distinct().all()
+                         if row[0] is not None}
+            last_followup = {row[0]: row[1] for row in
+                             s.query(Followup.customer_id, func.max(Followup.created_at))
+                             .filter(Followup.customer_id.isnot(None))
+                             .group_by(Followup.customer_id).all()}
+            done_viewing_count = {row[0]: row[1] for row in
+                                  s.query(Viewing.customer_id, func.count(Viewing.id))
+                                  .filter(Viewing.status == 'done', Viewing.customer_id.isnot(None))
+                                  .group_by(Viewing.customer_id).all()}
+            last_done_viewing = {row[0]: row[1] for row in
+                                 s.query(Viewing.customer_id, func.max(Viewing.created_at))
+                                 .filter(Viewing.status == 'done', Viewing.customer_id.isnot(None))
+                                 .group_by(Viewing.customer_id).all()}
+            for cid, name, tier, phone in customers:
+                if cid in dealt_ids:
                     continue
                 signals = []
                 score = 0
                 # 信号1：最后跟进距今
-                last = s.query(Followup).filter(
-                    Followup.customer_id == c.id
-                ).order_by(Followup.created_at.desc()).first()
-                days_since = (now - last.created_at).days if last and last.created_at else None
+                last_at = last_followup.get(cid)
+                days_since = (now - last_at).days if last_at else None
                 if days_since is None:
                     score += 40
                     signals.append("从未跟进")
@@ -1116,22 +1135,17 @@ class RealEstateDB:
                 elif days_since > 14:
                     score += 30
                     signals.append(f"{days_since}天未联系")
-                # 信号2：带看完成后零跟进
-                done_viewings = s.query(Viewing).filter(
-                    Viewing.customer_id == c.id, Viewing.status == 'done').count()
+                # 信号2：带看完成后零跟进（最后一次带看之后没有任何跟进）
+                done_viewings = done_viewing_count.get(cid, 0)
                 if done_viewings > 0:
-                    fp_after = s.query(Followup).filter(
-                        Followup.customer_id == c.id,
-                        Followup.created_at >= s.query(Viewing.created_at)
-                            .filter(Viewing.customer_id == c.id, Viewing.status == 'done')
-                            .order_by(Viewing.created_at.desc()).limit(1).scalar_subquery(),
-                    ).count()
-                    if fp_after == 0:
+                    viewing_at = last_done_viewing.get(cid)
+                    has_fp_after = bool(last_at and viewing_at and last_at >= viewing_at)
+                    if not has_fp_after:
                         score += 20
                         signals.append("带看后无跟进")
                 if not signals:
                     continue
-                score = int(score * (1.5 if c.tier == 'S' else 1.0))
+                score = int(score * (1.5 if tier == 'S' else 1.0))
                 if score < min_risk:
                     continue
                 if days_since is not None and days_since > 30:
@@ -1141,8 +1155,8 @@ class RealEstateDB:
                 else:
                     reason_hint = "winback_long_absence"
                 result.append({
-                    'customer_id': c.id, 'name': c.name, 'tier': c.tier,
-                    'phone': c.phone,
+                    'customer_id': cid, 'name': name, 'tier': tier,
+                    'phone': phone,
                     'risk_score': score,
                     'risk_level': '高危' if score >= 60 else '中危',
                     'signals': signals,

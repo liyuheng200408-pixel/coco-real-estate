@@ -273,6 +273,17 @@ def case_stage_stagnation(w):
     return {"message": out.get("message") or "", "warnings": (out.get("warnings") or [])}
 
 
+def case_churn_warning(w):
+    """流失预警的三条话术：正常（含挽回建议）/ 名单被截断 / 空库"""
+    for i in range(25):
+        c = w.db.add_customer(name=f"流失客户{i}", tier="B", customer_type="rent")
+        w.db.add_followup(customer_id=c["id"], type="note", content="旧跟进",
+                          created_at=datetime.now() - timedelta(days=40))
+    out = _load(w.fu.churn_warning())
+    empty_lib = {"message": out.get("message") or ""}
+    return {"message": empty_lib["message"], "warnings": (out.get("warnings") or [])}
+
+
 def case_market_brief(w):
     _customers(w.db, 3)
     return _load(w.an.market_brief())
@@ -302,6 +313,7 @@ SCENARIOS = [
     ("midday_check 说明句", case_midday_check),
     ("stale_check 说明句", case_stale_check),
     ("stage_stagnation 说明句", case_stage_stagnation),
+    ("churn_warning 话术", case_churn_warning),
 ]
 
 

@@ -18,6 +18,9 @@ AGENT_ID_MAX = 100
 
 # 逾期清单：默认在对话里列 50 条；limit 不设上限（老板 2026-09-25：要看全部走文档，别塞对话）
 OVERDUE_LIMIT_DEFAULT = 50
+# 流失预警的风险分阈值：默认 40（中危起步）；传非数字/None/≤0 按这个默认值
+CHURN_MIN_RISK_DEFAULT = 40
+
 # 本模块"名单类"返回的默认展示条数（流失名单、阶段滞留名单；老板 2026-09-25 定 20：
 # 这类清单要能一眼看完，总数另给 total / stale_total）—— 改它等于同时改所有名单的上限
 LIST_SHOW_LIMIT = 20
@@ -587,39 +590,68 @@ registry.register(
 _WINBACK_LABELS = {"winback_long_absence": "长期未联系", "winback_after_viewing": "看房后没下文"}
 
 
-def churn_warning(min_risk: int = 40, task_id: str = None) -> str:
-    """流失预警：找出"快凉了但还能救"的客户，附挽回建议"""
+def _norm_min_risk(value, default=CHURN_MIN_RISK_DEFAULT):
+    """风险分阈值归一 → 正整数：非数字/None/≤0 一律按默认（与 `limit` 类"非数字按默认"同一套口径）
+
+    2026-09-25（F176）：原先 `min_risk='abc'`/`None` 会一路走到 `score < min_risk` 抛 TypeError
+    （被框架兜成"执行失败"），传 0/负数又会把全部有信号的客户倒出来。
+    """
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def churn_warning(min_risk: int = CHURN_MIN_RISK_DEFAULT, task_id: str = None) -> str:
+    """流失预警：找出"快凉了但还能救"的客户，附挽回建议
+
+    返回 `summary.total`=风险客户总数、`summary.high_risk`=高危人数，`customers` 只列风险最高的
+    `LIST_SHOW_LIMIT` 位（`count`/`total`/`truncated` 三件齐）；空库与"有客户但没风险"分开说。
+    """
+    min_risk = _norm_min_risk(min_risk)
     db = _get_db()
     rows = db.churn_risk_customers(min_risk=min_risk)
-    if not rows:
-        return json.dumps({"success": True, "message": "当前无流失风险客户，保持节奏", "customers": []}, ensure_ascii=False)
     # 联系方式展示防御（2026-09-25）：customers[] 里带着 phone，密钥不一致时是密文（原先直出）
     masked_fields = []
     for r in rows:
         _, m = mask_contacts(r)
         masked_fields.extend(m)
     high = [r for r in rows if r["risk_level"] == "高危"]
-    lines = [f"⚠️ 流失预警：{len(rows)} 位客户有流失风险（高危 {len(high)} 位）"]
-    for r in rows[:10]:
-        lines.append(f"\n· {r['name']}（{r['tier']}级，风险{r['risk_score']}分[{r['risk_level']}]）")
-        lines.append(f"  信号: {'、'.join(r['signals'])}")
-        label = _WINBACK_LABELS.get(r["winback_script"], "挽回")
-        lines.append(f"  建议: 用「{label}」挽回模板生成话术")
+    total = len(rows)
+    shown = rows[:LIST_SHOW_LIMIT]
+    if not total:
+        message = ("库里还没有客户，先登记客户再看流失预警" if not db.count_customers()
+                   else "当前无流失风险客户，保持节奏")
+    else:
+        lines = [f"⚠️ 流失预警：{total} 位客户有流失风险（高危 {len(high)} 位）"]
+        for r in shown[:10]:
+            lines.append(f"\n· {r['name']}（{r['tier']}级，风险{r['risk_score']}分[{r['risk_level']}]）")
+            lines.append(f"  信号: {'、'.join(r['signals'])}")
+            label = _WINBACK_LABELS.get(r["winback_script"], "挽回")
+            lines.append(f"  建议: 用「{label}」挽回模板生成话术")
+        if total > 10:
+            lines.append(f"\n共 {total} 位客户有流失风险，这里列风险最高的 {min(10, len(shown))} 位"
+                         f"（要我列全就说一声）")
+        message = "\n".join(lines)
     return json.dumps(attach_key_warning({
         "success": True,
-        "summary": {"total": len(rows), "high_risk": len(high)},
-        "customers": rows,
-        "message": "\n".join(lines),
+        "summary": {"total": total, "high_risk": len(high)},
+        "customers": shown,
+        "count": len(shown),
+        "total": total,
+        "truncated": total > len(shown),
+        "message": message,
     }, masked_fields), ensure_ascii=False)
 
 
 registry.register(
     name="churn_warning",
     toolset="real_estate",
-    schema={"name": "churn_warning", "description": "客户流失预警：综合最后跟进时间/带看后沉默/等级加权评分，点名高危客户并给挽回建议", "parameters": {
+    schema={"name": "churn_warning", "description": "客户流失预警：综合最后跟进时间/带看后沉默/等级加权评分，点名高危客户并给挽回建议。返回 summary.total=风险客户总数、summary.high_risk=高危人数，customers 只列风险最高的 20 位（truncated 标记是否被截断）。", "parameters": {
         "type": "object",
         "properties": {
-            "min_risk": {"type": "integer", "description": "最低风险分（默认40，中危起步）"},
+            "min_risk": {"type": "integer", "description": "最低风险分（默认 40，中危起步；传非数字/0/负数按默认 40）"},
         },
     }},
     handler=lambda args, **kw: churn_warning(**args),
