@@ -77,12 +77,19 @@ class TestMessageAndSummary:
     def test_message_is_a_full_sentence(self, wired, mixed):
         out = _call()
         assert out["message"] == ("共 8 次带看：待带看 3 次、已看 3 次（其中 2 位客户感兴趣）、"
-                                 "已取消 2 次；感兴趣占比 66.7%（按已看算）"), out["message"]
+                                 "已取消 2 次；感兴趣占比 66.7%（按已看算）"
+                                 "；客户意向：感兴趣 2 位、不感兴趣 1 位、再考虑 0 位"
+                                 "；看房最多的是 统计房源 1号楼101（5 次，其中 1 位感兴趣）"), out["message"]
 
     def test_summary_uses_chinese_keys(self, wired, mixed):
         out = _call()
-        assert out["summary"] == {"总带看": 8, "待带看": 3, "已看": 3, "已取消": 2,
-                                  "感兴趣的客户": 2, "感兴趣占比": "66.7%"}, out["summary"]
+        assert out["summary"] == {
+            "总带看": 8, "待带看": 3, "已看": 3, "已取消": 2,
+            "感兴趣的客户": 2, "感兴趣占比": "66.7%",
+            "客户意向": {"感兴趣": 2, "不感兴趣": 1, "再考虑": 0, "没记意向": 0},
+            "看房最多的房源": [{"房源": "统计房源 1号楼101", "带看次数": 5, "感兴趣": 1},
+                          {"房源": "统计房源B", "带看次数": 3, "感兴趣": 2}],
+        }, out["summary"]
 
     def test_raw_stats_keys_kept(self, wired, mixed):
         out = _call()
@@ -143,7 +150,9 @@ class TestEmptyAndZero:
         _schedule(cid, pid, days=1)
         _schedule(cid, pid, days=2)
         out = _call()
-        assert out["message"] == "已经有 2 次带看，但还没记过带看结果 —— 感兴趣占比要等有「已看」才有意义", out
+        assert out["message"].startswith("已经有 2 次带看，但还没记过带看结果"), out["message"]
+        assert "感兴趣占比要等有「已看」才有意义" in out["message"], out["message"]
+        assert "客户意向" not in out["message"], out["message"]      # 没有已看就不谈意向分布
         assert out["summary"]["已看"] == 0 and out["summary"]["感兴趣占比"] is None, out["summary"]
 
     def test_done_but_nobody_interested(self, wired):
@@ -151,11 +160,76 @@ class TestEmptyAndZero:
         vid = _schedule(cid, pid)
         _set(wired, vid, "done", "not_interested")
         out = _call()
-        assert out["message"] == "已看 1 次，暂时没有客户感兴趣（占比 0%）", out
+        assert out["message"].startswith("已看 1 次，暂时没有客户感兴趣（占比 0%）"), out["message"]
+        assert "客户意向：感兴趣 0 位、不感兴趣 1 位、再考虑 0 位" in out["message"], out["message"]
         assert out["summary"]["感兴趣占比"] == "0.0%", out["summary"]
 
     def test_normal_message_names_denominator(self, wired, mixed):
         assert "（按已看算）" in _call()["message"]
+
+
+# ==================== ③b 增强：客户意向分布 + 看房最多的房源 ====================
+class TestIntentAndTopProperties:
+    def test_intent_breakdown_shape(self, wired, mixed):
+        out = _call()
+        assert out["intent"] == {"interested": 2, "not_interested": 1, "pending": 0,
+                                 "unknown": 0}, out["intent"]
+
+    def test_intent_counts_add_up_to_done(self, wired, mixed):
+        out = _call()
+        assert sum(out["intent"].values()) == out["stats"]["done"], out
+
+    def test_unknown_intent_is_counted_not_dropped(self, wired, mixed):
+        """已看但没记意向（或记了认不出的值）→ 归到 unknown，不静默丢"""
+        vid = _schedule(mixed["cid1"], mixed["pid1"], days=20)
+        _set(wired, vid, "done", None)
+        vid2 = _schedule(mixed["cid1"], mixed["pid1"], days=21)
+        _set(wired, vid2, "done", "weird")
+        out = _call()
+        assert out["intent"]["unknown"] == 2, out["intent"]
+        assert sum(out["intent"].values()) == out["stats"]["done"], out
+        assert "另外 2 次没记意向" in out["message"], out["message"]
+
+    def test_top_properties_sorted_by_viewings(self, wired, mixed):
+        out = _call()
+        tops = out["top_properties"]
+        assert tops[0] == {"property_id": mixed["pid1"], "property_title": "统计房源 1号楼101",
+                           "viewings": 5, "interested": 1}, tops[0]
+        assert [x["viewings"] for x in tops] == sorted([x["viewings"] for x in tops], reverse=True), tops
+
+    def test_top_properties_total_and_truncation_note(self, wired):
+        """超过 5 套房源有带看时：给总数 + 一句截断说明"""
+        cid = _customer(wired)
+        for i in range(7):
+            pid = _property(wired, f"排行房源{i}")
+            _schedule(cid, pid, days=i + 1)
+        out = _call()
+        assert len(out["top_properties"]) == 5, out["top_properties"]
+        assert out["top_properties_total"] == 7 and out["top_properties_truncated"] is True, out
+        assert "这里列看房最多的 5 套（要我列全就说一声）" in out["message"], out["message"]
+
+    def test_top_properties_deleted_property_labelled(self, wired, mixed):
+        with wired.get_session() as s:
+            s.execute(text("DELETE FROM re_properties WHERE id = :i"), {"i": mixed["pid1"]})
+            s.commit()
+        out = _call()
+        titles = [x["property_title"] for x in out["top_properties"]]
+        assert any("已删除房源" in t for t in titles), titles
+
+    def test_message_mentions_top_property(self, wired, mixed):
+        assert "看房最多的是 统计房源 1号楼101（5 次，其中 1 位感兴趣）" in _call()["message"]
+
+    def test_no_top_properties_when_no_viewings(self, wired):
+        out = _call()
+        assert out["top_properties"] == [] and out["top_properties_total"] == 0, out
+        assert "看房最多" not in out["message"], out["message"]
+
+    def test_description_mentions_enhancements(self):
+        from tools.registry import registry
+
+        desc = registry.get_entry("viewing_stats").schema["description"]
+        for word in ("客户意向分布", "看房最多的前 5 套", "不感兴趣"):
+            assert word in desc, (word, desc)
 
 
 # ==================== ④ 参数与描述 ====================

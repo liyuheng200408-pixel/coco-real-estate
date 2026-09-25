@@ -3336,18 +3336,50 @@ class RealEstateDB:
             return v.to_dict() if v else None
 
     def viewing_stats(self, period='month'):
-        """带看统计：总数、已看、取消、感兴趣客户"""
+        """带看统计：总数、已看、取消、感兴趣客户 + 客户意向分布
+
+        `intent_breakdown`（2026-09-25 老板要的增强）只统计**已看**的带看：感兴趣/不感兴趣/再考虑/未记意向
+        四项之和 = `done`（对账用）。认不出的意向值归到 `unknown`，不静默丢。
+        """
         with self.get_session() as s:
+            from sqlalchemy import func
             total = s.query(Viewing).count()
             done = s.query(Viewing).filter(Viewing.status == 'done').count()
             scheduled = s.query(Viewing).filter(Viewing.status == 'scheduled').count()
             cancelled = s.query(Viewing).filter(Viewing.status == 'cancelled').count()
             interested = s.query(Viewing).filter(Viewing.status == 'done', Viewing.result == 'interested').count()
+            breakdown = {'interested': 0, 'not_interested': 0, 'pending': 0, 'unknown': 0}
+            for result, n in (s.query(Viewing.result, func.count())
+                              .filter(Viewing.status == 'done')
+                              .group_by(Viewing.result).all()):
+                key = result if result in ('interested', 'not_interested', 'pending') else 'unknown'
+                breakdown[key] += n
             return {
                 'total_viewings': total, 'done': done, 'scheduled': scheduled,
                 'cancelled': cancelled, 'interested': interested,
                 'interest_rate': round(interested / done * 100, 1) if done else 0,
+                'intent_breakdown': breakdown,
             }
+
+    def viewing_top_properties(self, limit=5):
+        """带看最多的房源 → (明细, 有过带看的房源总数)
+
+        按带看次数降序、次数相同按感兴趣数降序（2026-09-25 老板要的增强）。房源已被删的给可读标注。
+        """
+        with self.get_session() as s:
+            from sqlalchemy import case, func
+            count_col = func.count(Viewing.id)
+            interested_col = func.sum(case((Viewing.result == 'interested', 1), else_=0))
+            rows = (s.query(Viewing.property_id, count_col, interested_col)
+                    .group_by(Viewing.property_id)
+                    .order_by(count_col.desc(), interested_col.desc(), Viewing.property_id.asc())
+                    .limit(limit).all())
+            total = s.query(func.count(func.distinct(Viewing.property_id))).scalar() or 0
+        titles = self.get_property_titles([row[0] for row in rows])
+        items = [{'property_id': pid,
+                  'property_title': titles.get(pid) or f"已删除房源（id={pid}）",
+                  'viewings': n, 'interested': int(i or 0)} for pid, n, i in rows]
+        return items, total
 
     # ---------- 成交 ----------
     def add_deal(self, customer_id, property_id, **kwargs):

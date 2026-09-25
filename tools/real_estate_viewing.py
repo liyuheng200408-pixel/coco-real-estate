@@ -15,6 +15,9 @@ _LIST_LIMIT_MAX = 200
 # 只给日期、没说时刻时按上午 10:00 记（回执必须说明这是默认值，别让经纪人以为他说过）
 _DEFAULT_VIEWING_HOUR = 10
 
+# 带看统计里「看房最多的房源」列几套（2026-09-25 老板拍板：5 套）
+_TOP_PROPERTY_LIMIT = 5
+
 # 带看状态与客户意向：存英文枚举、说中文（提示语与读回来都用这张表）
 _VIEWING_STATUS_LABELS = {'scheduled': '待带看', 'done': '已完成', 'cancelled': '已取消'}
 _VIEWING_RESULT_LABELS = {'interested': '感兴趣', 'not_interested': '不感兴趣', 'pending': '再考虑'}
@@ -461,10 +464,11 @@ def list_viewings(customer_id: int = None, property_id: int = None, status: str 
 
 
 def viewing_stats(task_id: str = None) -> str:
-    """带看统计（全部历史）：总次数、待带看/已看/已取消、客户意向、感兴趣占比
+    """带看统计（全部历史）：总次数、待带看/已看/已取消、客户意向分布、感兴趣占比、看房最多的房源
 
     感兴趣占比按**已看**算（interested / done），不是按总带看算；"还没有已看"与"占比 0%"是两回事，
-    所以说明里会分开讲清。数字口径与带看列表完全对得上（同表同筛选）。
+    所以说明里会分开讲清。客户意向分布只统计已看（感兴趣/不感兴趣/再考虑/未记意向，四项之和 = 已看）。
+    看房最多的房源列前 5 套（按带看次数降序），被截断时说明一句。数字口径与带看列表完全对得上。
     """
     db = _get_db()
     stats = db.viewing_stats() or {}
@@ -474,8 +478,16 @@ def viewing_stats(task_id: str = None) -> str:
     cancelled = stats.get('cancelled') or 0
     interested = stats.get('interested') or 0
     rate = stats.get('interest_rate')
+    intent = stats.get('intent_breakdown') or {}
+    top, top_total = db.viewing_top_properties(_TOP_PROPERTY_LIMIT)
     summary = {'总带看': total, '待带看': scheduled, '已看': done, '已取消': cancelled,
-               '感兴趣的客户': interested, '感兴趣占比': f'{rate}%' if done else None}
+               '感兴趣的客户': interested, '感兴趣占比': f'{rate}%' if done else None,
+               '客户意向': {'感兴趣': intent.get('interested', 0),
+                        '不感兴趣': intent.get('not_interested', 0),
+                        '再考虑': intent.get('pending', 0),
+                        '没记意向': intent.get('unknown', 0)},
+               '看房最多的房源': [{'房源': x['property_title'], '带看次数': x['viewings'],
+                              '感兴趣': x['interested']} for x in top]}
     if not total:
         message = "还没有带看记录 —— 先约一次带看再看统计"
     elif not done:
@@ -487,8 +499,23 @@ def viewing_stats(task_id: str = None) -> str:
         message = (f"共 {total} 次带看：待带看 {scheduled} 次、已看 {done} 次"
                    f"（其中 {interested} 位客户感兴趣）、已取消 {cancelled} 次；"
                    f"感兴趣占比 {rate}%（按已看算）")
-    return json.dumps({"success": True, "stats": stats, "summary": summary, "message": message},
-                      ensure_ascii=False)
+    if done:
+        line = (f"客户意向：感兴趣 {intent.get('interested', 0)} 位、"
+                f"不感兴趣 {intent.get('not_interested', 0)} 位、"
+                f"再考虑 {intent.get('pending', 0)} 位")
+        if intent.get('unknown'):
+            line += f"、另外 {intent['unknown']} 次没记意向"
+        message += f"；{line}"
+    if top:
+        first = top[0]
+        message += (f"；看房最多的是 {first['property_title']}"
+                    f"（{first['viewings']} 次，其中 {first['interested']} 位感兴趣）")
+        if top_total > len(top):
+            message += f"。这里列看房最多的 {_TOP_PROPERTY_LIMIT} 套（要我列全就说一声）"
+    payload = {"success": True, "stats": stats, "summary": summary, "message": message,
+               "intent": intent, "top_properties": top, "top_properties_total": top_total,
+               "top_properties_truncated": bool(top_total > len(top))}
+    return json.dumps(payload, ensure_ascii=False)
 
 
 registry.register(
@@ -581,10 +608,11 @@ registry.register(
     name="viewing_stats",
     toolset="real_estate",
     schema={"name": "viewing_stats", "description":
-            "带看统计（全部历史，不按月）：总带看次数、待带看/已看/已取消次数、感兴趣的客户数与感兴趣占比。"
-            "占比按「已看」算（不是按总带看）；还没有已看时会说明「要等有已看才有意义」，"
-            "库里没有带看与「还没记过结果」分开说。返回 stats（原字段）、summary（中文键名）"
-            "与 message（一句可直接复述的中文）。经纪人问「最近带看情况怎么样」时用它。", "parameters": {
+            "带看统计（全部历史，不按月）：总带看次数、待带看/已看/已取消次数、客户意向分布"
+            "（感兴趣/不感兴趣/再考虑/没记意向，只统计已看）、感兴趣占比（按「已看」算，不是按总带看）、"
+            "以及看房最多的前 5 套房源（按带看次数排）。还没有已看时会说明「要等有已看才有意义」，"
+            "库里没有带看与「还没记过结果」分开说。返回 stats（原字段）、summary（中文键名）、"
+            "intent、top_properties 与 message（一句可直接复述的中文）。经纪人问「最近带看情况怎么样」时用它。", "parameters": {
         "type": "object",
         "properties": {},
     }},
