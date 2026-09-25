@@ -548,6 +548,8 @@ class Followup(Base):
     next_date = Column(DateTime)
     next_time = Column(String(10))
     agent_id = Column(String(100))
+    # 这条提醒来自哪一次带看（带看完成自动回访提醒的不重复建用；迁移 014）
+    source_viewing_id = Column(Integer, ForeignKey('re_viewings.id'))
     created_at = Column(DateTime, default=datetime.now)
     
     customer = relationship("Customer", back_populates="followups")
@@ -2639,6 +2641,30 @@ class RealEstateDB:
                    .order_by(Followup.id.desc())
                    .first())
             return row.to_dict() if row else None
+
+    def find_followup_by_viewing(self, viewing_id):
+        """某次带看自动生成的回访提醒 → dict 或 None
+
+        带看重复记「完成」时要靠它精确找到那一条（有就不重复建）。
+        """
+        with self.get_session() as s:
+            row = (s.query(Followup)
+                   .filter(Followup.source_viewing_id == viewing_id)
+                   .order_by(Followup.id.asc()).first())
+            return row.to_dict() if row else None
+
+    def update_followup(self, followup_id, **kwargs):
+        """改一条跟进（只写传进来的字段）→ 更新后的 dict 或 None"""
+        with self.get_session() as s:
+            row = s.query(Followup).get(followup_id)
+            if not row:
+                return None
+            for k, val in kwargs.items():
+                if hasattr(row, k):
+                    setattr(row, k, val)
+            s.commit()
+            s.refresh(row)
+            return row.to_dict()
 
     def update_followup_content(self, followup_id, content):
         """改一条跟进的正文（只用于「同时间的提醒改了内容」）→ 更新后的 dict 或 None"""

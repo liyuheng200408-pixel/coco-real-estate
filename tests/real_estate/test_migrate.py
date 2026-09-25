@@ -27,6 +27,8 @@ def sqlite_db(tmp_path):
     conn.execute("CREATE TABLE re_deals (id INTEGER PRIMARY KEY, name TEXT)")
     conn.execute("CREATE TABLE re_customer_changes (id INTEGER PRIMARY KEY, customer_id INTEGER,"
                  " field TEXT, old_value TEXT, new_value TEXT)")
+    conn.execute("CREATE TABLE re_followups (id INTEGER PRIMARY KEY, customer_id INTEGER,"
+                 " type TEXT, content TEXT, next_date TIMESTAMP)")   # 014 需要
     conn.commit()
     conn.close()
     return f"sqlite:///{db_path}"
@@ -223,3 +225,23 @@ class TestMigrate:
         assert got["丁"] == "a" and got["戊"] == "a"
         assert got["己"] == "正常标签"                        # 干净的没被动
         assert got["庚"] == "" and got["辛"] is None          # 空值没被动
+
+    def test_014_adds_followup_source_viewing(self, sqlite_db):
+        """014 迁移：跟进表补 source_viewing_id（存量行为 None），重跑安全"""
+        import sqlite3
+        db_path = sqlite_db.replace("sqlite:///", "")
+        conn = sqlite3.connect(db_path)
+        conn.execute("INSERT INTO re_followups (customer_id, type, content)"
+                     " VALUES (1, 'reminder', '存量提醒')")
+        conn.commit()
+        conn.close()
+
+        assert run_migrate(sqlite_db).returncode == 0
+        assert run_migrate(sqlite_db).returncode == 0        # 再跑一遍：ADD COLUMN 自动跳过
+
+        conn = sqlite3.connect(db_path)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(re_followups)")]
+        got = conn.execute("SELECT type, content, source_viewing_id FROM re_followups").fetchall()
+        conn.close()
+        assert "source_viewing_id" in cols, cols
+        assert got == [("reminder", "存量提醒", None)], got

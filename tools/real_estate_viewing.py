@@ -2,9 +2,9 @@
 Coco 房产工具 - 带看管理
 """
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from tools.registry import registry
-from agent.real_estate_input import clamp_limit, norm_date, norm_id
+from agent.real_estate_input import clamp_limit, clean_text, norm_date, norm_id
 from tools.real_estate_followup import norm_followup_time, split_time_part
 from tools.real_estate_property import _STATUS_LABELS
 
@@ -14,6 +14,24 @@ _LIST_LIMIT_MAX = 200
 
 # 只给日期、没说时刻时按上午 10:00 记（回执必须说明这是默认值，别让经纪人以为他说过）
 _DEFAULT_VIEWING_HOUR = 10
+
+# 带看状态与客户意向：存英文枚举、说中文（提示语与读回来都用这张表）
+_VIEWING_STATUS_LABELS = {'scheduled': '待带看', 'done': '已完成', 'cancelled': '已取消'}
+_VIEWING_RESULT_LABELS = {'interested': '感兴趣', 'not_interested': '不感兴趣', 'pending': '再考虑'}
+# 经纪人嘴里的说法（与「记跟进」认中文类型同一套口径）
+_VIEWING_STATUS_ALIASES = {
+    '待带看': 'scheduled', '待看': 'scheduled', '还没看': 'scheduled', '未看': 'scheduled',
+    '计划中': 'scheduled', '约好了': 'scheduled',
+    '已完成': 'done', '已看': 'done', '看完': 'done', '看完了': 'done', '看过': 'done',
+    '看过了': 'done', '完成': 'done',
+    '已取消': 'cancelled', '取消': 'cancelled', '不来了': 'cancelled', '没去': 'cancelled',
+}
+_VIEWING_RESULT_ALIASES = {
+    '感兴趣': 'interested', '有意向': 'interested', '满意': 'interested', '喜欢': 'interested',
+    '不感兴趣': 'not_interested', '没兴趣': 'not_interested', '不满意': 'not_interested',
+    '不喜欢': 'not_interested',
+    '再考虑': 'pending', '待定': 'pending', '再看看': 'pending', '再想想': 'pending', '犹豫': 'pending',
+}
 
 
 def _get_db():
@@ -104,63 +122,130 @@ def schedule_viewing(customer_id: int, property_id: int, viewing_time: str, task
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _norm_viewing_enum(value, labels, aliases, label):
+    """带看枚举归一 → (规范值或 None, 提示或 None)。没给/空串按"没要求改"处理（返回 None 不报错）"""
+    if value is None:
+        return None, None
+    text = str(value).strip()
+    if not text:
+        return None, None
+    key = text.lower()
+    if key in labels:
+        return key, None
+    if text in aliases:
+        return aliases[text], None
+    options = "、".join(f"{cn}（{en}）" for en, cn in labels.items())
+    return None, f"{label}没能识别：收到的是「{value}」。可用：{options}"
+
+
+def norm_viewing_status(value):
+    """带看状态归一（待带看/已完成/已取消，认中文说法）"""
+    return _norm_viewing_enum(value, _VIEWING_STATUS_LABELS, _VIEWING_STATUS_ALIASES, '带看状态')
+
+
+def norm_viewing_result(value):
+    """客户意向归一（感兴趣/不感兴趣/再考虑，认中文说法）"""
+    return _norm_viewing_enum(value, _VIEWING_RESULT_LABELS, _VIEWING_RESULT_ALIASES, '客户意向')
+
+
 def record_viewing(viewing_id: int, status: str = None, result: str = None, feedback: str = None, task_id: str = None) -> str:
-    """记录带看结果：status(scheduled/done/cancelled)、result(interested/not_interested/pending)、feedback(客户反馈)"""
+    """记录带看结果：状态（待带看/已完成/已取消）、客户意向（感兴趣/不感兴趣/再考虑）、客户反馈
+
+    状态与意向认中文说法（已完成、已看、客户不感兴趣…）也认英文值；**什么都没说就给一句提示**，
+    不回一个"成功"却什么也没记。带看标记已完成的会自动安排 1 小时后回访提醒并关联房源，
+    **同一条带看只留一条提醒**（再记一次只更新那条、不重复建）；把已完成的带看改回其它状态只提醒不拦。
+    """
     viewing_id, problem = norm_id(viewing_id, '带看编号', '，可在带看记录列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    status_value, problem = norm_viewing_status(status)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    result_value, problem = norm_viewing_result(result)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    feedback = clean_text(feedback)          # 空串按"未填"存，别让空串与未填两种形态并存
+    if status_value is None and result_value is None and not feedback:
+        return json.dumps({"success": False, "error":
+                           "没说记什么 —— 说说这次带看怎么样（看完了 / 客户取消了 / 客户什么意向），"
+                           "或者补一句客户反馈"}, ensure_ascii=False)
     db = _get_db()
+    before = db.get_viewing(viewing_id)
+    if not before:
+        return json.dumps({"success": False, "error": "带看记录不存在，请在带看记录列表里核对编号"},
+                          ensure_ascii=False)
     kwargs = {}
-    if status:
-        if status not in ('scheduled', 'done', 'cancelled'):
-            return json.dumps({"success": False, "error": "status 必须是 scheduled/done/cancelled"}, ensure_ascii=False)
-        kwargs['status'] = status
-    if result:
-        if result not in ('interested', 'not_interested', 'pending'):
-            return json.dumps({"success": False, "error": "result 必须是 interested/not_interested/pending"}, ensure_ascii=False)
-        kwargs['result'] = result
-    if feedback is not None:
+    if status_value:
+        kwargs['status'] = status_value
+    if result_value:
+        kwargs['result'] = result_value
+    if feedback:
         kwargs['feedback'] = feedback
     updated = db.update_viewing(viewing_id, **kwargs)
-    if not updated:
-        return json.dumps({"success": False, "error": "带看记录不存在"}, ensure_ascii=False)
 
-    # 带看完成 → 自动安排 1 小时后回访提醒
-    reminder_added = False
-    if kwargs.get('status') == 'done':
+    warnings = []
+    if status_value and before.get('status') == 'done' and status_value != 'done':
+        warnings.append(f"这条带看原来记的是已完成，现在改成了{_VIEWING_STATUS_LABELS[status_value]}"
+                        f" —— 如果不是笔误就不用管")
+
+    # 带看完成 → 自动安排 1 小时后回访提醒（同一条带看只留一条：命中就更新那条，不重复建）
+    reminder, reminder_reused = None, False
+    if status_value == 'done':
         try:
-            from datetime import timedelta
-            now = datetime.now()
-            remind_time = now + timedelta(hours=1)
+            when = datetime.now() + timedelta(hours=1)
             customer = db.get_customer(updated['customer_id'])
             customer_name = customer.get('name') if customer else '客户'
-            db.add_followup(
-                customer_id=updated['customer_id'],
-                type='reminder',
-                content=f"带看后回访：{customer_name} 看完 {updated.get('property_title')} 已 1 小时，主动跟进了解意向",
-                next_date=remind_time,
-                next_time=remind_time.strftime('%H:%M'),
-            )
-            reminder_added = True
+            content = (f"带看后回访：{customer_name} 看完 {updated.get('property_title')} 已 1 小时，"
+                       f"主动跟进了解意向")
+            existing = db.find_followup_by_viewing(viewing_id)
+            if existing:
+                reminder = db.update_followup(existing['id'], content=content,
+                                              property_id=updated.get('property_id'))
+                reminder_reused = True
+            else:
+                reminder = db.add_followup(
+                    customer_id=updated['customer_id'],
+                    property_id=updated.get('property_id'),
+                    type='reminder', content=content, next_date=when,
+                    next_time=when.strftime('%H:%M'), source_viewing_id=viewing_id,
+                )
         except Exception:
-            reminder_added = False
+            reminder = None
 
     # 缺陷标签反哺（2026-08-28 功能3）：记录带看结果后自动重扫该房缺陷
     defect_refreshed = None
     if updated.get('property_id') and (feedback or updated.get('result') == 'not_interested'):
         try:
-            defects = db.refresh_defect_tags(updated['property_id'])
-            defect_refreshed = defects
+            defect_refreshed = db.refresh_defect_tags(updated['property_id'])
         except Exception:
             defect_refreshed = None
 
-    response = {"success": True, "viewing": updated}
+    labels = []
+    if status_value:
+        labels.append(_VIEWING_STATUS_LABELS[status_value])
+    if result_value:
+        labels.append(f"客户{_VIEWING_RESULT_LABELS[result_value]}")
+    if labels:
+        message = f"带看已记录：{'、'.join(labels)}（带看编号 {viewing_id}）"
+        if feedback:
+            message += "，客户反馈也记下了"
+    else:
+        message = f"已记下客户反馈（带看编号 {viewing_id}）"
+    if reminder_reused:
+        message += "；这条带看的回访提醒已经在（时间不变），我把它一起更新了"
+    elif reminder:
+        message += "，已安排 1 小时后回访提醒"
     if defect_refreshed:
-        response["defect_tags_updated"] = defect_refreshed
-        response["message"] = f"带看已记录；检测到共性差评，已更新房源缺陷标签: {','.join(defect_refreshed)}"
-    elif reminder_added:
-        response["message"] = "带看已记录，已自动安排 1 小时后回访提醒"
-    return json.dumps(response, ensure_ascii=False)
+        message += f"；检测到共性差评，已更新房源缺陷标签: {'、'.join(defect_refreshed)}"
+
+    payload = {"success": True, "viewing": updated, "message": message}
+    if reminder:
+        payload["reminder"] = reminder
+    if defect_refreshed:
+        payload["defect_tags_updated"] = defect_refreshed
+    if warnings:
+        payload["warnings"] = warnings
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def get_viewing(viewing_id: int, task_id: str = None) -> str:
@@ -223,13 +308,21 @@ registry.register(
 registry.register(
     name="record_viewing",
     toolset="real_estate",
-    schema={"name": "record_viewing", "description": "记录带看结果：状态和客户反馈", "parameters": {
+    schema={"name": "record_viewing", "description":
+            "记录带看结果：带看状态（待带看/已完成/已取消）、客户意向（感兴趣/不感兴趣/再考虑）、客户反馈；"
+            "认中文说法也认英文值，也可以只补一句反馈。标记为已完成会自动安排 1 小时后回访提醒"
+            "（同一条带看只留一条，再记一次只更新那条）；把已完成的带看改回其它状态只提醒不拦。", "parameters": {
         "type": "object",
         "properties": {
-            "viewing_id": {"type": "integer", "description": "带看记录ID"},
-            "status": {"type": "string", "enum": ["scheduled", "done", "cancelled"], "description": "带看状态"},
-            "result": {"type": "string", "enum": ["interested", "not_interested", "pending"], "description": "客户意向"},
-            "feedback": {"type": "string", "description": "客户反馈"},
+            "viewing_id": {"type": "integer", "description": "带看编号（数字，来自预约带看的回执或带看列表）"},
+            "status": {"type": "string", "enum": ["scheduled", "done", "cancelled"],
+                       "description": "带看状态：scheduled待带看 / done已完成 / cancelled已取消"
+                                      "（也可以直接说 已完成、看完了、已取消）"},
+            "result": {"type": "string", "enum": ["interested", "not_interested", "pending"],
+                       "description": "客户意向：interested感兴趣 / not_interested不感兴趣 / pending再考虑"
+                                      "（也可以直接说 感兴趣、不感兴趣、再看看）"},
+            "feedback": {"type": "string", "description":
+                         "客户反馈原话（如 采光差、户型还行）；给了反馈会顺手重扫该房源缺陷标签"},
         },
         "required": ["viewing_id"],
     }},
