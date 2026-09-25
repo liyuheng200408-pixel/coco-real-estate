@@ -461,10 +461,34 @@ def list_viewings(customer_id: int = None, property_id: int = None, status: str 
 
 
 def viewing_stats(task_id: str = None) -> str:
-    """带看统计：总数、已看、取消、客户感兴趣比例"""
+    """带看统计（全部历史）：总次数、待带看/已看/已取消、客户意向、感兴趣占比
+
+    感兴趣占比按**已看**算（interested / done），不是按总带看算；"还没有已看"与"占比 0%"是两回事，
+    所以说明里会分开讲清。数字口径与带看列表完全对得上（同表同筛选）。
+    """
     db = _get_db()
-    stats = db.viewing_stats()
-    return json.dumps({"success": True, "stats": stats}, ensure_ascii=False)
+    stats = db.viewing_stats() or {}
+    total = stats.get('total_viewings') or 0
+    scheduled = stats.get('scheduled') or 0
+    done = stats.get('done') or 0
+    cancelled = stats.get('cancelled') or 0
+    interested = stats.get('interested') or 0
+    rate = stats.get('interest_rate')
+    summary = {'总带看': total, '待带看': scheduled, '已看': done, '已取消': cancelled,
+               '感兴趣的客户': interested, '感兴趣占比': f'{rate}%' if done else None}
+    if not total:
+        message = "还没有带看记录 —— 先约一次带看再看统计"
+    elif not done:
+        message = (f"已经有 {total} 次带看，但还没记过带看结果 —— "
+                   f"感兴趣占比要等有「已看」才有意义")
+    elif not interested:
+        message = f"已看 {done} 次，暂时没有客户感兴趣（占比 0%）"
+    else:
+        message = (f"共 {total} 次带看：待带看 {scheduled} 次、已看 {done} 次"
+                   f"（其中 {interested} 位客户感兴趣）、已取消 {cancelled} 次；"
+                   f"感兴趣占比 {rate}%（按已看算）")
+    return json.dumps({"success": True, "stats": stats, "summary": summary, "message": message},
+                      ensure_ascii=False)
 
 
 registry.register(
@@ -556,7 +580,11 @@ registry.register(
 registry.register(
     name="viewing_stats",
     toolset="real_estate",
-    schema={"name": "viewing_stats", "description": "带看统计：总数、已看、取消、客户感兴趣比例", "parameters": {
+    schema={"name": "viewing_stats", "description":
+            "带看统计（全部历史，不按月）：总带看次数、待带看/已看/已取消次数、感兴趣的客户数与感兴趣占比。"
+            "占比按「已看」算（不是按总带看）；还没有已看时会说明「要等有已看才有意义」，"
+            "库里没有带看与「还没记过结果」分开说。返回 stats（原字段）、summary（中文键名）"
+            "与 message（一句可直接复述的中文）。经纪人问「最近带看情况怎么样」时用它。", "parameters": {
         "type": "object",
         "properties": {},
     }},
