@@ -248,6 +248,43 @@ class TestIdForms:
         assert _reminders(wired, customer_id=cid) == []
 
 
+# ==================== ⑧ 兜底失败要如实说（不许静默吞异常） ====================
+class TestFailureIsReported:
+    def _boom(self, *a, **kw):
+        raise RuntimeError("boom")
+
+    def test_reminder_failure_is_reported(self, wired, cid, pid, monkeypatch):
+        import tools.real_estate_viewing as m
+
+        monkeypatch.setattr(wired, "add_followup", self._boom)
+        vid = _schedule(cid, pid)
+        out = _record(viewing_id=vid, status="已完成", result="感兴趣")
+        assert out["success"] is True, out                      # 带看结果本身照旧记下
+        assert _row(wired, vid)[0] == "done", _row(wired, vid)
+        assert any("回访提醒这次没建起来" in w for w in out["warnings"]), out.get("warnings")
+        assert out.get("reminder_error") == "RuntimeError", out
+        assert not out.get("reminder"), out
+
+    def test_defect_rescan_failure_is_reported(self, wired, cid, pid, monkeypatch):
+        import tools.real_estate_viewing as m
+
+        monkeypatch.setattr(wired, "refresh_defect_tags", self._boom)
+        vid = _schedule(cid, pid)
+        out = _record(viewing_id=vid, status="已完成", feedback="采光差")
+        assert out["success"] is True, out
+        assert out["viewing"]["feedback"] == "采光差", out
+        assert any("缺陷标签这次没能重新统计" in w for w in out["warnings"]), out.get("warnings")
+        assert out.get("defect_rescan_error") == "RuntimeError", out
+
+    def test_warning_wording_has_no_internals(self, wired, cid, pid, monkeypatch):
+        monkeypatch.setattr(wired, "add_followup", self._boom)
+        vid = _schedule(cid, pid)
+        out = _record(viewing_id=vid, status="已完成")
+        blob = " ".join(out.get("warnings") or [])
+        for word in ("RuntimeError", "boom", "Traceback", "add_followup", "except"):
+            assert word not in blob, (word, blob)
+
+
 # ==================== ⑦ 读回口径 ====================
 class TestReadBack:
     def test_get_viewing_matches(self, wired, cid, pid):

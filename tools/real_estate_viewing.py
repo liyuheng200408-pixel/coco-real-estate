@@ -190,6 +190,7 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
 
     # 带看完成 → 自动安排 1 小时后回访提醒（同一条带看只留一条：命中就更新那条，不重复建）
     reminder, reminder_reused = None, False
+    reminder_error = None
     if status_value == 'done':
         try:
             when = datetime.now() + timedelta(hours=1)
@@ -209,16 +210,22 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
                     type='reminder', content=content, next_date=when,
                     next_time=when.strftime('%H:%M'), source_viewing_id=viewing_id,
                 )
-        except Exception:
+        except Exception as exc:
+            # 不许静默兜底：提醒没建起来要如实说（带看结果本身已经记下了）
             reminder = None
+            reminder_error = type(exc).__name__
+            warnings.append("回访提醒这次没建起来 —— 你手动记一条也行，或者再说一次我重试")
 
     # 缺陷标签反哺（2026-08-28 功能3）：记录带看结果后自动重扫该房缺陷
     defect_refreshed = None
+    defect_error = None
     if updated.get('property_id') and (feedback or updated.get('result') == 'not_interested'):
         try:
             defect_refreshed = db.refresh_defect_tags(updated['property_id'])
-        except Exception:
+        except Exception as exc:
             defect_refreshed = None
+            defect_error = type(exc).__name__
+            warnings.append("房源缺陷标签这次没能重新统计（不影响这条带看结果）")
 
     labels = []
     if status_value:
@@ -243,6 +250,10 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
         payload["reminder"] = reminder
     if defect_refreshed:
         payload["defect_tags_updated"] = defect_refreshed
+    if reminder_error:
+        payload["reminder_error"] = reminder_error
+    if defect_error:
+        payload["defect_rescan_error"] = defect_error
     if warnings:
         payload["warnings"] = warnings
     return json.dumps(payload, ensure_ascii=False)
