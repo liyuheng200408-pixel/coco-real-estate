@@ -541,6 +541,32 @@ def _fmt_yesno(value) -> str:
     return "有" if value else "无"
 
 
+# 房源不能用时的说法：sold / rented / 其它状态，各自的"不能做什么"由调用方给
+_PROPERTY_UNAVAILABLE_ACTION = {"sold": "发在售文案", "rented": "发在租文案"}
+
+
+def unavailable_property_note(property_id, prop=None, action=None):
+    """房源不能用的中文说明（**一处定义**：文案 / 海报 / 九宫格 / 口播稿都走它）
+
+    三种情况分开说 —— 不存在 / 已售 / 已租。原先是同一句「房源不存在或不在售」，
+    经纪人看不出这套其实在库、只是已售（2026-09-26 文案那轮先修，海报同族）。
+
+    `prop`：调用方已经查过的房源 dict；`None` = 库里没有这个编号。
+    `action`：这次想做什么（如「出海报」）。传 None 时按状态取默认（已售→发在售文案、已租→发在租文案）。
+    返回 `(给经纪人看的话, 结构化状态标签或 None)`。
+    """
+    if not prop:
+        return f"没有编号 {property_id} 的房源，先在房源列表里核对一下编号。", None
+    status = prop.get('status')
+    label = _STATUS_LABELS.get(status, status or '未知状态')
+    if action is None:
+        action = _PROPERTY_UNAVAILABLE_ACTION.get(status, "发布")
+    phrase = {'sold': '已经售出', 'rented': '已经出租'}.get(status, f"现在状态是{label}")
+    name = prop.get('title') or ''
+    who = f"编号 {property_id} 的房源" + (f"（{name}）" if name else "")
+    return f"{who}{phrase}，不能{action}。如果它已经回到在售，跟我说一声我把状态改回来。", label
+
+
 def _fmt_area(value) -> str:
     """面积展示：整数就显示整数（100㎡），有小数才带小数（128.5㎡）"""
     if value in (None, ""):
