@@ -761,8 +761,11 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     }, ensure_ascii=False)
 
 
-# 只认自己生成的海报成品（`poster_<编号>_<模板>[_指纹].png/.svg`）—— 房源照片也放在同一个目录里，别碰
-_POSTER_ARTIFACT_RE = re.compile(r"^poster_(?:\d+_[A-Za-z]+|grid)(?:_[0-9a-f]{8})?\.(png|svg)$")
+# 只认自己生成的海报成品 —— 房源照片也放在同一个目录里，别碰。
+# 三种结尾都要认：`.png`（成品）、`.svg`（老命名）、`.png.svg`（渲染引擎写的 SVG 源文件，名字 = 成品名 + .svg）
+_POSTER_ARTIFACT_SUFFIXES = (".png.svg", ".png", ".svg")
+_POSTER_ARTIFACT_RE = re.compile(
+    r"^poster_(?:\d+_[A-Za-z]+|grid)(?:_[0-9a-f]{8})?(?:\.png\.svg|\.png|\.svg)$")
 _POSTER_KEEP = 20
 
 
@@ -793,7 +796,12 @@ def _stamp_and_prune(path, keep=_POSTER_KEEP):
             name = os.path.basename(f)
             if not _POSTER_ARTIFACT_RE.match(name):
                 continue
-            stem = re.sub(r"_[0-9a-f]{8}$", "", os.path.splitext(name)[0])
+            stem = name
+            for suffix in _POSTER_ARTIFACT_SUFFIXES:      # 先剥后缀、再剥指纹
+                if stem.endswith(suffix):
+                    stem = stem[: -len(suffix)]
+                    break
+            stem = re.sub(r"_[0-9a-f]{8}$", "", stem)     # PNG 与它的 .svg 归成同一组，一起留/一起删
             groups.setdefault(stem, []).append(f)
         ordered = sorted(groups.values(),
                          key=lambda fs: max(os.path.getmtime(f) for f in fs), reverse=True)

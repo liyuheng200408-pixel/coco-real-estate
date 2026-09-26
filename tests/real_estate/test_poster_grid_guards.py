@@ -169,6 +169,33 @@ def test_grid_is_covered_by_the_prune_pattern(wired):
     assert not m_poster._POSTER_ARTIFACT_RE.match("house_photo.jpg"), "房源照片不该被清理"
 
 
+@pytest.mark.parametrize("name", ["poster_1_A.png.svg", "poster_1_A_deadbeef.png.svg",
+                                  "poster_grid.png.svg", "poster_grid_deadbeef.png.svg",
+                                  "poster_1_A.svg"])
+def test_svg_companions_are_covered(name):
+    """SVG 源文件的名字是「成品名 + .svg」，也要被清理认到（否则会一直堆积）"""
+    assert m_poster._POSTER_ARTIFACT_RE.match(name), name
+
+
+def test_prune_groups_png_with_its_svg(wired, tmp_path):
+    """同一张图的 .png 与它的 .svg 算一组：一起留、一起删（老实现把 .svg 漏在外面）"""
+    for i in range(25):
+        (tmp_path / f"poster_{i}_A_{i:08x}.png").write_bytes(b"x")
+        (tmp_path / f"poster_{i}_A_{i:08x}.png.svg").write_text("<svg/>")
+        os.utime(tmp_path / f"poster_{i}_A_{i:08x}.png", (1_600_000_000 + i, 1_600_000_000 + i))
+        os.utime(tmp_path / f"poster_{i}_A_{i:08x}.png.svg", (1_600_000_000 + i, 1_600_000_000 + i))
+    fresh = tmp_path / "poster_99_A.png"
+    fresh.write_bytes(b"new")
+    m_poster._stamp_and_prune(str(fresh))
+    left = sorted(f.name for f in tmp_path.glob("poster_*"))
+    assert not [n for n in left if n.startswith("poster_0_A")], f"最旧那组没被清掉：{left[:4]}"
+    assert len([n for n in left if n.endswith(".png")]) == 20, left
+    # 留下的每张 png 都该带着自己的 svg（不被拆散）
+    left_pngs = {n for n in left if n.endswith(".png")}
+    left_svgs = {n[: -len(".svg")] for n in left if n.endswith(".png.svg")}
+    assert left_svgs <= left_pngs, (sorted(left_pngs)[:3], sorted(left_svgs)[:3])
+
+
 # ---------- ⑧ 参数已收敛 ----------
 def test_qr_content_removed_from_schema():
     from tools.registry import registry
