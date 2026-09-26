@@ -69,13 +69,14 @@ def test_listing_and_video_and_images_find_late_property(db, monkeypatch):
 
 
 def test_sold_property_still_reports_not_available(db, monkeypatch):
-    """非在售房源仍然如实报"不存在或不在售"（语义不变）"""
+    """非在售房源仍然如实报（2026-09-26 口径细化：已售/已租点到状态，不再与"不存在"同一句）"""
     import tools.real_estate_listing as li
     _patch_all(monkeypatch, db)
     p = make_property(db, title="已售房源", status="sold")
     data = json.loads(li.generate_listing_copy(property_id=p["id"]))
     assert data["success"] is False
-    assert "不在售" in data["error"]
+    assert "已经售出" in data["error"] and "不能发在售文案" in data["error"], data
+    assert data["property_status"] == "已售", data
 
 
 def test_total_properties_numbers_are_real(db, monkeypatch):
