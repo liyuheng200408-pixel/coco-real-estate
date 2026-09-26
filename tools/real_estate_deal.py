@@ -63,6 +63,30 @@ def norm_deal_stage(value):
     return None, f"阶段没能识别：收到的是「{value}」。可以说 {stages_options_text()}"
 
 
+def _deal_display(row):
+    """成交单详情/列表共用的展示口径（**只补不替换**：原值一律保留给机器读）
+
+    - 阶段：补中文名（与列表、与推进工具共用同一张 `STAGE_LABELS`）
+    - 金额：补「万」口径（`agent/real_estate_money.py::fmt_wan`；空值不臆造）
+    - 日期：五个阶段日期各补 `YYYY-MM-DD`（原值是 ISO，那个 `T` 不该念给经纪人听）
+    - 孤儿：客户/房源已被删时给可读标注，而不是 null（契约 20）
+    """
+    item = dict(row or {})
+    stage = item.get('stage')
+    item['stage_label'] = STAGE_LABELS.get(stage, stage)
+    item['price_label'] = fmt_wan(item['price']) if item.get('price') is not None else None
+    item['deposit_label'] = (fmt_wan(item['deposit_amount'])
+                             if item.get('deposit_amount') is not None else None)
+    for field in STAGE_DATE_FIELDS.values():
+        value = item.get(field)
+        item[f'{field}_label'] = str(value)[:10] if value else None
+    if not item.get('customer_name'):
+        item['customer_name'] = f"已删除客户（id={item.get('customer_id')}）"
+    if not item.get('property_title'):
+        item['property_title'] = f"已删除房源（id={item.get('property_id')}）"
+    return item
+
+
 def _parse_date(value: str, field_name: str):
     """成交/交易里的日期入参 → datetime；认不出抛 ValueError（提示是中文）。
 
@@ -318,14 +342,17 @@ def advance_deal(deal_id: int, stage: str, date: str = None, notes: str = None,
 
 
 def get_deal(deal_id: int, task_id: str = None) -> str:
-    """查看成交详情"""
+    """查看一笔成交的详情：客户与房源、金额、当前阶段（中文）、各阶段日期、备注
+
+    客户或房源已被删除（存量数据、外部改库）时给可读标注，不回 null。
+    """
     deal_id, problem = norm_id(deal_id, '成交单编号', '，可在成交列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
     result = db.get_deal(deal_id)
     if result:
-        return json.dumps({"success": True, "deal": result}, ensure_ascii=False)
+        return json.dumps({"success": True, "deal": _deal_display(result)}, ensure_ascii=False)
     return json.dumps({"success": False, "error": "成交单不存在"}, ensure_ascii=False)
 
 
@@ -392,9 +419,14 @@ registry.register(
 registry.register(
     name="get_deal",
     toolset="real_estate",
-    schema={"name": "get_deal", "description": "查看成交详情", "parameters": {
+    schema={"name": "get_deal", "description": (
+        "查看一笔成交的详情：客户与房源、成交价与定金、当前阶段（中文）、"
+        "意向金/签约/贷款/过户/交房各阶段的日期、备注。客户或房源已被删除时给可读标注。"
+        "要看多笔请用成交列表。"), "parameters": {
         "type": "object",
-        "properties": {"deal_id": {"type": "integer"}},
+        "properties": {
+            "deal_id": {"type": "integer", "description": "成交单编号（数字，可在成交列表里查）"},
+        },
         "required": ["deal_id"],
     }},
     handler=lambda args, **kw: get_deal(**args),
