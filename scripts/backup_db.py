@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Coco 房产智能体 - 数据库备份脚本（PostgreSQL 版）
-支持定时自动备份、保留30天、数据变化检查、备份日志
+支持定时自动备份、数据库备份保留30天、图片包保留最近2份、数据变化检查、备份日志
 使用 pg_dump 导出，恢复用 pg_restore
 """
 import os
@@ -49,20 +49,33 @@ def _load_db_config():
     return ""
 
 
+def _is_today(path: Path) -> bool:
+    """文件的最后修改时间是不是「今天」（按本机时区；海报只备份当天那份）"""
+    try:
+        modified = datetime.fromtimestamp(path.stat().st_mtime)
+    except OSError:
+        return False
+    now = datetime.now()
+    return (modified.year, modified.month, modified.day) == (now.year, now.month, now.day)
+
+
 class DatabaseBackup:
     """PostgreSQL 数据库备份管理器"""
 
-    def __init__(self, database_url: str = None, backup_dir: str = None):
+    def __init__(self, database_url: str = None, backup_dir: str = None,
+                 keep_image_tars: int = 2):
         """
         初始化备份管理器
 
         Args:
             database_url: PostgreSQL 连接串（默认从 .env.db 读取）
             backup_dir: 备份目录（默认 ~/backups/real_estate/）
+            keep_image_tars: 图片包保留份数（默认 2；<=0 表示不自动清理）
         """
         self.database_url = database_url or _load_db_config()
         if not self.database_url:
             raise RuntimeError("无法获取 DATABASE_URL，请检查 .env.db 或环境变量")
+        self.keep_image_tars = keep_image_tars
 
         if backup_dir:
             self.backup_dir = Path(backup_dir)
@@ -176,7 +189,7 @@ class DatabaseBackup:
         self.hash_file.write_text(self._get_db_snapshot(), encoding="utf-8")
 
     def _cleanup_old_backups(self, keep_days: int = 30):
-        """清理旧备份"""
+        """清理过期的数据库备份（按天保留，默认 30 天）"""
         cutoff_date = datetime.now() - timedelta(days=keep_days)
         for backup_file in self.backup_dir.glob("real_estate_*.dump"):
             try:
@@ -186,6 +199,24 @@ class DatabaseBackup:
                     backup_file.unlink()
                     self._log(f"删除旧备份: {backup_file.name}")
             except ValueError:
+                continue
+
+    def _cleanup_old_image_tars(self, keep: int = None):
+        """图片包按**份数**滚动保留（默认 2 份）
+
+        为什么不是按天：图片包装的是**全部**房源照片归档，每天一份会按「照片总量 × 天数」线性堆磁盘
+        （一份 2GB 的归档，留 30 天就是 60GB）。归档目录本身在磁盘上，图片包是第二份（迁移/换机器用），
+        留最近两份足够覆盖「今天的备份坏了还能用昨天的」。
+        """
+        keep = self.keep_image_tars if keep is None else keep
+        if keep is None or keep <= 0:
+            return
+        tars = sorted(self.backup_dir.glob("real_estate_images_*.tar.gz"))
+        for old_tar in tars[:-keep]:
+            try:
+                old_tar.unlink()
+                self._log(f"删除旧备份: {old_tar.name}")
+            except OSError:
                 continue
 
     def backup(self, force: bool = False) -> bool:
@@ -212,6 +243,7 @@ class DatabaseBackup:
 
             # 备份房源图片目录（tar.gz，与数据库备份同名）
             image_tar = self._backup_images(timestamp)
+            self._cleanup_old_image_tars()
             if image_tar:
                 file_size = backup_path.stat().st_size
                 self._log(f"备份成功: {backup_filename} ({file_size} bytes) + 图片 {image_tar}")
@@ -224,68 +256,122 @@ class DatabaseBackup:
             self._log(f"备份失败: {str(e)}")
             return False
 
-    def _backup_images(self, timestamp: str) -> str:
-        """打包房源图片缓存目录到备份目录，返回 tar 文件名（无图片返回空字符串）"""
-        import tarfile
-        cache_candidates = [
-            Path.home() / ".hermes" / "image_cache",          # 房源图片实际位置（海报/上传）
-            Path.home() / ".hermes" / "cache" / "images",
-            _REPO_ROOT / ".hermes" / "cache" / "images",
+    def _image_dir_specs(self):
+        """要进包的 (tar 内前缀, 目录) —— 备份与恢复共用这一份，避免两边口径漂移。
+
+        - `real_estate_images/`：房源照片归档目录，数据库 `re_properties.images` 存的就是它的路径；
+          网关缓存目录里的照片 24 小时后会被自动清理，所以这一份是照片的真正归处，**必须进包**。
+        - `images/`：网关媒体缓存（老 `image_cache` 与新 `cache/images` 都认；两个都在就都打包，
+          不再像以前那样只认第一个）。
+        - `posters/`：海报成品，只打包**当天**的（海报是一次性交付物，隔天的天天进包只会堆垃圾）。
+        """
+        return [
+            ("real_estate_images", self._archive_dir()),
+            ("images", Path.home() / ".hermes" / "image_cache"),
+            ("images", Path.home() / ".hermes" / "cache" / "images"),
+            ("images", _REPO_ROOT / ".hermes" / "cache" / "images"),
+            ("posters", Path.home() / ".hermes" / "posters"),
         ]
-        image_dir = None
-        for cand in cache_candidates:
-            if cand.exists() and any(cand.iterdir()):
-                image_dir = cand
-                break
-        if image_dir is None:
+
+    def _archive_dir(self) -> Path:
+        """照片归档目录：口径与工具层同一处（agent/real_estate_media.images_archive_dir）"""
+        try:
+            import sys
+
+            if str(_REPO_ROOT) not in sys.path:
+                sys.path.insert(0, str(_REPO_ROOT))
+            from agent.real_estate_media import images_archive_dir
+
+            return Path(images_archive_dir())
+        except Exception:  # noqa: BLE001 —— 备份不能因为导不到工具而失败，退回默认位置
+            return Path.home() / ".hermes" / "real_estate_images"
+
+    def _image_file_specs(self):
+        """本次要进包的 (arcname, 源文件) 列表；没有可打包的文件时返回空列表"""
+        specs, seen = [], set()
+        for prefix, src in self._image_dir_specs():
+            if not src.is_dir():
+                continue
+            for f in sorted(src.iterdir()):
+                if not f.is_file() or f.name.startswith("."):
+                    continue
+                if prefix == "posters" and not _is_today(f):
+                    continue
+                arcname = f"{prefix}/{f.name}"
+                if arcname in seen:          # 两个缓存目录同名时按先出现的算，不重复入包
+                    continue
+                seen.add(arcname)
+                specs.append((arcname, f))
+        return specs
+
+    def _backup_images(self, timestamp: str) -> str:
+        """打包照片归档 / 图片缓存 / 当天海报到备份目录，返回 tar 文件名（无文件可打包返回空字符串）"""
+        import tarfile
+        specs = self._image_file_specs()
+        if not specs:
             return ""
         tar_name = f"real_estate_images_{timestamp}.tar.gz"
         tar_path = self.backup_dir / tar_name
         try:
             with tarfile.open(tar_path, "w:gz") as tar:
-                for img in image_dir.iterdir():
-                    if img.is_file():
-                        tar.add(img, arcname=f"images/{img.name}")
+                for arcname, f in specs:
+                    tar.add(f, arcname=arcname)
             os.chmod(tar_path, 0o600)
             return tar_name
         except Exception as e:
             self._log(f"图片备份失败: {e}")
             return ""
 
+    def _restore_target_for(self, prefix: str):
+        """tar 内的前缀 → 解包目标目录（与备份端同一份目录清单）"""
+        if prefix in ("real_estate_images", "posters"):
+            for _prefix, src in self._image_dir_specs():
+                if _prefix == prefix:
+                    try:
+                        src.mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        return None
+                    return src if os.access(src, os.W_OK) else None
+            return None
+        # 其余（含老备份包里的纯 `images/xxx`）继续按老规矩解到第一个可写的缓存目录
+        for cand in [Path.home() / ".hermes" / "image_cache",
+                     Path.home() / ".hermes" / "cache" / "images",
+                     _REPO_ROOT / ".hermes" / "cache" / "images"]:
+            try:
+                cand.mkdir(parents=True, exist_ok=True)
+                if os.access(cand, os.W_OK):
+                    return cand
+            except Exception:
+                continue
+        return None
+
     def restore_images(self, image_tar_filename: str) -> bool:
-        """恢复房源图片备份（tar.gz 解包到图片缓存目录）"""
+        """恢复房源图片备份（按 tar 内的前缀解到对应目录：归档/缓存/海报各归各位）"""
         import tarfile
         tar_path = self.backup_dir / image_tar_filename
         if not tar_path.exists():
             self._log(f"错误: 图片备份不存在: {image_tar_filename}")
             return False
-        cache_candidates = [
-            Path.home() / ".hermes" / "image_cache",          # 房源图片实际位置（海报/上传）
-            Path.home() / ".hermes" / "cache" / "images",
-            _REPO_ROOT / ".hermes" / "cache" / "images",
-        ]
-        target_dir = None
-        for cand in cache_candidates:
-            try:
-                cand.mkdir(parents=True, exist_ok=True)
-                if os.access(cand, os.W_OK):
-                    target_dir = cand
-                    break
-            except Exception:
-                continue
-        if target_dir is None:
-            self._log("错误: 找不到可写的图片缓存目录")
-            return False
         try:
+            counts = {}
             with tarfile.open(tar_path, "r:gz") as tar:
                 for member in tar.getmembers():
-                    if member.isfile():
-                        f = tar.extractfile(member)
-                        if f:
-                            data = f.read()
-                            (target_dir / member.name.split("/")[-1]).write_bytes(data)
-            count = len([p for p in target_dir.iterdir() if p.is_file()])
-            self._log(f"图片恢复成功: {image_tar_filename} -> {target_dir} ({count} 张图片)")
+                    if not member.isfile():
+                        continue
+                    parts = member.name.split("/")
+                    target_dir = self._restore_target_for(parts[0] if len(parts) > 1 else "images")
+                    if target_dir is None:
+                        continue
+                    f = tar.extractfile(member)
+                    if not f:
+                        continue
+                    (target_dir / parts[-1]).write_bytes(f.read())
+                    counts[target_dir] = counts.get(target_dir, 0) + 1
+            if not counts:
+                self._log(f"图片恢复失败: {image_tar_filename} 里没有可识别的图片文件")
+                return False
+            for target_dir, count in counts.items():
+                self._log(f"图片恢复成功: {image_tar_filename} -> {target_dir} ({count} 张图片)")
             return True
         except Exception as e:
             self._log(f"图片恢复失败: {e}")
@@ -470,13 +556,15 @@ def main():
     parser.add_argument("--db-url", default=None, help="PostgreSQL 连接串（默认读 .env.db）")
     parser.add_argument("--backup-dir", default=None, help="备份目录")
     parser.add_argument("--force", action="store_true", help="强制备份（忽略数据变化）")
+    parser.add_argument("--keep-image-tars", type=int, default=2,
+                        help="图片包保留份数（默认 2；0 = 不自动清理）")
     parser.add_argument("--restore-file", help="恢复指定备份文件")
     parser.add_argument("--images-file", help="迁移恢复时指定图片备份文件")
     parser.add_argument("--migration-tar", help="迁移打包文件路径（coco_migration.tar.gz），restore_migration 先解包再恢复")
 
     args = parser.parse_args()
 
-    backup_mgr = DatabaseBackup(args.db_url, args.backup_dir)
+    backup_mgr = DatabaseBackup(args.db_url, args.backup_dir, keep_image_tars=args.keep_image_tars)
 
     if args.action == "backup":
         exit(0 if backup_mgr.backup(force=args.force) else 1)

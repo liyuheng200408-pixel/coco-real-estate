@@ -45,9 +45,16 @@ def _load_font(size):
 
 
 def _poster_dir():
-    cache_dir = os.path.expanduser('~/.hermes/image_cache')
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
+    """海报成品目录（独立于网关的图片缓存：缓存目录里的文件 24 小时后会被自动清理）"""
+    try:
+        from hermes_constants import get_hermes_home
+
+        base = str(get_hermes_home())
+    except Exception:  # noqa: BLE001 —— 拿不到框架工具时退回默认家目录，别让出图失败
+        base = os.path.expanduser('~/.hermes')
+    out = os.path.join(base, 'posters')
+    os.makedirs(out, exist_ok=True)
+    return out
 
 
 def _gradient(size, c1, c2):
@@ -801,7 +808,7 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     }, ensure_ascii=False)
 
 
-# 只认自己生成的海报成品 —— 房源照片也放在同一个目录里，别碰。
+# 只认自己生成的海报成品 —— 海报目录里可能还放着别的文件，别碰。
 # 三种结尾都要认：`.png`（成品）、`.svg`（老命名）、`.png.svg`（渲染引擎写的 SVG 源文件，名字 = 成品名 + .svg）
 _POSTER_ARTIFACT_SUFFIXES = (".png.svg", ".png", ".svg")
 _POSTER_ARTIFACT_RE = re.compile(

@@ -444,6 +444,48 @@ try:
 except Exception as _exc15:  # noqa: BLE001
     warn(f"命令面自检未完成（{_exc15}）", "修复：coco update")
 
+# ---- 16. 房源图片可读性 ----
+# 背景：经纪人发来的照片原先存在网关的图片缓存目录里，网关每小时清理一次「最后修改时间超过 24 小时」
+# 的文件 → 照片上传一天后从磁盘消失，而数据库里还存着那些路径（海报会取不到照片）。现在照片进库前
+# 会归档到 $HERMES_HOME/real_estate_images/，这一项就是盯「库里的路径在本机还能不能读到」。
+print("\n[16] 房源图片可读性")
+if db_url:
+    img_code = f"""
+import os, sqlalchemy
+try:
+    kw = {{'connect_args': {{'connect_timeout': 5}}}} if {db_url.startswith('postgresql')!r} else {{}}
+    e = sqlalchemy.create_engine({db_url!r}, **kw)
+    with e.connect() as c:
+        rows = c.execute(sqlalchemy.text("select images from re_properties where coalesce(images,'') <> ''")).fetchall()
+    paths = []
+    for row in rows:
+        for p in (row[0] or '').split(','):
+            p = p.strip()
+            if p and '://' not in p:
+                paths.append(p)
+    missing = [p for p in paths if not os.path.exists(p)]
+    print(f'IMG total={{len(paths)}} missing={{len(missing)}}')
+    for p in missing[:3]:
+        print('MISS ' + p)
+except Exception as ex:
+    print('ERR:' + str(ex)[:120])
+"""
+    rc16, out16 = sh(f"{PY} -c {__import__('shlex').quote(img_code)}", timeout=20)
+    if rc16 and out16.startswith("IMG"):
+        total = int(out16.split("total=")[1].split()[0])
+        missing = int(out16.split("missing=")[1].split()[0])
+        if not total:
+            ok("没有房源登记过本地图片")
+        elif not missing:
+            ok(f"房源照片 {total} 张全部可读")
+        else:
+            warn(f"{missing} / {total} 张房源照片在本机找不到（这类房出海报会取不到照片，退成不带照片的版式）",
+                 "让经纪人把照片重发一次即可补上；历史照片可从备份包恢复（见 docs/BACKUP_MIGRATION.md）")
+    else:
+        warn(f"图片可读性检查未完成: {out16[:100]}", "手动执行 python3 scripts/healthcheck.py 查看")
+else:
+    warn("跳过图片可读性检查（无 DATABASE_URL）")
+
 # ---- 汇总 ----
 print("\n" + "=" * 56)
 print(f" 汇总: PASS {PASS}  /  FAIL {FAIL}  /  WARN {WARN}")

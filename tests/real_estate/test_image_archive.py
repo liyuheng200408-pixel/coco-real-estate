@@ -4,14 +4,21 @@
 里最后修改时间超过 24 小时的文件删掉 —— 而经纪人发来的房源照片就存在那里、`re_properties.images`
 存的就是那些路径 ⇒ 照片上传一天后从磁盘消失，库里留下打不开的路径（海报 B 款会反过来找经纪人要照片）。
 
-本文件钉两件事：
+本文件钉四件事：
 1. 归档行为（复制、幂等、链接/缺文件原样保留、同名不同图不互相覆盖）；
-2. `add_property` / `add_property_images` 存进库的是**归档后**的路径。
+2. `add_property` / `add_property_images` 存进库的是**归档后**的路径；
+3. 备份把归档目录 / 缓存目录 / **当天**海报都打进去（老实现只认第一个缓存目录、且完全不认归档目录）；
+4. 恢复按包内前缀各归各位；图片包按份数滚动保留；备份端与工具层的归档目录口径一致。
 """
 import json
+import os
+import sys
+import tarfile
+import time
 from pathlib import Path
 
 import pytest
+from conftest import REPO_ROOT  # noqa: F401 —— conftest 已把仓库根塞进 sys.path
 
 from agent.real_estate_media import archive_images, images_archive_dir, is_archived
 
@@ -158,3 +165,138 @@ def test_add_property_images_archives_and_keeps_missing_warning(tmp_path, monkey
                     {"property_id": pid, "images": "/tmp/not-here-coco.jpg"})
     warnings = " ".join(missing.get("warnings") or [])
     assert "没找到" in warnings, "找不到的本地文件仍要如实提示（口径不变）"
+
+
+# ---------- 备份 / 恢复 ----------
+def _backup_module():
+    scripts = Path(REPO_ROOT) / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    import backup_db
+
+    return backup_db
+
+
+def _fake_home(tmp_path, monkeypatch):
+    """把 HOME 与 HERMES_HOME 都指到临时目录，备份/工具两侧解析到同一个地方"""
+    home = tmp_path / "home"
+    (home / ".hermes").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HERMES_HOME", str(home / ".hermes"))
+    monkeypatch.delenv("COCO_IMAGES_DIR", raising=False)
+    return home / ".hermes"
+
+
+@pytest.fixture
+def backup_env(tmp_path, monkeypatch):
+    hermes = _fake_home(tmp_path, monkeypatch)
+    backup_db = _backup_module()
+    mgr = backup_db.DatabaseBackup(database_url="postgresql://u:p@localhost/db",
+                                   backup_dir=str(tmp_path / "bk"))
+    return mgr, hermes, backup_db
+
+
+def _write(path: Path, data: bytes = b"x", age_days: float = 0):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    if age_days:
+        ts = time.time() - age_days * 86400
+        os.utime(path, (ts, ts))
+    return path
+
+
+def test_backup_packs_archive_cache_and_todays_posters(backup_env):
+    mgr, hermes, _ = backup_env
+    _write(hermes / "real_estate_images" / "img_archived_11111111.jpg")
+    _write(hermes / "image_cache" / "img_legacy.jpg")
+    _write(hermes / "cache" / "images" / "img_new_layout.jpg")
+    _write(hermes / "posters" / "poster_1_A_today.png")
+    _write(hermes / "posters" / "poster_1_A_yesterday.png", age_days=1)
+
+    name = mgr._backup_images("20260926_000000")
+    with tarfile.open(Path(mgr.backup_dir) / name) as tar:
+        names = set(tar.getnames())
+
+    assert "real_estate_images/img_archived_11111111.jpg" in names
+    assert "images/img_legacy.jpg" in names, "老缓存目录要进包"
+    assert "images/img_new_layout.jpg" in names, "新缓存目录也要进包（老实现只认第一个目录）"
+    assert "posters/poster_1_A_today.png" in names
+    assert "posters/poster_1_A_yesterday.png" not in names, "海报只备份当天那份"
+
+
+def test_backup_archive_dir_matches_tool_layer(backup_env):
+    """备份端与工具层的归档目录必须同口径（只允许一处实现，不许漂移）"""
+    mgr, _hermes, _ = backup_env
+    assert mgr._archive_dir() == images_archive_dir()
+
+
+def test_restore_routes_members_back_to_their_dirs(backup_env):
+    mgr, hermes, _ = backup_env
+    src_tar = Path(mgr.backup_dir) / "real_estate_images_20260926_010101.tar.gz"
+    src_tar.parent.mkdir(parents=True, exist_ok=True)
+    staged = [("real_estate_images/img_archived_22222222.jpg", b"archived"),
+              ("images/img_legacy.jpg", b"legacy"),
+              ("posters/poster_1_A_x.png", b"poster")]
+    with tarfile.open(src_tar, "w:gz") as tar:
+        for arcname, data in staged:
+            blob = src_tar.parent / Path(arcname).name
+            blob.write_bytes(data)
+            tar.add(blob, arcname=arcname)
+            blob.unlink()
+
+    assert mgr.restore_images(src_tar.name) is True
+    assert (hermes / "real_estate_images" / "img_archived_22222222.jpg").read_bytes() == b"archived"
+    assert (hermes / "posters" / "poster_1_A_x.png").read_bytes() == b"poster"
+    cache_hit = any((hermes / d / "img_legacy.jpg").exists()
+                    for d in ("image_cache", "cache/images"))
+    assert cache_hit, "老包里的 images/ 按老规矩解到缓存目录"
+
+
+def test_old_backup_without_prefixes_still_restores(backup_env):
+    """老备份包只有 `images/xxx`（没有前缀区分）也要能恢复 —— 向后兼容"""
+    mgr, hermes, _ = backup_env
+    old_tar = Path(mgr.backup_dir) / "real_estate_images_20260101_000000.tar.gz"
+    old_tar.parent.mkdir(parents=True, exist_ok=True)
+    blob = old_tar.parent / "img_old.jpg"
+    blob.write_bytes(b"old")
+    with tarfile.open(old_tar, "w:gz") as tar:
+        tar.add(blob, arcname="images/img_old.jpg")
+    blob.unlink()
+
+    assert mgr.restore_images(old_tar.name) is True
+    assert any((hermes / d / "img_old.jpg").exists() for d in ("image_cache", "cache/images"))
+
+
+def test_image_tars_keep_only_the_newest(backup_env):
+    """图片包装的是全部照片归档，按份数滚动保留（否则「照片总量 × 天数」线性堆磁盘）"""
+    mgr, _hermes, _ = backup_env
+    assert mgr.keep_image_tars == 2
+    for stamp in ("20260920_000000", "20260921_000000", "20260922_000000", "20260923_000000"):
+        (Path(mgr.backup_dir) / f"real_estate_images_{stamp}.tar.gz").write_bytes(b"x")
+
+    mgr._cleanup_old_image_tars()
+    left = sorted(p.name for p in Path(mgr.backup_dir).glob("real_estate_images_*.tar.gz"))
+    assert left == ["real_estate_images_20260922_000000.tar.gz",
+                    "real_estate_images_20260923_000000.tar.gz"]
+
+
+def test_image_tar_rotation_never_touches_dumps(backup_env):
+    mgr, _hermes, _ = backup_env
+    dump = Path(mgr.backup_dir) / "real_estate_20260901_020000.dump"
+    dump.parent.mkdir(parents=True, exist_ok=True)
+    dump.write_bytes(b"dump")
+    mgr._cleanup_old_image_tars()
+
+    assert dump.exists(), "图片包轮转不许动数据库备份（数据库备份按天留 30 天）"
+
+
+def test_zero_keeps_all_image_tars(tmp_path, monkeypatch):
+    _fake_home(tmp_path, monkeypatch)
+    backup_db = _backup_module()
+    mgr = backup_db.DatabaseBackup(database_url="postgresql://u:p@localhost/db",
+                                   backup_dir=str(tmp_path / "bk"), keep_image_tars=0)
+    for stamp in ("20260920_000000", "20260921_000000"):
+        (Path(mgr.backup_dir) / f"real_estate_images_{stamp}.tar.gz").write_bytes(b"x")
+    mgr._cleanup_old_image_tars()
+
+    assert len(list(Path(mgr.backup_dir).glob("real_estate_images_*.tar.gz"))) == 2
