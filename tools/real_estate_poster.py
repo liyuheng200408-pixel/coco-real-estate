@@ -10,7 +10,7 @@ import re
 from functools import partial
 
 from agent.real_estate_input import norm_id
-from tools.real_estate_property import _prop_brief, unavailable_property_note
+from tools.real_estate_property import _fmt_area, _prop_brief, unavailable_property_note
 from agent.real_estate_money import fmt_price, fmt_unit_price
 from tools.registry import registry
 
@@ -762,7 +762,7 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
 
 
 # 只认自己生成的海报成品（`poster_<编号>_<模板>[_指纹].png/.svg`）—— 房源照片也放在同一个目录里，别碰
-_POSTER_ARTIFACT_RE = re.compile(r"^poster_\d+_[A-Za-z]+(?:_[0-9a-f]{8})?\.(png|svg)$")
+_POSTER_ARTIFACT_RE = re.compile(r"^poster_(?:\d+_[A-Za-z]+|grid)(?:_[0-9a-f]{8})?\.(png|svg)$")
 _POSTER_KEEP = 20
 
 
@@ -858,12 +858,32 @@ def suggest_poster_titles(property_id: int = None, title: str = None, task_id: s
     }, ensure_ascii=False)
 
 
-# 九宫格（旧版 3x3 拼图，保留兼容）
-def generate_poster_grid(property_ids: str, qr_content: str = None, show_room_no: str = "unit",
-                         task_id: str = None) -> str:
-    """生成朋友圈九宫格大图（3x3 拼图，最多9套房源）
+# 九宫格（旧版 3x3 拼图，保留兼容；2026-09-26 收口口径与形状，**版式原样保留**）
+_GRID_TITLE_SIZES = (38, 34, 30, 26, 22)
 
-    property_ids: 房源ID列表，逗号分隔（如 "1,2,3,4,5,6,7,8,9"），最多9个。
+
+def _fit_cell_title(draw, text, max_width):
+    """格子里的小区/房号标题：先**自动缩字号**（38→22），仍放不下才截断，且**保尾部**
+
+    为什么保尾部：unit/full 档要显示的信息（楼栋/单元/房号）都在标题尾部 —— 实测
+    `格子小区 3号楼1602 急售` 从尾部截断后成了 `格子小区 3号楼…`，经纪人特意选的"完整房号"反而看不到。
+    """
+    for size in _GRID_TITLE_SIZES:
+        font = _load_font(size)
+        if draw.textlength(text, font=font) <= max_width:
+            return text, font
+    font = _load_font(_GRID_TITLE_SIZES[-1])
+    while text and draw.textlength('…' + text, font=font) > max_width:
+        text = text[1:]
+    return '…' + text, font
+
+
+def generate_poster_grid(property_ids: str, show_room_no: str = "unit",
+                         task_id: str = None) -> str:
+    """生成朋友圈九宫格大图（3x3 拼图，最多 9 套房源）
+
+    property_ids: 房源编号列表 —— **数组与逗号串都认**（`[1,2,3]` 或 `"1,2,3"`），最多 9 个；
+                  重复的编号每套只画一格（并在回执里说明）。
     show_room_no: full / unit / none —— 每格标题里的房号显示方式，**默认 unit**
     （批量图默认不逐个曝光具体房号；经纪人要显示完整房号时显式传 full）。
     """
@@ -886,19 +906,52 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, show_room_no
         if problem:
             return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
         ids.append(value)
-    ids = ids[:9]   # 九宫格最多 9 格
-    by_id = {i: q for i in ids if (q := db.get_available_property(i)) is not None}
     if not ids:
         return json.dumps({"success": False, "error": "请提供房源ID列表（逗号分隔，最多9个）"}, ensure_ascii=False)
 
-    missing = [i for i in ids if i not in by_id]
-    if missing:
-        return json.dumps({"success": False, "error": f"房源不存在或不在售：{missing}"}, ensure_ascii=False)
+    # 房号档位：认不出就**不许静默按默认出图**（原先 `or "unit"` 把乱值悄悄当成 unit）
+    mode = _norm_room_no_mode(show_room_no)
+    if mode is None:
+        if show_room_no in (None, ""):
+            mode = "unit"                      # 没给 = 用默认档（默认 unit 是文档承诺的行为）
+        else:
+            return json.dumps({"success": False, "error": (
+                f"房号写法没能识别：你说的是「{show_room_no}」。可以这样说：full 写完整房号（如 7号楼2单元1602）/ "
+                f"unit 只写楼栋单元（如 7号楼2单元）（这是默认）/ none 不写房号、只显示小区名。")},
+                ensure_ascii=False)
+
+    warnings = []
+    deduped = []
+    for pid in ids:
+        if pid not in deduped:
+            deduped.append(pid)
+    if len(deduped) != len(ids):
+        dup = sorted({p for p in ids if ids.count(p) > 1})
+        warnings.append(f"编号 {'、'.join(str(x) for x in dup)} 给了两次，每套只画一格。")
+
+    total = len(deduped)
+    ids = deduped[:9]                          # 九宫格最多 9 格
+    dropped = deduped[9:]
+    if dropped:
+        warnings.append(f"九宫格最多 9 格，这次只画了前 9 套；没画上的："
+                        f"{'、'.join(str(x) for x in dropped)}（要这些的话，分开再出一张就行）。")
+
+    by_id = {i: q for i in ids if (q := db.get_available_property(i)) is not None}
+    unavailable = []
+    for pid in [i for i in ids if i not in by_id]:
+        text, label = unavailable_property_note(pid, db.get_property(pid), action="做九宫格")
+        unavailable.append({"property_id": pid, "status": label or "不存在", "error": text})
+    if unavailable:
+        # 不存在 / 已售 / 已租 分开说（原先一律「房源不存在或不在售：[…]」）
+        return json.dumps({
+            "success": False,
+            "error": "；".join(x["error"] for x in unavailable),
+            "unavailable": unavailable,
+        }, ensure_ascii=False)
 
     cell, gap = 360, 0
     grid = Image.new('RGB', (cell * 3, cell * 3), (240, 244, 250))
     draw = ImageDraw.Draw(grid)
-    f_title = _load_font(38)
     f_price = _load_font(44)
     f_area = _load_font(30)
 
@@ -908,21 +961,29 @@ def generate_poster_grid(property_ids: str, qr_content: str = None, show_room_no
         c1, c2 = _type_colors(p.get('property_type'))
         card = _gradient((cell, cell), c1, c2)
         d = ImageDraw.Draw(card)
-        title = _ellipsis(d, _poster_display_title(p, _norm_room_no_mode(show_room_no) or "unit"), f_title, cell - 40)
-        d.text((20, 20), title, font=f_title, fill=(255, 255, 255))
+        title_text, f_title = _fit_cell_title(d, _poster_display_title(p, mode), cell - 40)
+        d.text((20, 20), title_text, font=f_title, fill=(255, 255, 255))
         d.text((20, 130), _fmt_price(p), font=f_price, fill=(255, 255, 255))
-        area = f"{p.get('area')}㎡" if p.get('area') else ''
+        area = f"{_fmt_area(p.get('area'))}㎡" if p.get('area') else ''
         d.text((20, 240), area, font=f_area, fill=(220, 230, 245))
         grid.paste(card, (cx, cy))
 
     path = os.path.join(_poster_dir(), 'poster_grid.png')
     grid.save(path)
-    return json.dumps({
+    path = _stamp_and_prune(path)
+    payload = {
         "success": True,
         "property_ids": ids,
+        "count": len(ids),
+        "total": total,
+        "truncated": bool(dropped),
         "grid_path": path,
-        "message": f"九宫格已生成：{path}（发送时用 MEDIA:{path} 直接发图）",
-    }, ensure_ascii=False)
+        "message": (f"九宫格已生成（{len(ids)} 格）" + ("；" + "；".join(warnings) if warnings else "")
+                    + f"：{path}（发送时用 MEDIA:{path} 直接发图）"),
+    }
+    if warnings:
+        payload["warnings"] = warnings
+    return json.dumps(payload, ensure_ascii=False)
 
 
 registry.register(
@@ -965,12 +1026,11 @@ registry.register(
 registry.register(
     name="generate_poster_grid",
     toolset="real_estate",
-    schema={"name": "generate_poster_grid", "description": "生成朋友圈九宫格大图（3x3拼图，最多9套房源），返回图片路径，发消息时用 MEDIA:路径 发送图片", "parameters": {
+    schema={"name": "generate_poster_grid", "description": "生成朋友圈九宫格大图（3x3 拼图，最多 9 套房源；超过 9 套只画前 9 套并说明没画上哪些）。每格显示 小区/房号 + 价格 + 面积，房号写法由 show_room_no 决定（默认只到楼栋单元，不逐个曝光具体房号）。返回图片路径，发消息时用 MEDIA:路径 发送图片", "parameters": {
         "type": "object",
         "properties": {
-              "show_room_no": {"type": "string", "enum": ["full", "unit", "none"], "description": "每格标题里的房号写法：full 完整 / unit 只到楼栋单元（默认）/ none 只显示小区名"},
-            "property_ids": {"type": "string", "description": "房源ID列表，逗号分隔，最多9个，如 1,2,3,4,5,6,7,8,9"},
-            "qr_content": {"type": "string", "description": "可选：二维码内容"},
+            "property_ids": {"type": "string", "description": "房源编号列表，最多 9 个（如 1,2,3,4,5,6,7,8,9；数组写法也认）"},
+              "show_room_no": {"type": "string", "enum": ["full", "unit", "none"], "description": "每格标题里的房号写法：full 写完整房号（如 7号楼2单元1602）/ unit 只写楼栋单元（如 7号楼2单元，默认）/ none 不写房号、只显示小区名"},
         },
         "required": ["property_ids"],
     }},
