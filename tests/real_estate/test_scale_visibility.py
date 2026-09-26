@@ -59,8 +59,8 @@ def test_listing_and_video_and_images_find_late_property(db, monkeypatch):
     _patch_all(monkeypatch, db)
     ids = _seed_many(db)
     target = ids[114]
-    for fn, kwargs in ((li.generate_listing_copy, {"property_id": target}),
-                       (vi.generate_short_video_script, {"property_id": target}),
+    for fn, kwargs in ((li.generate_listing_copy, {"property_id": target, "platform": "friends"}),
+                       (vi.generate_short_video_script, {"property_id": target, "platform": "douyin"}),
                        (im.list_property_images, {"property_id": target}),
                        (im.add_property_images, {"property_id": target, "images": "a.jpg"})):
         data = json.loads(fn(**kwargs))
