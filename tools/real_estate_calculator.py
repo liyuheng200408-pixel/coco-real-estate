@@ -340,6 +340,7 @@ def tax_calculator(
     is_only_home: bool = True,
     hold_years: float = 2,
     property_class: str = "ordinary",
+    original_price: float = None,
     task_id: str = None,
 ) -> str:
     """
@@ -352,6 +353,7 @@ def tax_calculator(
         is_only_home: 卖方是否唯一住房（满五唯一免个税的关键）
         hold_years: 房产证持有年限（年，可小数如 1.5）
         property_class: ordinary(普通住宅) / non_ordinary(非普通住宅)
+        original_price: 卖方原购入价（元），非普通住宅满 2 年按差额计税要用；不给就按现价估算并说明
 
     口径与「税费明细单」（客户版）**共用一处**（`_tax_assessment`），两个出口不会给出两个数。
     """
@@ -387,8 +389,19 @@ def tax_calculator(
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     if pclass is None:
         pclass = 'ordinary'
+    # 可选参数：没给就是"没给"（`_norm_money_arg` 对必填项才把 None 当"空值"报错）
+    original_value = None
+    if original_price is not None and str(original_price).strip() != '':
+        original_value, problem = _norm_money_arg(original_price, '卖方原购入价')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if original_value is not None and original_value <= 0:
+        return json.dumps({"success": False, "error": (
+            f"卖方原购入价要大于 0：收到的是「{original_price}」"
+            f"（不给就按现价估算，回执里会说明）")}, ensure_ascii=False)
 
-    rules = _tax_assessment(price_yuan, area_value, hold_years_value, first_home, only_home, pclass)
+    rules = _tax_assessment(price_yuan, area_value, hold_years_value, first_home, only_home, pclass,
+                            original_price=original_value)
     total_tax = rules["deed"] + rules["vat"] + rules["personal"]
 
     result = {
@@ -409,9 +422,11 @@ def tax_calculator(
     else:
         notes.append(f"增值税：{rules['vat_note']}")
     notes.append(f"个人所得税：{rules['personal_note']}")
-    if not rules["ordinary"] and rules["full_two"]:
-        notes.append("非普通住宅满 2 年按差额计税，需要卖方原购入价；这里按现价全额估算，"
-                     "要精确请用税费明细单")
+    if original_value is not None:
+        result["卖方原购入价"] = f"{original_value/10000:.2f}万元"
+    if not rules["ordinary"] and rules["full_two"] and original_value is None:
+        notes.append("非普通住宅满 2 年按差额计税，这里没给卖方原购入价、按现价全额估算；"
+                     "要精确就给我原购入价，或用税费明细单")
     payload = {"success": True, "calculator": result, "note": "；".join(notes)}
     return json.dumps(payload, ensure_ascii=False)
 
@@ -773,6 +788,7 @@ TOOLS = [
                 "is_only_home": {"type": "boolean", "description": "卖方是否唯一住房（是/否）：满五年且唯一才免个人所得税"},
                 "hold_years": {"type": "number", "description": "房产证持有年限（年，可写小数如 1.5）：满 2 年免增值税，满 5 年且唯一免个税"},
                 "property_class": {"type": "string", "enum": ["ordinary", "non_ordinary"], "description": "普通住宅(ordinary) / 非普通住宅(non_ordinary)：非普宅且面积>90㎡ 时首套契税按 3%"},
+            "original_price": {"type": "number", "description": "卖方原购入价（元）：非普通住宅满 2 年按差额计税要用；不给就按现价估算并在 note 里说明"},
             },
             "required": ["price", "area"],
         },

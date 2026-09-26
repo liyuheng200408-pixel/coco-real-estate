@@ -191,6 +191,49 @@ def test_description_and_params_document_the_rule():
     assert "满五年且唯一" in props["is_only_home"]["description"], props["is_only_home"]
 
 
+# ==================== ⑥b 卖方原购入价（非普宅满 2 年差额计税） ====================
+
+class TestOriginalPrice:
+    def test_diff_taxation_with_original_price(self):
+        """非普宅满 2 年：增值税 = （现价 − 原价）÷ 1.05 × 5%"""
+        out = _call(price=P, area=120, hold_years=3, property_class="non_ordinary",
+                    original_price=3_000_000)
+        assert out["calculator"]["增值税"] == "4.76万元", out["calculator"]
+        assert out["calculator"]["卖方原购入价"] == "300.00万元", out["calculator"]
+        assert "原价300万元" in (out.get("note") or ""), out
+
+    def test_matches_breakdown_report_with_original_price(self):
+        mine = _call(price=P, area=120, hold_years=3, property_class="non_ordinary",
+                     original_price=3_000_000)["calculator"]["增值税"]
+        theirs = _breakdown(price=P, area=120, hold_years=3, property_class="non_ordinary",
+                            original_price=3_000_000)["增值税及附加"]
+        assert mine == theirs, (mine, theirs)
+
+    def test_missing_original_price_is_disclosed(self):
+        out = _call(price=P, area=120, hold_years=3, property_class="non_ordinary")
+        assert "没给卖方原购入价" in (out.get("note") or ""), out
+        assert out["calculator"]["增值税"] == "19.05万元", out["calculator"]
+        assert "卖方原购入价" not in out["calculator"], out["calculator"]
+
+    @pytest.mark.parametrize("value", [0, -1_000_000])
+    def test_bad_original_price_gets_hint(self, value):
+        out = _call(price=P, area=120, property_class="non_ordinary", original_price=value)
+        assert out.get("success") is not True and "卖方原购入价要大于 0" in out["error"], out
+
+    def test_original_price_writings(self):
+        for raw in ("300万", "3,000,000", 3_000_000):
+            out = _call(price=P, area=120, hold_years=3, property_class="non_ordinary",
+                        original_price=raw)
+            assert out["calculator"]["卖方原购入价"] == "300.00万元", (raw, out)
+
+    def test_description_documents_original_price(self):
+        from tools.registry import registry
+
+        props = registry.get_entry("tax_calculator").schema["parameters"]["properties"]
+        assert "original_price" in props, props
+        assert "差额计税" in props["original_price"]["description"], props["original_price"]
+
+
 # ==================== ⑦ 框架层（走真实 dispatch） ====================
 
 def test_dispatch_required_and_unknown(monkeypatch):
