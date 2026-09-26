@@ -3582,8 +3582,9 @@ class RealEstateDB:
           分数最高的 3 位老客户在默认调用里一位都不出现。
         - 给 `customer_id`：只回那一位（含已关闭客户 —— 经纪人直接问某位客户的意向仍要能答）；
           不存在回 `[]`。
-        - `last_followup_at`：最近一条**人为**跟进时间（口径见 `_only_human_followups`），
-          只用于同分排序，**不参与计分**。
+        - `last_followup_at` / `recent_followups` 都只看**人为**跟进（口径见 `_only_human_followups`）：
+          带看档 3 自动写的带看跟进/回访提醒不算"经纪人联系过客户"（与流失预警族、F215 同一口径）。
+          `last_followup_at` 只用于同分排序、**不参与计分**。
         """
         from sqlalchemy import func
         with self.get_session() as s:
@@ -3604,9 +3605,13 @@ class RealEstateDB:
                         .filter(Viewing.status == 'done', Viewing.customer_id.in_(ids))
                         .group_by(Viewing.customer_id).all()}
             week_ago = datetime.now() - timedelta(days=7)
+            # 「近 7 天跟进」只算**人为**跟进：带看档 3 自动写的带看跟进/回访提醒不算
+            # （口径与「最后一次联系」F215 同一处 `_only_human_followups`）—— 否则带看一完成
+            # 就算成"经纪人联系过"，分项文案还会写"近7天跟进2次"（其实一次都没联系）。
             recent = {r[0]: r[1] for r in
-                      s.query(Followup.customer_id, func.count(Followup.id))
-                      .filter(Followup.customer_id.in_(ids), Followup.created_at >= week_ago)
+                      _only_human_followups(
+                          s.query(Followup.customer_id, func.count(Followup.id))
+                          .filter(Followup.customer_id.in_(ids), Followup.created_at >= week_ago))
                       .group_by(Followup.customer_id).all()}
             deals = {r[0]: r[1] for r in
                      s.query(Deal.customer_id, func.count(Deal.id))

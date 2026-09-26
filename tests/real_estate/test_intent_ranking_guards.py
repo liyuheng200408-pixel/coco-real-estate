@@ -146,25 +146,46 @@ class TestOrdering:
             s.commit()
         out = _call(wired)
         rows = {row["customer_id"]: row for row in out["rankings"]}
-        assert rows[auto["id"]]["score"] == rows[human["id"]]["score"] == 30, rows
+        assert rows[auto["id"]]["score"] == 15, rows[auto["id"]]      # 无任何人为跟进 → 不加那 15 分
+        assert rows[human["id"]]["score"] == 30, rows[human["id"]]
         assert rows[auto["id"]]["last_followup_at"] is None, rows[auto["id"]]
         assert [row["customer_id"] for row in out["rankings"]] == [human["id"], auto["id"]], out
 
-    def test_auto_record_still_counts_as_recent_activity(self, wired):
-        """（口径记录，非本次改动）「近 7 天跟进」这一项仍把自动记录算进去 —— 与改动前一致。
+    def test_auto_records_do_not_count_as_followups(self, wired):
+        """（2026-09-26 老板拍板 F288）「近 7 天跟进」这一项**只看人为跟进**：
 
-        它的直接后果：带看完成（档 3 自动写一条带看跟进）会让"近7天跟进"这一项 +15，
-        分项文案会显示"近7天跟进1次"。是否要改成只看人为跟进，留给老板定（见汇报"待拍板"）。
+        带看档 3 自动写的带看跟进 + 回访提醒不算"经纪人联系过客户"。改前实测：一位客户只做过
+        2 次带看 + 1 条人工跟进，分项文案写的是「近7天跟进5次 +15」（5 条里 4 条是系统写的）。
         """
         from datetime import datetime
         c = wired.add_customer(name="只有自动记录", phone="13700000098", tier="C")
         with wired.get_session() as s:
             from agent.real_estate_db import Followup
+            s.add(Followup(customer_id=c["id"], content="带看完成自动写的带看跟进", type="visit",
+                           created_at=datetime.now(), source_viewing_id=1))
+            s.add(Followup(customer_id=c["id"], content="带看后回访提醒", type="reminder",
+                           created_at=datetime.now(), source_viewing_id=1))
+            s.commit()
+        out = json.loads(m_intent.intent_score(customer_id=c["id"]))
+        intent = out["intent"]
+        assert intent["score"] == 5, intent                       # 5 基础，系统记录不给那 15 分
+        assert "近7天跟进" not in "".join(intent["breakdown"]), intent["breakdown"]
+        assert intent["recent_followups"] == 0, intent
+        assert intent["data_sufficient"] is False and intent["score_note"], intent
+
+    def test_human_followup_still_counts(self, wired):
+        """人为跟进照旧 +15，且文案里的次数就是人为跟进条数"""
+        from datetime import datetime
+        c = wired.add_customer(name="人工跟进过的", phone="13700000099", tier="C")
+        with wired.get_session() as s:
+            from agent.real_estate_db import Followup
+            s.add(Followup(customer_id=c["id"], content="打电话聊过", type="call",
+                           created_at=datetime.now()))
             s.add(Followup(customer_id=c["id"], content="带看完成自动写的", type="visit",
                            created_at=datetime.now(), source_viewing_id=1))
             s.commit()
         intent = json.loads(m_intent.intent_score(customer_id=c["id"]))["intent"]
-        assert intent["score"] == 20, intent          # 5 基础 + 15 近7天跟进
+        assert intent["score"] == 20, intent                       # 5 基础 + 15 人为跟进
         assert "近7天跟进1次 +15" in intent["breakdown"], intent["breakdown"]
 
     def test_order_reproducible(self, hot_and_cold, wired):

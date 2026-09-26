@@ -178,6 +178,24 @@ class TestInsufficientData:
         assert intent["data_sufficient"] is False, intent
         assert intent["last_followup_at"], intent      # 最近跟进时间仍要能看到
 
+    def test_system_written_records_are_not_activity(self, wired):
+        """（F288，老板拍板）带看档 3 自动写的两条跟进不算「经纪人联系过」→ 不给那 15 分
+
+        改前实测：一位客户只做过 2 次带看 + 1 条人工跟进，分项文案写「近7天跟进5次 +15」。
+        """
+        from datetime import datetime
+        c = wired.add_customer(name="只有自动记录", phone="13700000016", tier="C")
+        with wired.get_session() as s:
+            s.add(Followup(customer_id=c["id"], content="带看完成自动写的带看跟进", type="visit",
+                           created_at=datetime.now(), source_viewing_id=1))
+            s.add(Followup(customer_id=c["id"], content="带看后回访提醒", type="reminder",
+                           created_at=datetime.now(), source_viewing_id=1))
+            s.commit()
+        intent = _score({"customer_id": c["id"]})["intent"]
+        assert intent["score"] == 5 and intent["recent_followups"] == 0, intent
+        assert "近7天跟进" not in "".join(intent["breakdown"]), intent["breakdown"]
+        assert intent["data_sufficient"] is False and intent["score_note"], intent
+
 
 # ==================== ③ 编号形态与不存在 ====================
 class TestIdGuards:
