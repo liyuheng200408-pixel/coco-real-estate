@@ -574,7 +574,10 @@ def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
     """房源详情的人类可读摘要（模型照抄即可，避免它自己拼表时漏字段）"""
     lines = [f"【房源】{prop.get('title')}（编号 {prop.get('id')}）"]
     unit_price = prop.get("unit_price")
-    unit_part = f"单价 {fmt_unit_price(unit_price)}元/㎡" if unit_price else "单价 面积缺失，无法计算"
+    # 单价单位随口径走：出租算出来的是"每平米月租"，写法必须与列表/对比里的 _property_display 一致
+    unit_suffix = "元/㎡/月" if prop.get("property_type") == "rental" else "元/㎡"
+    unit_part = (f"单价 {fmt_unit_price(unit_price)}{unit_suffix}" if unit_price
+                 else "单价 面积缺失，无法计算")
     lines.append(f"总价 {fmt_price(prop)} | 面积 {_fmt_area(prop.get('area'))}㎡ | {unit_part}")
     lines.append(
         f"类型 {_TYPE_LABELS.get(prop.get('property_type'), prop.get('property_type') or '未录入')}"
@@ -912,7 +915,7 @@ registry.register(
 registry.register(
     name="get_property_detail",
     toolset="real_estate",
-    schema={"name": "get_property_detail", "description": "房源详情（一次给全）：按 房源编号(property_id) 或 标题(title) 查**单套**房源的完整资料——全部字段 + 单价(元/㎡，系统按总价÷面积自动计算) + 业主（姓名/电话/微信/看房方式）+ 图片数量 + 调价记录。经纪人问'某套房源的详细信息/详情/资料/这套房什么情况/XX栋XX房给我看看'时必须用本工具（不要用 search_property 自己拼表，否则容易漏业主段）。标题查不到会返回 not_found 与最接近的候选（绝不返回别的房源充当答案）；命中多套会返回候选列表，需先让经纪人确认编号。", "parameters": {
+    schema={"name": "get_property_detail", "description": "房源详情（一次给全）：按 房源编号(property_id) 或 标题(title) 查**单套**房源的完整资料——全部字段 + 单价(元/㎡；出租为 元/㎡/月，按总价÷面积自动计算) + 业主（姓名/电话/微信/看房方式）+ 图片数量 + 调价记录。经纪人问'某套房源的详细信息/详情/资料/这套房什么情况/XX栋XX房给我看看'时必须用本工具（不要用 search_property 自己拼表，否则容易漏业主段）。标题查不到会返回 not_found 与最接近的候选（绝不返回别的房源充当答案）；命中多套会返回候选列表，需先让经纪人确认编号。", "parameters": {
         "type": "object",
         "properties": {
             "property_id": {"type": "integer", "description": "房源编号（与标题二选一，优先）"},

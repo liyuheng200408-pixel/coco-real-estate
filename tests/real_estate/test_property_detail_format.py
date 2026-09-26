@@ -47,6 +47,15 @@ def test_area_keeps_decimal_when_needed(tool_db):
     assert "单价 14396.89元/㎡" in msg, msg
 
 
+def test_rental_unit_price_says_per_month(tool_db):
+    """出租房按"每平米月租"说（60㎡ / 月租 2500 → 41.67元/㎡/月），与列表/对比同一口径"""
+    p = make_property(tool_db, title="口径小区 3号楼501", price=2_500, area=60.0,
+                      property_type="rental")
+    msg = _detail(p["id"])["message"]
+    assert "总价 2500元/月" in msg and "单价 41.67元/㎡/月" in msg, msg
+    assert "单价 41.67元/㎡ " not in msg, msg      # 不许漏掉 /月
+
+
 # ---------- F16 密文兜底 ----------
 def test_detail_hides_ciphertext_and_warns(tool_db):
     p = make_property(tool_db, title="密钥小区 3号楼301", price=1_500_000, area=100.0)
