@@ -26,6 +26,7 @@ import subprocess
 import tempfile
 
 from agent.real_estate_money import fmt_price
+from tools.real_estate_property import _fmt_area
 
 W, H = 1080, 1920
 MARGIN = 70                      # 左右安全边
@@ -50,21 +51,75 @@ _MEASURE_FILES = {
 _ROOM_TAIL_RE = re.compile(r"[\s,，、\-]*(\d{3,4})(?:\s*(?:室|号|房))?\s*$")
 
 
-def strip_room_no(text) -> str:
-    """去掉末尾房号、保留楼栋/单元：「7号楼2单元1602」→「7号楼2单元」；「262栋1009」→「262栋」。
+def _room_no_match(text):
+    """在**原文**里定位房号：与房源判重共用同一套正则与防护表（面积/价格/楼层不会被误抹）
 
-    用途：经纪人要求海报上不写（或只写到楼栋）房号时，对房源标题做掩码 ——
-    渲染前的**兜底**，即使上游把带房号的标题塞进主标题也不会泄露。
+    `agent/real_estate_db` 的 `parse_property_identity` 是同一套规则，但它把文本归一化过、
+    只回值不回位置；这里要按位置删字，所以用同一批正则/防护表在原文上扫。
+    """
+    from agent.real_estate_db import (_ROOM_AFTER_MARKER_RE, _ROOM_PREFIX_BLOCK, _ROOM_RE,
+                                      _ROOM_TAIL_BLOCK)
+
+    m = _ROOM_AFTER_MARKER_RE.search(text)
+    if m:
+        return m
+    for m in _ROOM_RE.finditer(text):
+        after = text[m.end():].lstrip()[:1]
+        if after and (after in _ROOM_TAIL_BLOCK or after in ".．"):
+            continue                       # 后面跟着 平/㎡/万/元/层… 或小数点 → 是面积/价格
+        if any(k in text[max(0, m.start() - 3):m.start()] for k in _ROOM_PREFIX_BLOCK):
+            continue                       # 前面是 租/价/费/面积 → 不是房号
+        return m
+    return None
+
+
+def strip_room_no(text) -> str:
+    """去掉房号（**任意位置**，不只是末尾）：「海阔天空7号楼2单元1602 急售」→「海阔天空7号楼2单元 急售」。
+
+    2026-09-26 修：原先只去**末尾**房号，实测「房号在中段/后面还有字」的三种写法
+    （`…1602 急售`、`1602 南北通透三居`、`1602室 急售`）都能照印到海报上 —— unit/none 档形同虚设。
     """
     s = str(text or "").strip()
     if not s:
         return ""
-    m = _ROOM_TAIL_RE.search(s)
+    m = _room_no_match(s)
     if m is None:
         return s
-    if m.start() == 0:
-        return ""          # 整串就是房号（如「301」）→ 没有可保留的信息，交给调用方回退到小区名
-    return s[: m.start()].strip()
+    start, end = m.start(1), m.end(1)              # 只吃房号本身，别把「单元/号楼」一起吃掉
+    if end < len(s) and s[end] in "室房号":        # 连「室/房」一起吃掉
+        end += 1
+    head, tail = s[:start].strip(), s[end:].strip()
+    if head and tail:
+        return re.sub(r"\s{2,}", " ", head + " " + tail)
+    return head or tail
+
+
+def mask_room_no(text, mode="full", community=None) -> str:
+    """按房号档位掩码一段文字（**主标题与房源标识行共用这一处**）
+
+    - `full`：原样返回；
+    - `unit`：去掉房号、保留楼栋/单元与其余文字；**掩完若连楼栋/单元都不剩**，退回小区名
+      （例如「1602室 急售」→ 没有定位信息 → 用小区名，绝不退回原串）；
+    - `none`：只留小区名（没有小区名时用掩码后的文字）。
+
+    `community`：调用方拿到的小区名（房源字段），优先于从文字里解析出来的。
+    """
+    from agent.real_estate_db import parse_property_identity
+
+    s = str(text or "").strip()
+    mode = str(mode or "full").lower()
+    if mode in ("", "full") or not s:
+        return s
+    if _room_no_match(s) is None:
+        return s                                   # 本来就没房号 → 原样（别丢经纪人自己写的字）
+    masked = strip_room_no(s)
+    if mode in ("none", "no", "hide"):
+        return community or parse_property_identity(s).get("community") or masked
+    ident = parse_property_identity(masked)
+    if not (ident.get("building") or ident.get("unit")):
+        # 掩完没有楼栋/单元信息了 → 说明原本只有房号，别把光秃秃的尾巴当标题
+        return community or parse_property_identity(s).get("community") or masked
+    return masked
 
 
 def _code_line_for(d, p) -> str:
@@ -76,11 +131,7 @@ def _code_line_for(d, p) -> str:
     """
     mode = str(d.get("room_no_mode") or "full").lower()
     raw = d.get("code_line") or p.get("title") or p.get("community") or "房源"
-    if mode in ("none", "no", "hide"):
-        return p.get("community") or strip_room_no(raw) or "房源"
-    if mode in ("unit", "unit_only", "building"):
-        return strip_room_no(raw) or (p.get("community") or "房源")
-    return raw
+    return mask_room_no(raw, mode, community=p.get("community")) or "房源"
 
 
 def _esc(text) -> str:
@@ -312,6 +363,12 @@ def _footer(text: str = "房源信息以实际看房为准", color: str = "#FFFF
             % (W // 2, y, _esc(FONTS["body"][0]), color, opacity, _esc(text)))
 
 
+def _area_text(p: dict) -> str:
+    """图内面积：整数不带 `.0`（90㎡）、有小数才带（95.5㎡）—— 与房源详情/文案同一口径（F289 同族）"""
+    area = p.get("area")
+    return f"{_fmt_area(area)}㎡" if area else ""
+
+
 def _price_text(p: dict) -> str:
     """海报大字价格：复用共用实现（一位小数），near_int 让 29.96万 这类零头直接说 30万"""
     return fmt_price(p, digits=1, empty="价格待定", near_int=True)
@@ -327,7 +384,10 @@ def _unit_price_text(p: dict, prefix: str = "单价 ") -> str:
         up = float(up)
     except (TypeError, ValueError):
         return ""
-    return (prefix + "%.2f万/㎡" % (up / 10000)) if up >= 10000 else (prefix + "%.0f元/㎡" % up)
+    if up >= 10000:
+        return prefix + "%.2f万/㎡" % (up / 10000)
+    # 出租房算出来的是"每平米月租"，大字也不能漏 /月（F290/F296 同族）
+    return prefix + "%.0f元/㎡%s" % (up, "/月" if p.get("property_type") == "rental" else "")
 
 
 def _layout_text(p: dict) -> str:
@@ -355,11 +415,10 @@ def template_a(d: dict) -> str:
     sub = d.get("subtitle") or " · ".join(
         str(x) for x in [p.get("community"), p.get("district"), p.get("renovation")] if x)
     code_line = _code_line_for(d, p)
-    if str(d.get("room_no_mode") or "full").lower() not in ("", "full"):
-        # 兜底：主标题里若被塞了房号，也一并掩掉（unit/none 档）
-        title = strip_room_no(title) or title
+    # 兜底：主标题里若被塞了房号，也按同一档位掩掉（**不许回退原串** —— 那等于没掩）
+    title = mask_room_no(title, d.get("room_no_mode"), community=p.get("community")) or title
     tags = _tags_of(d, p)
-    cards = [("建面", ("%s㎡" % p.get("area")) if p.get("area") else ""),
+    cards = [("建面", _area_text(p)),
              ("户型", _layout_text(p)),
              ("装修", p.get("renovation") or "")]
     cards = [c for c in cards if c[1]]
@@ -473,7 +532,9 @@ def template_a(d: dict) -> str:
 def template_b(d: dict) -> str:
     p = d["properties"][0]
     agent = d.get("agent") or {}
-    title = d.get("title") or "今日主推"
+    # 主标题也按房号档位掩码（B 款原先完全没掩，实测 unit 档照印房号）
+    title = mask_room_no(d.get("title"), d.get("room_no_mode"),
+                         community=p.get("community")) or "今日主推"
     photo = d.get("photo_path")
     cream, ink, gold, mute = "#F5F1EA", "#3C2E26", "#C9A227", "#8C8072"
     sub = d.get("subtitle") or " · ".join(str(x) for x in [p.get("community"), p.get("district")] if x)
@@ -515,7 +576,7 @@ def template_b(d: dict) -> str:
                % (ty + 84, _esc(FONTS["body"][0]), mute, _esc(_fit(sub, W - 160, 38))))
     out.append('<line x1="80" y1="%d" x2="%d" y2="%d" stroke="%s" stroke-width="3"/>' % (ty + 128, W - 80, ty + 128, gold))
 
-    info = [("建筑面积", ("%s㎡" % p.get("area")) if p.get("area") else "—"),
+    info = [("建筑面积", _area_text(p) or "—"),
             ("户型", _layout_text(p) or "—"),
             ("楼层", p.get("floor") or "—"),
             ("朝向", p.get("orientation") or "—")]
@@ -727,7 +788,7 @@ def _field_rows(style, p) -> list:
         elif f == "unit_price":
             rows.append(("单价", _unit_price_text(p, prefix="") or "—"))
         elif f == "area":
-            rows.append(("建面", ("%s㎡" % p.get("area")) if p.get("area") else "—"))
+            rows.append(("建面", _area_text(p) or "—"))
         elif f == "layout":
             rows.append(("户型", _layout_text(p) or "—"))
         elif f == "floor":
@@ -792,7 +853,8 @@ def template_custom(d: dict) -> str:
     agent = d.get("agent") or {}
     photo = d.get("photo_path")
     has_photo = bool(photo and os.path.exists(photo))
-    title = d.get("title") or "今日主推"
+    title = mask_room_no(d.get("title"), d.get("room_no_mode"),
+                         community=p.get("community")) or "今日主推"
     rx = _rx_of(style["decor"])
     serif = style["font_style"] == "serif"
     fam_title = FONTS["title_serif"][0] if serif else FONTS["title_heavy"][0]

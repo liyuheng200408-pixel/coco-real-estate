@@ -2,11 +2,15 @@
 Coco 房产工具 - 房源海报/九宫格生成
 一键生成朋友圈海报图（标题+价格+面积+二维码），返回图片路径供飞书直接发送
 """
+import glob
+import hashlib
 import json
 import os
+import re
 from functools import partial
 
 from agent.real_estate_input import norm_id
+from tools.real_estate_property import _prop_brief, unavailable_property_note
 from agent.real_estate_money import fmt_price, fmt_unit_price
 from tools.registry import registry
 
@@ -480,19 +484,15 @@ def _norm_room_no_mode(value):
 
 
 def _poster_display_title(p, room_no_mode: str = "full") -> str:
-    """海报上显示的房源标题：按房号档位做掩码（unit/none 档不显示具体房号）。
+    """海报上显示的房源标题：按房号档位掩码（unit/none 档不显示具体房号）。
 
-    渲染前**兜底**：即便上游把带房号的标题塞进来，也不会把具体房号印到图上。
+    渲染前**兜底**：即便上游把带房号的标题塞进来，也不会把具体房号印到图上；
+    **掩完没有可显示的字时不回退原串**（那等于没掩），退回小区名或「优质房源」。
     """
-    from tools.real_estate_poster_svg import strip_room_no
+    from tools.real_estate_poster_svg import mask_room_no
 
     raw = p.get('title') or '优质房源'
-    mode = str(room_no_mode or "full").lower()
-    if mode in ("none", "no", "hide"):
-        return p.get('community') or strip_room_no(raw) or raw
-    if mode in ("unit", "unit_only", "building"):
-        return strip_room_no(raw) or (p.get('community') or raw)
-    return raw
+    return mask_room_no(raw, room_no_mode, community=p.get('community')) or '优质房源'
 
 
 def _missing_poster_info(p, card, need_photo: bool, need_floor: bool = False,
@@ -598,9 +598,26 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     p = db.get_available_property(property_id) if property_id is not None else None
     if p is None and title:
         hits = db.find_available_property_by_title(title)
+        if len(hits) > 1:
+            # 命中多套时**不许猜**（原先静默取第一套 → 可能把别的房源印成海报）
+            return json.dumps({
+                "success": False, "ambiguous": True,
+                "candidates": [_prop_brief(h) for h in hits[:5]],
+                "error": (f"标题「{title}」命中 {len(hits)} 套在售房源，请告诉我要出哪一套（把编号给我），"
+                          f"我不替你挑 —— 海报印错了收不回来。"),
+            }, ensure_ascii=False)
         p = hits[0] if hits else None
     if p is None:
-        return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
+        if property_id is not None:
+            error, status_label = unavailable_property_note(
+                property_id, db.get_property(property_id), action="出海报")
+            payload = {"success": False, "error": error}
+            if status_label:
+                payload["property_status"] = status_label
+            return json.dumps(payload, ensure_ascii=False)
+        return json.dumps({"success": False, "error": (
+            f"库里没有标题含「{title}」的在售房源，先把房源编号或完整标题给我。")}, ensure_ascii=False)
+    property_id = p.get('id')            # 按标题找到的也要回填编号，经纪人才能核对
 
     card = _agent_card()
     photo = _property_photo(p)
@@ -612,6 +629,12 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
     if tpl is None:
         tpl = "A"          # 仅用于判断依赖（照片/楼层/朝向），真正的代号在拿到选择后才会用于渲染
     room_no_mode = _norm_room_no_mode(show_room_no)
+    room_no_note = None
+    if room_no_mode is None and allow_missing:
+        # 没能问过房号档位时，落到**最不曝光**的那一档（老板口径：不能替他决定，就别默认印完整房号）
+        room_no_mode = "unit"
+        room_no_note = ("你没说海报上要不要写房号，我按「只写楼栋单元、不写具体房号」出的图；"
+                        "要写完整房号跟我说一声，我重出一张。")
     from tools.real_estate_poster_svg import normalize_style
 
     style_notes: list = []
@@ -621,6 +644,9 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
         style_summary = style_norm["summary"]
     else:
         style_norm = None
+        if style:
+            style_notes.append(f"这次的 style（参考图风格）没生效：模板 {tpl} 不用 style；"
+                               f"想按参考图风格出图，请把 template 传 CUSTOM。")
     if tpl == "B" and not photo:
         if allow_missing:
             tpl, reason = "A", "无照片（经纪人同意先出图）→ 改为不需要照片的促销款"
@@ -701,19 +727,28 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
         result = {"success": False, "error": f"SVG 引擎不可用：{exc}"}
 
     notes = []
+    if room_no_note:
+        notes.append(room_no_note)
     if not result.get("success"):
         # 回落旧 Pillow 引擎（保证任何服务器都能出图）
         notes.append(f"已回落到旧引擎（原因：{result.get('error')}）")
-        path = _render_legacy({**p, "title": _poster_display_title(p, room_no_mode)}, qr_content, tpl)
+        try:
+            path = _render_legacy({**p, "title": _poster_display_title(p, room_no_mode)},
+                                  qr_content, tpl)
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"success": False, "error": (
+                f"海报没出成：本机的 SVG 渲染器与备用引擎都不能用（{exc}）。"
+                f"装上 librsvg2-bin 再试，或跟我说一声我换一台机器出图。")}, ensure_ascii=False)
     else:
         path = result["png_path"]
 
+    path = _stamp_and_prune(path)
+
     if not card.get('company'):
         notes.append("未提供公司名称，海报未显示品牌（不臆造）")
-    if tpl == "CUSTOM":
-        notes.extend(style_notes)
-        if not photo:
-            notes.append("这套房源还没有照片：已用色块代替大图位")
+    notes.extend(style_notes)     # CUSTOM 的风格收敛说明 + "非 CUSTOM 传了 style" 这类提醒
+    if tpl == "CUSTOM" and not photo:
+        notes.append("这套房源还没有照片：已用色块代替大图位")
     return json.dumps({
         "success": True,
         "property_id": property_id,
@@ -724,6 +759,53 @@ def generate_property_poster(property_id: int = None, title: str = None, qr_cont
         "notes": notes,
         "message": f"海报已生成（模板 {tpl}）：{path}（发送时用 MEDIA:{path} 直接发图）",
     }, ensure_ascii=False)
+
+
+# 只认自己生成的海报成品（`poster_<编号>_<模板>[_指纹].png/.svg`）—— 房源照片也放在同一个目录里，别碰
+_POSTER_ARTIFACT_RE = re.compile(r"^poster_\d+_[A-Za-z]+(?:_[0-9a-f]{8})?\.(png|svg)$")
+_POSTER_KEEP = 20
+
+
+def _stamp_and_prune(path, keep=_POSTER_KEEP):
+    """给成品名加上内容指纹（同一房源同模板改标题重出图不再复用同一个文件名），并只留最近 keep 份
+
+    为什么两件事要一起做：只加指纹会**多留文件**，而图片目录原先没有任何清理 ——
+    治了"发送端可能按路径缓存旧图"，却堆出一个磁盘隐患。
+    只清理**我们自己生成的海报**（同一目录里还放着经纪人的房源照片，绝不能碰）。
+    """
+    try:
+        with open(path, 'rb') as fh:
+            digest = hashlib.sha1(fh.read()).hexdigest()[:8]
+        base, ext = os.path.splitext(path)
+        stamped = base if base.endswith("_" + digest) else f"{base}_{digest}{ext}"
+        if stamped != path:
+            os.replace(path, stamped)
+            svg_old, svg_new = path + ".svg", stamped + ".svg"
+            if os.path.exists(svg_old):          # SVG 源文件同样改名，保持 poster_path+".svg" 的老约定
+                os.replace(svg_old, svg_new)
+        path = stamped
+    except Exception:      # noqa: BLE001 —— 改名失败不影响出图，代价只是文件名不带指纹
+        pass
+
+    try:
+        groups = {}
+        for f in glob.glob(os.path.join(_poster_dir(), "poster_*")):
+            name = os.path.basename(f)
+            if not _POSTER_ARTIFACT_RE.match(name):
+                continue
+            stem = re.sub(r"_[0-9a-f]{8}$", "", os.path.splitext(name)[0])
+            groups.setdefault(stem, []).append(f)
+        ordered = sorted(groups.values(),
+                         key=lambda fs: max(os.path.getmtime(f) for f in fs), reverse=True)
+        for group in ordered[keep:]:
+            for f in group:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+    except Exception:      # noqa: BLE001 —— 清理失败不影响出图
+        pass
+    return path
 
 
 def _make_qr_png(content: str):
