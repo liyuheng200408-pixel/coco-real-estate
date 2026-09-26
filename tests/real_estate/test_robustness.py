@@ -112,17 +112,26 @@ class TestWarningsOnPartialFailure:
         assert "统计失败" in out["message"]
 
     def test_intent_ranking_warns_on_partial_failure(self, db, monkeypatch):
+        """单个客户算分失败不能悄悄跳过（否则排名少人，经纪人以为这些客户不在库里）
+
+        2026-09-26（第八组）：计分从 `db.customer_intent_score`（逐客户查库）改成
+        `tools.real_estate_intent._score_intent`（一处定义、排名与详情同源）→ 打点位置跟着挪到
+        这个纯函数上；契约本身不变（失败要点名、不静默）。
+        """
         import tools.real_estate_intent as tin
         monkeypatch.setattr(tin, "_get_db", lambda: db)
         c1 = db.add_customer(name="能算分的", customer_type="buy_second_hand", tier="A")
-        db.add_customer(name="算分失败的", customer_type="buy_second_hand", tier="A")
-        real = db.customer_intent_score
-        def flaky(cid):
-            if cid == 2:
+        c2 = db.add_customer(name="算分失败的", customer_type="buy_second_hand", tier="A")
+        real = tin._score_intent
+
+        def flaky(comp):
+            if comp.get("customer_id") == c2["id"]:
                 raise RuntimeError("模拟算分失败")
-            return real(cid)
-        monkeypatch.setattr(db, "customer_intent_score", flaky)
+            return real(comp)
+
+        monkeypatch.setattr(tin, "_score_intent", flaky)
         out = json.loads(tin.list_intent_scores())
         assert out["success"] is True
         assert "warning_scores" in out, out
         assert "算分失败的" in out["warning_scores"]
+        assert [row["customer_id"] for row in out["rankings"]] == [c1["id"]], out

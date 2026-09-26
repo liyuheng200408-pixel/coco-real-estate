@@ -3543,58 +3543,62 @@ class RealEstateDB:
             }
 
     # ---------- 客户意向度评分 ----------
-    def customer_intent_score(self, customer_id):
-        """客户意向度评分（0-100）：
-        - 等级基础分：S=40, A=25, B=15, C=5
-        - 带看次数加分：每次 +15（上限 30）
-        - 跟进活跃度加分：近 7 天有跟进 +15
-        - 预算明确加分：预算上下限都有 +10
+    def intent_components(self, customer_id=None, tier=None):
+        """意向度评分的**原始分项**（一次聚合拿回；计分与分项文案在
+        `tools/real_estate_intent.py::_score_intent` 一处，别在这里再写一套权重）。
+
+        返回 [{customer_id, customer_name, tier, status, budget_min, budget_max,
+              viewing_count, recent_followups, deal_count, last_followup_at}]
+
+        - 不给 `customer_id`：全部**在跟**客户（status='active'，与流失预警族同一口径），
+          可按 `tier` 筛。原先 `list_intent_scores` 逐客户调 `customer_intent_score`
+          （200 位 = 801 次 SQL / 0.49 秒），且名单先被"最新 N 位"截断 → 实测库里
+          分数最高的 3 位老客户在默认调用里一位都不出现。
+        - 给 `customer_id`：只回那一位（含已关闭客户 —— 经纪人直接问某位客户的意向仍要能答）；
+          不存在回 `[]`。
+        - `last_followup_at`：最近一条**人为**跟进时间（口径见 `_only_human_followups`），
+          只用于同分排序，**不参与计分**。
         """
+        from sqlalchemy import func
         with self.get_session() as s:
-            c = s.query(Customer).get(customer_id)
-            if not c:
-                return None
-            score = {'S': 40, 'A': 25, 'B': 15, 'C': 5}.get(c.tier, 5)
-            reasons = [f"等级{c.tier}基础分"]
-
-            # 带看次数
-            viewing_count = s.query(Viewing).filter(
-                Viewing.customer_id == customer_id,
-                Viewing.status == 'done',
-            ).count()
-            viewing_score = min(viewing_count * 15, 30)
-            if viewing_score:
-                score += viewing_score
-                reasons.append(f"带看{viewing_count}次 +{viewing_score}")
-
-            # 近 7 天跟进
+            q = s.query(Customer.id, Customer.name, Customer.tier, Customer.status,
+                        Customer.budget_min, Customer.budget_max)
+            if customer_id is not None:
+                q = q.filter(Customer.id == customer_id)
+            else:
+                q = q.filter(Customer.status == 'active')
+                if tier:
+                    q = q.filter(Customer.tier == tier)
+            rows = q.all()
+            if not rows:
+                return []
+            ids = [r[0] for r in rows]
+            viewings = {r[0]: r[1] for r in
+                        s.query(Viewing.customer_id, func.count(Viewing.id))
+                        .filter(Viewing.status == 'done', Viewing.customer_id.in_(ids))
+                        .group_by(Viewing.customer_id).all()}
             week_ago = datetime.now() - timedelta(days=7)
-            recent_fu = s.query(Followup).filter(
-                Followup.customer_id == customer_id,
-                Followup.created_at >= week_ago,
-            ).count()
-            if recent_fu > 0:
-                score += 15
-                reasons.append(f"近7天跟进{recent_fu}次 +15")
-
-            # 预算明确
-            if c.budget_min and c.budget_max:
-                score += 10
-                reasons.append("预算明确 +10")
-
-            # 是否有成交
-            deal_count = s.query(Deal).filter(Deal.customer_id == customer_id).count()
-            if deal_count > 0:
-                score = 100
-                reasons = ["已成交 100分"]
-
-            score = min(score, 100)
-            return {
-                'customer_id': c.id, 'customer_name': c.name,
-                'tier': c.tier, 'score': score, 'breakdown': reasons,
-                'viewing_count': viewing_count, 'recent_followups': recent_fu,
-                'budget': [c.budget_min, c.budget_max],
-            }
+            recent = {r[0]: r[1] for r in
+                      s.query(Followup.customer_id, func.count(Followup.id))
+                      .filter(Followup.customer_id.in_(ids), Followup.created_at >= week_ago)
+                      .group_by(Followup.customer_id).all()}
+            deals = {r[0]: r[1] for r in
+                     s.query(Deal.customer_id, func.count(Deal.id))
+                     .filter(Deal.customer_id.in_(ids))
+                     .group_by(Deal.customer_id).all()}
+            last_fu = {r[0]: r[1] for r in
+                       _only_human_followups(
+                           s.query(Followup.customer_id, func.max(Followup.created_at))
+                           .filter(Followup.customer_id.in_(ids)))
+                       .group_by(Followup.customer_id).all()}
+            return [{
+                'customer_id': r[0], 'customer_name': r[1], 'tier': r[2], 'status': r[3],
+                'budget_min': r[4], 'budget_max': r[5],
+                'viewing_count': viewings.get(r[0], 0),
+                'recent_followups': recent.get(r[0], 0),
+                'deal_count': deals.get(r[0], 0),
+                'last_followup_at': last_fu.get(r[0]),
+            } for r in rows]
 
     # ---------- 话术库 ----------
     def add_script(self, name, content, scenario='custom'):
