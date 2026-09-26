@@ -397,7 +397,7 @@ def schedule_reminder(customer_id: int, date: str, time: str = None, content: st
     if previous and previous.get('next_date'):
         try:
             if datetime.fromisoformat(previous['next_date']) < datetime.now():
-                warnings.append("这位客户之前那条逾期提醒不再出现了（系统按最新一条跟进算逾期）")
+                warnings.append("这位客户之前那条逾期提醒不再出现了（系统按最新一条人工跟进算逾期）")
         except ValueError:
             pass
 

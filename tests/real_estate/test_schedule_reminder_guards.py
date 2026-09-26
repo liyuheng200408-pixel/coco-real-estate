@@ -209,7 +209,9 @@ class TestWarnings:
 
         assert cid in [o["customer_id"] for o in json.loads(m.get_overdue())["overdue"]]
         out = _call(customer_id=cid, date=SOON, time="09:00")
-        assert any("之前那条逾期提醒不再出现" in w for w in (out.get("warnings") or [])), out
+        # 钉整句（F215 起口径是「人工跟进」）
+        assert ("这位客户之前那条逾期提醒不再出现了（系统按最新一条人工跟进算逾期）"
+                in (out.get("warnings") or [])), out
         assert cid not in [o["customer_id"] for o in json.loads(m.get_overdue())["overdue"]]
 
     def test_no_warning_when_nothing_superseded(self, wired, cid):
