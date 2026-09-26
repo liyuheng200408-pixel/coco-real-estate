@@ -525,26 +525,66 @@ def _missing_poster_info(p, card, need_photo: bool, need_floor: bool = False,
     return miss
 
 
-def _title_candidates(p) -> list:
-    """主标题候选（2~3 个）：Coco 拿给经纪人挑，不擅自定稿"""
-    tags = [x.strip() for x in str(p.get('tags') or '').replace('，', ',').replace('、', ',').split(',') if x.strip()]
-    t = p.get('property_type')
-    if t == 'rental':
-        cands = ["拎包入住", "今日可看", "月租好房"]
-    elif t == 'new':
-        cands = ["新盘在售", "开发商直售", "今日主推"]
-    else:
-        cands = ["今日主推", "业主诚售", "仅此一套"]
+# 兜底营销词：**不对房源事实做任何断言**（原先的「业主诚售/仅此一套/开发商直售/拎包入住/今日可看」
+# 五句在房源里都查不到依据，其中「仅此一套」还是绝对化表述 —— 2026-09-26 老板拍板全部删掉）
+_REMARK_WORDS = {
+    "second_hand": ["今日主推", "好房推荐"],
+    "new": ["新盘在售", "今日主推"],          # 「新盘在售」= 房源类型就是新的，有依据
+    "rental": ["月租好房", "今日主推"],
+}
+_TAG_TITLE_MAX_LEN = 6      # 标签太长（如「地铁1号线步行3分钟」）不做候选，海报大字放不下
+
+
+def _is_recent_listing(p, days: int = 7) -> bool:
+    created = p.get('created_at')
+    if not created:
+        return False
+    from datetime import datetime, timedelta
+
+    try:
+        ts = datetime.fromisoformat(str(created).replace('Z', '').replace('T', ' ')[:19])
+    except (TypeError, ValueError):
+        return False
+    return datetime.now() - ts <= timedelta(days=days)
+
+
+def _title_candidate_items(p) -> list:
+    """主标题候选（**每个都带依据**）：先用房源里真有的卖点，不够再用中性营销词补足
+
+    2026-09-26 修（F318/F319）：原先把三个硬编码套话排在最前、再追加标签/装修候选，最后 `[:3]` 截断 ——
+    于是「业主诚售/仅此一套/今日可看」这些**没有依据的断言**永远占满名额，标签与装修**从来没进过候选**
+    （而描述写着"按房源类型/标签生成"）。现在反过来：有依据的排前面，营销词只做兜底。
+    """
+    items = []
+    tags = [x.strip() for x in str(p.get('tags') or '').replace('，', ',').replace('、', ',').split(',')
+            if x.strip()]
     for tag in tags[:2]:
-        cands.append(f"{tag}好房")
+        if len(tag) <= _TAG_TITLE_MAX_LEN:
+            items.append({"title": f"{tag}好房", "why": f"来自房源标签「{tag}」"})
     renovation = str(p.get('renovation') or '')
     if renovation in ('精装', '豪装'):
-        cands.append(f"{renovation}好房")
-    out = []
-    for c in cands:
-        if c not in out:
-            out.append(c)
+        items.append({"title": f"{renovation}好房", "why": f"来自房源装修「{renovation}」"})
+    if '南北通透' in str(p.get('orientation') or ''):
+        items.append({"title": "南北通透好房", "why": "来自房源朝向「南北通透」"})
+    if str(p.get('viewing_note') or '').strip():
+        items.append({"title": "随时可看", "why": "房源里已填看房方式（钥匙/预约）"})
+    if _is_recent_listing(p):
+        items.append({"title": "新上房源", "why": "近 7 天内录入的房源"})
+    for word in _REMARK_WORDS.get(p.get('property_type'), _REMARK_WORDS["second_hand"]):
+        items.append({"title": word, "why": "中性营销词（不涉及房源事实）"})
+
+    seen, out = set(), []
+    for it in items:
+        if it["title"] in seen:
+            continue
+        seen.add(it["title"])
+        out.append(it)
     return out[:3]
+
+
+def _title_candidates(p) -> list:
+    """候选标题数组（海报那边在用）；带依据的明细见 `_title_candidate_items`"""
+    return [c["title"] for c in _title_candidate_items(p)]
 
 
 def _pick_template(p, template: str, photo: str) -> tuple:
@@ -846,7 +886,7 @@ def _render_legacy(p, qr_content, tpl: str) -> str:
 
 
 def suggest_poster_titles(property_id: int = None, title: str = None, task_id: str = None) -> str:
-    """给经纪人挑的海报主标题候选（2~3 个）"""
+    """给经纪人挑的海报主标题候选（2~3 个，**优先用房源里真有的卖点**）"""
     if property_id is not None:
         property_id, problem = norm_id(property_id, '房源编号')
         if problem:
@@ -855,13 +895,35 @@ def suggest_poster_titles(property_id: int = None, title: str = None, task_id: s
     p = db.get_available_property(property_id) if property_id is not None else None
     if p is None and title:
         hits = db.find_available_property_by_title(title)
+        if len(hits) > 1:
+            # 命中多套时**不许猜**（与海报同一条口径：起错标题要重做海报）
+            return json.dumps({
+                "success": False, "ambiguous": True,
+                "properties": [_prop_brief(h) for h in hits[:5]],
+                "error": (f"标题「{title}」命中 {len(hits)} 套在售房源，请告诉我要给哪一套起标题（把编号给我），"
+                          f"我不替你挑。"),
+            }, ensure_ascii=False)
         p = hits[0] if hits else None
     if p is None:
-        return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
-    cands = _title_candidates(p)
+        if property_id is not None:
+            error, status_label = unavailable_property_note(
+                property_id, db.get_property(property_id), action="给海报起标题")
+            payload = {"success": False, "error": error}
+            if status_label:
+                payload["property_status"] = status_label
+            return json.dumps(payload, ensure_ascii=False)
+        if title:
+            return json.dumps({"success": False, "error": (
+                f"库里没有标题含「{title}」的在售房源，先把房源编号或完整标题给我。")}, ensure_ascii=False)
+        return json.dumps({"success": False, "error": (
+            "请给房源编号或标题（编号最准）：我先定位到唯一那套房源，再给你 2~3 个海报主标题候选。")},
+            ensure_ascii=False)
+    items = _title_candidate_items(p)
     return json.dumps({
         "success": True,
-        "candidates": cands,
+        "property_id": p.get('id'),
+        "candidates": [c["title"] for c in items],
+        "candidates_detail": items,
         "ask": "把候选标题发给经纪人挑一个（他也可以自己给文案），选定后用 poster_title 传给 generate_property_poster。",
     }, ensure_ascii=False)
 
@@ -1021,11 +1083,11 @@ registry.register(
 registry.register(
     name="suggest_poster_titles",
     toolset="real_estate",
-    schema={"name": "suggest_poster_titles", "description": "给房产海报出 2~3 个主标题候选（按房源类型/标签生成），把候选发给经纪人挑，选定后用 poster_title 传给 generate_property_poster", "parameters": {
+    schema={"name": "suggest_poster_titles", "description": "给房产海报出 2~3 个主标题候选：**优先用房源里真有的卖点**（标签、装修、朝向、已填的看房方式、近 7 天新上），不够再用中性营销词补足；**不写「业主诚售/仅此一套」这类房源里查不到的断言**。每个候选在 candidates_detail 里带 why（依据），可用来向经纪人解释。把候选发给经纪人挑（他也可以自己给文案），选定后用 poster_title 传给 generate_property_poster", "parameters": {
         "type": "object",
         "properties": {
-            "property_id": {"type": "integer", "description": "房源ID（与 title 二选一）"},
-            "title": {"type": "string", "description": "房源标题关键词（与 property_id 二选一）"},
+            "property_id": {"type": "integer", "description": "房源编号（与 title 二选一，编号最准）"},
+            "title": {"type": "string", "description": "房源标题关键词（与 property_id 二选一；命中多套会让经纪人确认）"},
         },
     }},
     handler=lambda args, **kw: suggest_poster_titles(**args),
