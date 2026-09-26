@@ -10,7 +10,7 @@ Coco 房产工具 - 金融计算器
 import json
 import re
 from agent.real_estate_input import norm_money
-from agent.real_estate_money import fmt_wan
+from agent.real_estate_money import fmt_budget, fmt_wan
 from tools.registry import registry
 
 
@@ -189,6 +189,35 @@ def _norm_property_class(value, label='住宅类型'):
     if text in ('non_ordinary', 'non-ordinary', 'nonordinary', '非普通', '非普通住宅', '非普宅', '否'):
         return 'non_ordinary', None
     return None, f"{label}没能识别：收到的是「{value}」。请说 普通住宅(ordinary) 或 非普通住宅(non_ordinary)"
+
+
+def _norm_growth_rate(value, label='预期年增值率', default=0.05):
+    """预期年增值率归一 → (小数比例 或 None, 中文提示 或 None, 是否换写过)
+
+    这个参数最容易被写错：按揭/税费那边利率是**百分数**（4.5 表示 4.5%），这里历史默认是**比例**（0.05）。
+    实测传 `5`（想表达 5%）会被当成 500%/年 → 5 年后算出 311 亿的卖出价。规则：
+    `|值| ≤ 1` 按比例、`1 < 值 ≤ 100` 按百分数（并在回执里说明换写了什么），超出范围给中文提示。
+    """
+    if value is None:
+        return default, None, False
+    text = str(value).strip().replace('％', '%')
+    converted = False
+    if text.endswith('%'):
+        text, converted = text[:-1].strip(), True
+    try:
+        raw = float(text)
+    except (TypeError, ValueError):
+        return None, (f"{label}没能识别：收到的是「{value}」。"
+                      f"请按百分数给（5% 写 5，也可写 0.05）"), False
+    if converted or raw > 1:
+        rate = raw / 100
+        changed = True
+    else:
+        rate = raw
+        changed = abs(raw - default) > 1e-9
+    if not -1 < rate <= 1:
+        return None, (f"{label}要在 −100% 到 100% 之间：收到的是「{value}」"), False
+    return rate, None, changed
 
 
 def _norm_years_list(value, label='贷款年限'):
@@ -722,41 +751,86 @@ def roi_calculator(
     monthly_rent: float,
     hold_years: int = 5,
     expected_appreciation: float = 0.05,
+    vacancy_months: float = 0,
+    property_fee_monthly: float = 0,
+    loan_monthly_payment: float = 0,
     task_id: str = None,
 ) -> str:
     """
     投资回报率计算器
-    
+
     参数:
-        price: 购入价（元，如 400万=4000000）
-        monthly_rent: 月租金（元）
-        hold_years: 持有年限
-        expected_appreciation: 预期年增值率（默认5%）
+        price: 购入价（元，如 400万=4000000；也认「400万」）
+        monthly_rent: 月租金（元，如 5000，也认「5000元/月」）
+        hold_years: 持有年限（1–40 年）
+        expected_appreciation: 预期年增值率（按百分数给：5% 写 5，也可写 0.05 比例）
+        vacancy_months: 每年空置月数（0–12），默认 0；给了就算净口径
+        property_fee_monthly: 每月物业费（元），默认 0
+        loan_monthly_payment: 每月还贷额（元，含本金与利息的现金流），默认 0
+
+    口径：`总收益/总回报率` 只算租金 + 升值（毛）；给了上面三项任一时另出**净口径**字段
+    （扣空置、物业费与月供），并在 `note` 里说清。
     """
-    price_yuan = price  # 系统价格单位为元（如 400万 = 4000000）
-    
-    # 租金回报
-    annual_rent = monthly_rent * 12
+    price_yuan, problem = _norm_money_arg(price, '购入价')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if price_yuan <= 0:
+        return json.dumps({"success": False, "error": (
+            f"购入价要大于 0：收到的是「{price}」")}, ensure_ascii=False)
+    rent_value, problem = _norm_money_arg(monthly_rent, '月租金', '5000 或「5000元/月」')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if rent_value < 0:
+        return json.dumps({"success": False, "error": (
+            f"月租金不能是负数：收到的是「{monthly_rent}」")}, ensure_ascii=False)
+    years_value, problem = _norm_years_value(hold_years, '持有年限', low=1, high=40)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if years_value is None:
+        years_value = 5
+    appr, problem, appr_changed = _norm_growth_rate(expected_appreciation)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    vacancy, problem = _norm_years_value(vacancy_months, '每年空置月数', low=0, high=12)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    fee_value = loan_value = None
+    if property_fee_monthly is not None and str(property_fee_monthly).strip() != '':
+        fee_value, problem = _norm_money_arg(property_fee_monthly, '每月物业费')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if loan_monthly_payment is not None and str(loan_monthly_payment).strip() != '':
+        loan_value, problem = _norm_money_arg(loan_monthly_payment, '每月还贷额')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    for _v, _label, _raw in ((fee_value, '每月物业费', property_fee_monthly),
+                             (loan_value, '每月还贷额', loan_monthly_payment)):
+        if _v is not None and _v < 0:
+            return json.dumps({"success": False, "error": (
+                f"{_label}不能是负数：收到的是「{_raw}」")}, ensure_ascii=False)
+    vacancy = vacancy or 0
+    fee_value = fee_value or 0
+    loan_value = loan_value or 0
+
+    # 租金回报（毛）
+    annual_rent = rent_value * 12
     gross_rental_yield = annual_rent / price_yuan * 100
-    
+
     # 升值收益
-    future_price = price_yuan * (1 + expected_appreciation) ** hold_years
+    future_price = price_yuan * (1 + appr) ** years_value
     appreciation_gain = future_price - price_yuan
-    appreciation_rate = ((1 + expected_appreciation) ** hold_years - 1) * 100
-    
-    # 总收益
-    total_gain = annual_rent * hold_years + appreciation_gain
+
+    # 总收益（毛口径：租金 + 升值）
+    total_gain = annual_rent * years_value + appreciation_gain
     total_roi = total_gain / price_yuan * 100
-    
-    # 年化收益
-    annual_roi = ((1 + total_roi / 100) ** (1 / hold_years) - 1) * 100
-    
+    annual_roi = ((1 + total_roi / 100) ** (1 / years_value) - 1) * 100
+
     result = {
-        "购入价": f"{price/10000:.0f}万元",
-        "月租金": f"{monthly_rent}元",
-        "持有年限": f"{hold_years}年",
-        "预期年增值率": f"{expected_appreciation*100}%",
-        "年租金收入": f"{annual_rent}元",
+        "购入价": f"{price_yuan/10000:.2f}万元",
+        "月租金": f"{rent_value:.0f}元/月",
+        "持有年限": f"{years_value:g}年",
+        "预期年增值率": f"{appr*100:g}%",
+        "年租金收入": f"{annual_rent:.0f}元",
         "毛租金回报率": f"{gross_rental_yield:.2f}%",
         "预期卖出价": f"{future_price/10000:.2f}万元",
         "升值收益": f"{appreciation_gain/10000:.2f}万元",
@@ -764,8 +838,29 @@ def roi_calculator(
         "总回报率": f"{total_roi:.2f}%",
         "年化回报率": f"{annual_roi:.2f}%",
     }
-    
-    return json.dumps({"success": True, "calculator": result}, ensure_ascii=False)
+    notes = []
+    if appr_changed:
+        notes.append(f"预期年增值率「{expected_appreciation}」我按 {appr*100:g}% 算的")
+
+    # 净口径（只在给了空置/物业费/月供任一项时给，别把毛口径的字段改掉）
+    if vacancy or fee_value or loan_value:
+        effective_annual_rent = rent_value * (12 - vacancy)
+        annual_cost = (fee_value + loan_value) * 12
+        net_gain = effective_annual_rent * years_value + appreciation_gain - annual_cost * years_value
+        net_total_roi = net_gain / price_yuan * 100
+        net_annual_roi = ((1 + net_total_roi / 100) ** (1 / years_value) - 1) * 100
+        result["有效年租金"] = f"{effective_annual_rent:.0f}元"
+        result["年持有成本"] = f"{annual_cost:.0f}元"
+        result["净收益"] = f"{net_gain/10000:.2f}万元"
+        result["净租金回报率"] = f"{effective_annual_rent / price_yuan * 100:.2f}%"
+        result["净总回报率"] = f"{net_total_roi:.2f}%"
+        result["净年化回报率"] = f"{net_annual_roi:.2f}%"
+        notes.append(f"净口径：按每年空置 {vacancy:g} 个月、每月物业费 {fmt_budget(fee_value)}、"
+                     f"每月还贷 {fmt_budget(loan_value)} 扣算")
+    notes.append("投资回报口径：「总收益/总回报率」只算租金收入 + 房价增值，未扣税费与空置；"
+                 "「年化回报率」是按总回报率折算的年化近似值（不是 IRR），实际到手以现金为准")
+    payload = {"success": True, "calculator": result, "note": "；".join(notes)}
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # 工具注册
@@ -857,14 +952,22 @@ TOOLS = [
     },
     {
         "name": "roi_calculator",
-        "description": "投资回报率计算器 - 租金回报、升值收益",
+        "description": (
+            "投资回报率计算器：按购入价、月租金、持有年限、预期年升值率，算毛租金回报率、升值收益、总收益、"
+            "总回报率与年化回报率。金额按元（400万 记作 4000000，也认「400万」）；月租金写月租（如 5000，"
+            "也认「5000元/月」）；预期年增值率按百分数（5% 写 5，也可写 0.05）。"
+            "口径：总收益与总回报率只算租金与升值，未扣税费、物业费、空置与贷款利息；"
+            "年化回报率是按总回报率折算的近似值。给了空置月数/物业费/每月还贷任一项时，另给净收益与净回报率。"),
         "parameters": {
             "type": "object",
             "properties": {
-                "price": {"type": "number", "description": "购入价（元，如 400万=4000000）"},
-                "monthly_rent": {"type": "number", "description": "月租金（元）"},
-                "hold_years": {"type": "integer", "description": "持有年限"},
-                "expected_appreciation": {"type": "number", "description": "预期年增值率"},
+                "price": {"type": "number", "description": "购入价（元）：可写 4000000，也可写「400万」；必须大于 0"},
+                "monthly_rent": {"type": "number", "description": "月租金（元）：写 5000，也认「5000元/月」；不能是负数"},
+                "hold_years": {"type": "number", "description": "持有年限（1 到 40 年，默认 5）"},
+                "expected_appreciation": {"type": "number", "description": "预期年增值率（百分数）：5% 写 5，也可写 0.05 比例；范围 −100% 到 100%"},
+                "vacancy_months": {"type": "number", "description": "每年空置月数（0–12，默认 0）：给了就算净口径"},
+                "property_fee_monthly": {"type": "number", "description": "每月物业费（元，默认 0）：参与净口径"},
+                "loan_monthly_payment": {"type": "number", "description": "每月还贷额（元，默认 0，按现金流含本金与利息）：参与净口径"},
             },
             "required": ["price", "monthly_rent"],
         },
