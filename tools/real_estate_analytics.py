@@ -203,7 +203,7 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
     ② 「本周」全篇没写日期区间 → 按共用的周期口径写明（`近 7 天：09-19 ~ 09-26`）；
     ③ 描述写着"可直接转发朋友圈/客户群"，正文却是内部盘况与建议 → 描述改"内部用"，正文注明；
     ④ 空库照样给「在售房源偏少：联系房东补盘」→ 空库与"本期为空"分开说；
-    ⑤ 带看转化率的分母口径写明（现在是"近 7 天带看次数"，含预约与已取消）。
+    ⑤ 带看转化率的分母口径写明（现在是"近 7 天**已完成**的带看"，见 F360）。
     """
     db = _get_db()
     start, range_text, span_label = period_window('week')
@@ -218,11 +218,13 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
             new_props = s.query(Property).filter(Property.created_at >= start).count()
             avail = s.query(Property).filter(Property.status == 'available').count()
             viewings_week = s.query(Viewing).filter(Viewing.viewing_time >= start).count()
+            viewings_done_week = s.query(Viewing).filter(
+                Viewing.viewing_time >= start, Viewing.status == 'done').count()
             deals_week = s.query(Deal).filter(Deal.created_at >= start).count()
             no_library = not s.query(Property).count() and not s.query(Customer).count()
     except Exception as exc:
         # 同上：失败要标出来，不能假装是 0
-        new_props = avail = viewings_week = deals_week = None
+        new_props = avail = viewings_week = deals_week = viewings_done_week = None
         _brief_warning = f"自家盘况统计失败（{type(exc).__name__}: {exc}），下面的数字不可信"
 
     own_section = [f"一、自家盘况（系统数据，{span_label}：{range_text}）"]
@@ -233,14 +235,24 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
         # 空库不能给"在售偏少、联系房东补盘"这种建议（会让人以为盘子里有房）
         own_section.append("· 库里还没有客户和房源，先登记房源再看盘况")
     else:
-        conversion = f"{deals_week / viewings_week * 100:.0f}%" if viewings_week else "暂无数据"
+        # 带看转化率的分母是**本周已完成的带看**（2026-09-26 老板拍板改，F360）：
+        # 原先分母是"本周全部带看"（含还没看的预约与已取消的）——实测把带看全设成未来预约、
+        # 本周一场没看时，它照样报 67%，那个比例没有业务含义；两个原始数一并给出，便于对账。
+        if viewings_done_week:
+            conversion = f"{deals_week / viewings_done_week * 100:.0f}%"
+        else:
+            conversion = "暂无数据"
+        conversion_note = (f"带看转化率 {conversion} = 本周新开成交单 ÷ 本周已完成带看"
+                          if viewings_done_week else
+                          f"带看转化率暂无数据（本周还没有已完成的带看）")
         own_section += [
             f"· 本周新增房源: {new_props} 套",
             f"· 当前在售: {avail} 套",
-            f"· 本周带看: {viewings_week} 次",
-            f"· 本周成交: {deals_week} 单（带看转化率 {conversion}，"
-            f"按本周新开成交单 ÷ 本周带看次数算）",
+            f"· 本周带看: {viewings_week} 场（已完成 {viewings_done_week} 场）",
+            f"· 本周成交: {deals_week} 单（{conversion_note}）",
         ]
+        if viewings_done_week and deals_week > viewings_done_week:
+            own_section.append("· 带看转化率超过 100%：说明有成交来自更早的带看（不是本周看的）")
         if not any((new_props, viewings_week, deals_week)):
             own_section.append(f"· {span_label}没有新增房源、带看与成交（库里现有数据都在更早）")
 

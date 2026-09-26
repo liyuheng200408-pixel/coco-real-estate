@@ -127,16 +127,55 @@ class TestScope:
         assert re.search(r"近 7 天：\d{2}-\d{2} ~ \d{2}-\d{2}", msg), msg
         assert re.search(r"近 7 天（\d{2}-\d{2} ~ \d{2}-\d{2}）", out["统计区间"]), out["统计区间"]
 
-    def test_conversion_rate_scope_is_spelled_out(self, wired):
+    def test_conversion_rate_uses_done_viewings_only(self, wired):
+        """分母是本周**已完成**的带看（F360）：3 场已看 + 2 场未来预约 + 1 场已取消 + 1 张新单
+        → 率按 1/3 算；括号里同时给"本周带看 6 场、已完成 3 场"便于对账"""
         cid = wired.add_customer(name="简报客户", phone="13700009001", tier="A",
                                 customer_type="buy_second_hand")["id"]
-        pid = _property(wired)
-        wired.add_viewing(customer_id=cid, property_id=pid,
-                          viewing_time=datetime.now() - timedelta(days=1), status="done",
-                          result="interested")
-        wired.add_deal(customer_id=cid, property_id=pid, price=1_500_000)
+        pids = [_property(wired, title=f"简报房源{i} 1号楼101", i=i) for i in range(6)]
+        for i in range(3):          # 已完成（前 1-3 天）
+            wired.add_viewing(customer_id=cid, property_id=pids[i],
+                              viewing_time=datetime.now() - timedelta(days=i + 1),
+                              status="done", result="interested")
+        for i in range(3, 5):       # 未来预约（不会算进分母）
+            wired.add_viewing(customer_id=cid, property_id=pids[i],
+                              viewing_time=datetime.now() + timedelta(days=i - 2),
+                              status="scheduled")
+        wired.add_viewing(customer_id=cid, property_id=pids[5],   # 已取消（也不算）
+                          viewing_time=datetime.now() - timedelta(days=2), status="cancelled")
+        wired.add_deal(customer_id=cid, property_id=pids[0], price=1_500_000)
         msg = _brief()["message"]
-        assert "带看转化率" in msg and "按本周新开成交单 ÷ 本周带看次数算" in msg, msg
+        assert "本周带看: 6 场（已完成 3 场）" in msg, msg
+        assert "带看转化率 33% = 本周新开成交单 ÷ 本周已完成带看" in msg, msg
+        assert "17%" not in msg, msg      # 6 场全算会得到 17%（旧口径）
+
+    def test_no_done_viewing_says_no_data(self, wired):
+        """本周只有未来预约 / 已取消时，不许报一个"分母里没有真看过的"转化率（F360）"""
+        cid = wired.add_customer(name="简报客户2", phone="13700009002", tier="A",
+                                customer_type="buy_second_hand")["id"]
+        pids = [_property(wired, title=f"简报房源{i} 2号楼202", i=10 + i) for i in range(2)]
+        wired.add_viewing(customer_id=cid, property_id=pids[0],
+                          viewing_time=datetime.now() + timedelta(days=1), status="scheduled")
+        wired.add_viewing(customer_id=cid, property_id=pids[1],
+                          viewing_time=datetime.now() - timedelta(days=1), status="cancelled")
+        wired.add_deal(customer_id=cid, property_id=pids[0], price=1_500_000)
+        msg = _brief()["message"]
+        assert "本周带看: 2 场（已完成 0 场）" in msg, msg
+        assert "带看转化率暂无数据" in msg and "本周还没有已完成的带看" in msg, msg
+        assert "%" not in [ln for ln in msg.splitlines() if "带看转化率" in ln][0], msg
+
+    def test_rate_over_100_is_explained(self, wired):
+        """成交来自更早的带看时率会超过 100%，要解释一句，别让人以为报错了（F360）"""
+        cid = wired.add_customer(name="简报客户3", phone="13700009003", tier="A",
+                                customer_type="buy_second_hand")["id"]
+        pids = [_property(wired, title=f"简报房源{i} 3号楼303", i=20 + i) for i in range(3)]
+        wired.add_viewing(customer_id=cid, property_id=pids[0],
+                          viewing_time=datetime.now() - timedelta(days=1), status="done")
+        for i in range(2):
+            wired.add_deal(customer_id=cid, property_id=pids[i], price=1_500_000 + i)
+        msg = _brief()["message"]
+        assert "带看转化率 200%" in msg, msg
+        assert "超过 100%：说明有成交来自更早的带看" in msg, msg
 
     def test_no_city_skips_web_with_chinese_note(self, wired):
         msg = _brief()["message"]
