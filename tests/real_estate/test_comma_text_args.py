@@ -43,3 +43,71 @@ def test_as_comma_text(value, expected):
 def test_as_comma_text_does_not_reorder_or_dedupe():
     """数组按原顺序拼（去重/归一留给各字段自己的口径，别在这里偷偷改语义）"""
     assert as_comma_text(["b", "a", "b"]) == "b,a,b"
+
+
+# ---------- add_property：图片路径 / 标签 ----------
+def _registry(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path}/comma_args.db"
+    monkeypatch.setenv("DATABASE_URL", url)
+    from agent.real_estate_db import init_real_estate_db
+
+    init_real_estate_db(url)
+    import model_tools  # noqa: F401 —— 触发工具发现与注册
+
+    from tools.registry import registry
+
+    return registry
+
+
+def _add(registry, **kw):
+    args = {"title": "逗号串参数 1号楼101", "price": 1_000_000, "area": 80.0}
+    args.update(kw)
+    out = registry.get_entry("add_property").handler(args, session_id="agent:main:feishu:dm:oc_x")
+    return json.loads(out)
+
+
+class TestAddPropertyAcceptsArrays:
+    """数组写法不许崩（原先 image_paths/images 抛 AttributeError、tags 崩在数据库层）"""
+
+    def test_image_paths_as_array(self, tmp_path, monkeypatch):
+        registry = _registry(tmp_path, monkeypatch)
+        data = _add(registry, title="数组图片 1号楼101",
+                    image_paths=["/tmp/a.jpg", "/tmp/b.jpg"])
+        assert data["success"] is True, data
+        assert data["property"]["images"] == "/tmp/a.jpg,/tmp/b.jpg", data["property"].get("images")
+
+    def test_images_as_array(self, tmp_path, monkeypatch):
+        registry = _registry(tmp_path, monkeypatch)
+        data = _add(registry, title="数组图片 1号楼102", images=["/tmp/c.jpg", "/tmp/d.jpg"])
+        assert data["success"] is True, data
+        assert data["property"]["images"] == "/tmp/c.jpg,/tmp/d.jpg", data["property"].get("images")
+
+    def test_images_and_image_paths_merge(self, tmp_path, monkeypatch):
+        registry = _registry(tmp_path, monkeypatch)
+        data = _add(registry, title="数组图片 1号楼103", images=["/tmp/e.jpg"],
+                    image_paths="/tmp/f.jpg")
+        assert data["property"]["images"] == "/tmp/e.jpg,/tmp/f.jpg", data["property"].get("images")
+
+    def test_tags_as_array_stored_as_comma_text(self, tmp_path, monkeypatch):
+        """原先 tags=[…] 直接塞进 Text 列 → 数据库层报错（type 'list' is not supported）"""
+        registry = _registry(tmp_path, monkeypatch)
+        data = _add(registry, title="数组标签 1号楼104", tags=["近地铁", "学区房"])
+        assert data["success"] is True, data
+        assert data["property"]["tags"] == "近地铁,学区房", data["property"].get("tags")
+
+    def test_empty_array_is_treated_as_missing(self, tmp_path, monkeypatch):
+        """给了空数组 = 没给（不往库里写空串）"""
+        registry = _registry(tmp_path, monkeypatch)
+        data = _add(registry, title="空数组 1号楼105", images=[], image_paths=["", "  "],
+                    tags=[])
+        assert data["success"] is True, data
+        assert data["property"]["images"] is None, data["property"].get("images")
+        assert data["property"]["tags"] is None, data["property"].get("tags")
+
+    def test_comma_string_still_works(self, tmp_path, monkeypatch):
+        """逗号串写法行为不变（别把能用的写法改坏）"""
+        registry = _registry(tmp_path, monkeypatch)
+        data = _add(registry, title="逗号串 1号楼106", image_paths="/tmp/g.jpg,/tmp/h.jpg",
+                    tags="近地铁,学区房")
+        assert data["property"]["images"] == "/tmp/g.jpg,/tmp/h.jpg", data["property"].get("images")
+        assert data["property"]["tags"] == "近地铁,学区房", data["property"].get("tags")

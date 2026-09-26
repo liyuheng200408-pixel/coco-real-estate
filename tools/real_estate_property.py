@@ -8,8 +8,8 @@ from agent.real_estate_display import (OWNER_KEY_MISMATCH_WARNING, attach_key_wa
                                        safe_contact)
 from agent.real_estate_money import (fmt_budget, fmt_delta, fmt_price, fmt_unit_price,
                                      fmt_wan)
-from agent.real_estate_input import (clamp_limit, cn_number, norm_customer_type, norm_date, norm_id,
-                                     norm_money)
+from agent.real_estate_input import (as_comma_text, clamp_limit, cn_number, norm_customer_type,
+                                     norm_date, norm_id, norm_money)
 from tools.registry import registry
 
 
@@ -44,6 +44,8 @@ def add_property(
     force=True 跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用，默认 False）。
     """
     db = _get_db()
+    # 「一串多个值」的参数先归一：模型常把 image_paths/tags 当数组传（数组与逗号串都认）
+    images, image_paths, tags = as_comma_text(images), as_comma_text(image_paths), as_comma_text(tags)
     # 入口归一与基础校验（2026-09-24 加）：模型有时会把经纪人的原话直接传下来（"185万""一百二十平"），
     # 也可能传空标题/非法类型 —— 这里统一换算成 元 / ㎡ 并挡住脏数据，认不出的给中文提示，不静默入库。
     title = (title or '').strip()
