@@ -467,10 +467,20 @@ try:
     print(f'IMG total={{len(paths)}} missing={{len(missing)}}')
     for p in missing[:3]:
         print('MISS ' + p)
+    try:
+        import sys
+        sys.path.insert(0, {str(INSTALL_DIR)!r})
+        from agent.real_estate_media import images_archive_dir
+        d = images_archive_dir()
+        files = [f for f in d.iterdir() if f.is_file()]
+        size_mb = sum(f.stat().st_size for f in files) / 1024 / 1024
+        print(f'ARCH files={{len(files)}} size_mb={{size_mb:.1f}}')
+    except Exception as ex:
+        print('ARCH-ERR:' + str(ex)[:80])
 except Exception as ex:
     print('ERR:' + str(ex)[:120])
 """
-    rc16, out16 = sh(f"{PY} -c {__import__('shlex').quote(img_code)}", timeout=20)
+    rc16, out16 = sh(f"{PY} -c {__import__('shlex').quote(img_code)}", timeout=30)
     if rc16 and out16.startswith("IMG"):
         total = int(out16.split("total=")[1].split()[0])
         missing = int(out16.split("missing=")[1].split()[0])
@@ -481,6 +491,16 @@ except Exception as ex:
         else:
             warn(f"{missing} / {total} 张房源照片在本机找不到（这类房出海报会取不到照片，退成不带照片的版式）",
                  "让经纪人把照片重发一次即可补上；历史照片可从备份包恢复（见 docs/BACKUP_MIGRATION.md）")
+        # 归档目录只增不减（照片不做自动清理），给个体积数字，超阈值提示人工处理
+        if "ARCH files=" in out16:
+            arch = out16.split("ARCH files=")[1].split("\n")[0]
+            arch_files = int(arch.split()[0])
+            arch_mb = float(out16.split("size_mb=")[1].split()[0])
+            if arch_mb >= 20480:
+                warn(f"照片归档目录已占 {arch_mb / 1024:.1f} GB（{arch_files} 个文件）",
+                     "归档只增不减；磁盘紧张时人工挑选清理，脚本不会自动删照片")
+            else:
+                ok(f"照片归档目录 {arch_files} 个文件、{arch_mb:.0f} MB")
     else:
         warn(f"图片可读性检查未完成: {out16[:100]}", "手动执行 python3 scripts/healthcheck.py 查看")
 else:
