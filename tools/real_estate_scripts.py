@@ -4,8 +4,16 @@ Coco 房产工具 - 话术库沉淀
 """
 import json
 from tools.registry import registry
-from agent.real_estate_input import clean_text, clip_text, norm_id
-from agent.real_estate_script import label_of, norm_scenario, norm_sub_scenario, type_word
+from agent.real_estate_input import clamp_limit, clean_text, clip_text, norm_id
+from agent.real_estate_script import (
+    SCENARIO_ALIASES, label_of, norm_scenario, norm_sub_scenario, type_word,
+)
+
+# 列表类统一口径（契约 8）：默认 50、上限 200；回执里最多列 5 条名字
+_LIST_LIMIT_DEFAULT = 50
+_LIST_LIMIT_MAX = 200
+_LIST_MSG_MAX = 5
+_LIST_CIRCLED = "①②③④⑤"
 
 # 话术库认的场景（顺序即提示里给经纪人念的清单顺序）—— 与内置话术同一套档位
 SCRIPT_SCENARIOS = ["greeting", "objection_handling", "closing", "follow_up", "custom"]
@@ -143,11 +151,63 @@ def get_script_by_name(name: str, task_id: str = None) -> str:
         f"话术库里没有叫「{name}」的。要看库里都有什么，跟我说「列一下话术库」。")}, ensure_ascii=False)
 
 
-def list_scripts(scenario: str = None, task_id: str = None) -> str:
-    """列出话术库（可按场景筛选）"""
+def _scenario_spellings(key):
+    """该档位在库里的**全部历史写法** → 供筛选用
+
+    契约：筛选要把历史值归到同一档（改前 `save_script` 把「逼定」「开场白」原样存进库过，
+    按档位筛的时候不能把它们落下）；「自定义」档还要算上改前存进去的空串与 NULL。
+    """
+    values = [k for k, v in SCENARIO_ALIASES.items() if v == key]
+    if key == "custom":
+        values += ["", None]
+    return values
+
+
+def list_scripts(scenario: str = None, limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
+    """列出话术库（可按场景筛选）
+
+    参数:
+        scenario: 按场景筛（认中文说法与英文键；不填就列全部）
+        limit: 最多列几条（默认 50、最多 200）
+    """
+    scenario_key = None
+    if isinstance(scenario, str):
+        if scenario.strip():
+            scenario_key, problem = norm_scenario(scenario, SCRIPT_SCENARIOS)
+            if problem:
+                return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    elif scenario is not None:
+        return json.dumps({"success": False, "error": (
+            f"话术场景要给一个说法（如「开场白」）。这次收到的是{type_word(scenario)}，我没法用。")},
+            ensure_ascii=False)
+
+    limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     db = _get_db()
-    result = db.list_scripts(scenario=scenario)
-    return json.dumps({"success": True, "scripts": result, "count": len(result)}, ensure_ascii=False)
+    rows, total = db.list_scripts(scenario_values=_scenario_spellings(scenario_key) if scenario_key else None,
+                                  limit=limit, with_total=True)
+    for item in rows:
+        item["scenario_label"] = label_of(item["scenario"])
+
+    payload = {"success": True, "scripts": rows, "count": len(rows), "total": total,
+               "truncated": bool(total > len(rows))}
+    scope = f"「{label_of(scenario_key)}」下共 {total} 条" if scenario_key else f"话术库共 {total} 条"
+    if not total:
+        if scenario_key:
+            _, overall = db.list_scripts(limit=1, with_total=True)
+            payload["message"] = f"「{label_of(scenario_key)}」下还没有话术（话术库共 {overall} 条）。"
+        else:
+            payload["message"] = "话术库里还一条话术都没存过。跟我说「存一条话术」，把要记的话发我。"
+    elif payload["truncated"]:
+        payload["message"] = f"{scope}，这里列最近 {len(rows)} 条（最新登记优先）。要我多列就说一声。"
+    else:
+        shown = rows[:_LIST_MSG_MAX]
+        items = "".join(f"{_LIST_CIRCLED[i]}「{s['name']}」（编号 {s['id']}）" for i, s in enumerate(shown))
+        if len(rows) > _LIST_MSG_MAX:
+            payload["message"] = (f"{scope}（最新的在前），这里列最新的 {_LIST_MSG_MAX} 条：{items}；"
+                                  f"要全列就说一声。")
+        else:
+            payload["message"] = f"{scope}（最新的在前）：{items}。要说哪条的原文，跟我说名字。"
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def delete_script(script_id: int, task_id: str = None) -> str:
@@ -191,10 +251,11 @@ registry.register(
 registry.register(
     name="list_scripts",
     toolset="real_estate",
-    schema={"name": "list_scripts", "description": "列出话术库（可按场景筛选）", "parameters": {
+    schema={"name": "list_scripts", "description": "列出话术库（经纪人自己攒的那些），最新的在前；可按场景筛。返回条数与总数、被截断会说清；要看某条的原文按名字取。内置那 12 条标准话术不在这个库里（用 get_script 按场景取）。", "parameters": {
         "type": "object",
         "properties": {
-            "scenario": {"type": "string", "enum": ["greeting", "objection_handling", "closing", "follow_up", "custom"]},
+            "scenario": {"type": "string", "enum": ["greeting", "objection_handling", "closing", "follow_up", "custom"], "description": "按场景筛（可选）：开场白 / 异议处理 / 逼定成交 / 跟进维护 / 自定义（认这几种中文说法，也认英文；不填就列全部）"},
+            "limit": {"type": "integer", "description": "最多列几条（可选）：默认 50、最多 200；不填或填 0 按默认"},
         },
     }},
     handler=lambda args, **kw: list_scripts(**args),

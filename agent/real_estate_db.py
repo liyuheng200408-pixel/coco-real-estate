@@ -12,7 +12,7 @@ from agent.real_estate_input import (birthday_matches_month_day, clean_tags, cus
                                      norm_money, norm_phone, norm_tags)
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Float, Numeric, BigInteger,
-    DateTime, ForeignKey, CheckConstraint, Index, or_
+    DateTime, ForeignKey, CheckConstraint, Index, or_, func
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from sqlalchemy.types import TypeDecorator
@@ -3712,15 +3712,35 @@ class RealEstateDB:
             return {'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
                     'content': sc.content, 'created_at': sc.created_at.isoformat() if sc.created_at else None}
 
-    def list_scripts(self, scenario=None, limit=100):
+    def list_scripts(self, scenario=None, limit=100, with_total=False, scenario_values=None):
+        """列话术（最新登记优先）
+
+        `with_total=True` 时返回 `(rows, total)`（total 是**符合条件**的总数，一次聚合）；
+        `scenario_values`：该档位在库里的**全部历史写法**（英文键 / 中文原样 / 大小写变体 / 自定义的空串），
+        大小写不敏感匹配 —— 契约：筛选要把历史值归到同一档（改前存进去的「逼定」也要筛得到）。
+        """
         with self.get_session() as s:
             q = s.query(Script)
-            if scenario:
+            if scenario_values is not None:
+                conds = []
+                lowered = [str(v).lower() for v in scenario_values if v not in (None, '')]
+                if lowered:
+                    conds.append(func.lower(Script.scenario).in_(lowered))
+                if '' in scenario_values:
+                    conds.append(Script.scenario == '')
+                if None in scenario_values:
+                    conds.append(Script.scenario.is_(None))
+                if conds:
+                    q = q.filter(or_(*conds))
+            elif scenario:
                 q = q.filter(Script.scenario == scenario)
-            return [{'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
+            ordered = q.order_by(Script.created_at.desc())
+            total = ordered.count() if with_total else None
+            rows = [{'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
                      'content': sc.content,
                      'created_at': sc.created_at.isoformat() if sc.created_at else None}
-                    for sc in q.order_by(Script.created_at.desc()).limit(limit).all()]
+                    for sc in ordered.limit(limit).all()]
+            return (rows, total) if with_total else rows
 
     def get_script_by_name(self, name):
         with self.get_session() as s:
