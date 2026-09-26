@@ -179,8 +179,13 @@ else
     fi
     TS="$(date +%Y%m%d_%H%M%S)"
     BUNDLE="$TARGET_HOME/coco_uninstall_backup_${TS}.tar.gz"
-    ( cd "$BACKUP_DIR" && tar czf "$BUNDLE" ./*.dump ./*.tar.gz ./enc_key.txt 2>/dev/null ) \
-        || warn "备份包打包不完整（可能缺图片包或密钥），请检查 $BACKUP_DIR"
+    # 图片包每份都是**全量**（照片归档的完整副本），只打最新那份，避免里外两份全量副本白占一倍体积
+    ( cd "$BACKUP_DIR" && {
+        TAR_ITEMS=( ./*.dump ./enc_key.txt )
+        NEWEST_IMG="$(ls -1t real_estate_images_*.tar.gz 2>/dev/null | head -1)"
+        [[ -n "$NEWEST_IMG" ]] && TAR_ITEMS+=( "$NEWEST_IMG" )
+        tar czf "$BUNDLE" "${TAR_ITEMS[@]}"
+    } ) || warn "备份包打包不完整（可能缺图片包或密钥），请检查 $BACKUP_DIR"
     ok "已生成备份包：$BUNDLE"
     echo "    ⚠️  请把它下载到你的电脑：删库或重装系统后，服务器上这份也会一起没。"
     # 下载命令（由使用者自己在电脑上执行）：给出实际用户名与服务器地址
