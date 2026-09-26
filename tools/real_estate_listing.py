@@ -14,7 +14,7 @@ from functools import partial
 from tools.registry import registry
 from agent.real_estate_input import norm_id
 from agent.real_estate_money import fmt_price
-from tools.real_estate_property import _STATUS_LABELS, _property_display
+from tools.real_estate_property import _property_display, unavailable_property_note
 
 # 文案口径：整万说整万、非整万保留一位（海报/文案的字要短）；缺价格说"价格待定"
 _fmt_price = partial(fmt_price, digits=1, empty="价格待定")
@@ -77,20 +77,8 @@ def _fmt_basic(p):
 
 
 def _unavailable_error(property_id: int) -> tuple:
-    """房源不在售时怎么说：**不存在 / 已售 / 已租 分开说**，并给出可核对的下一步
-
-    返回 (给经纪人看的话, 结构化状态标签或 None)。
-    """
-    p = _get_db().get_property(property_id)
-    if p is None:
-        return f"没有编号 {property_id} 的房源，先在房源列表里核对一下编号。", None
-    status = p.get('status')
-    label = _STATUS_LABELS.get(status, status or '未知状态')
-    phrase = {"sold": "已经售出，不能发在售文案",
-              "rented": "已经出租，不能发在租文案"}.get(status, f"现在状态是{label}，不能发在售文案")
-    name = p.get('title') or ''
-    who = f"编号 {property_id} 的房源" + (f"（{name}）" if name else "")
-    return f"{who}{phrase}。如果它已经回到在售，跟我说一声我把状态改回来。", label
+    """房源不在售时怎么说（**共用件一处定义**：不存在 / 已售 / 已租 分开说）"""
+    return unavailable_property_note(property_id, _get_db().get_property(property_id))
 
 
 def generate_listing_copy(property_id: int, platform: str = "friends", task_id: str = None) -> str:
