@@ -3751,6 +3751,16 @@ class RealEstateDB:
                         'created_at': sc.created_at.isoformat() if sc.created_at else None}
             return None
 
+    def get_script(self, sid):
+        """按编号取一条话术（含正文）→ dict 或 None —— 删除前要能核对删的是哪条"""
+        with self.get_session() as s:
+            sc = s.get(Script, sid)
+            if not sc:
+                return None
+            return {'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
+                    'content': sc.content,
+                    'created_at': sc.created_at.isoformat() if sc.created_at else None}
+
     def list_scripts_by_name(self, name):
         """按名字取**全部**同名的（编号升序）—— 存量数据可能重名，读的时候要能说清有几份
 

@@ -211,14 +211,31 @@ def list_scripts(scenario: str = None, limit: int = _LIST_LIMIT_DEFAULT, task_id
 
 
 def delete_script(script_id: int, task_id: str = None) -> str:
-    """删除话术"""
+    """删除话术（**彻底删除**：删了就取不回来，回执会带上删的是哪一条）"""
     script_id, problem = norm_id(script_id, '话术编号', '，可在话术列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if script_id <= 0:
+        return json.dumps({"success": False, "error": (
+            f"话术编号要是正整数（如 12），收到的是「{script_id}」。可在话术列表里查。")}, ensure_ascii=False)
+
     db = _get_db()
-    if db.delete_script(script_id):
-        return json.dumps({"success": True, "message": "话术已删除"}, ensure_ascii=False)
-    return json.dumps({"success": False, "error": "话术不存在"}, ensure_ascii=False)
+    target = db.get_script(script_id)
+    if not target:
+        if not db.list_scripts(limit=1):
+            return json.dumps({"success": False, "error": (
+                "话术库里现在一条话术都没有，没有可删的。要存话术跟我说一声。")}, ensure_ascii=False)
+        return json.dumps({"success": False, "error": (
+            f"话术库里没有编号 {script_id} 的话术。要看库里都有什么，跟我说「列一下话术库」。")},
+            ensure_ascii=False)
+
+    db.delete_script(script_id)
+    label = label_of(target["scenario"])
+    return json.dumps({
+        "success": True,
+        "deleted": {**target, "scenario_label": label},
+        "message": f"已删除话术「{target['name']}」（编号 {script_id}，场景：{label}）。删了就取不回来了。",
+    }, ensure_ascii=False)
 
 
 registry.register(
@@ -264,9 +281,9 @@ registry.register(
 registry.register(
     name="delete_script",
     toolset="real_estate",
-    schema={"name": "delete_script", "description": "删除话术", "parameters": {
+    schema={"name": "delete_script", "description": "彻底删除一条自己存的话术（删了就取不回来，要留就先把内容记下来）。编号在话术列表里能查到；内置那 12 条标准话术不在这里面、删不掉。", "parameters": {
         "type": "object",
-        "properties": {"script_id": {"type": "integer", "description": "话术ID"}},
+        "properties": {"script_id": {"type": "integer", "description": "话术编号（正整数，在话术列表里能查到；不确定就先让我列一下话术库）"}},
         "required": ["script_id"],
     }},
     handler=lambda args, **kw: delete_script(**args),
