@@ -196,9 +196,9 @@ A级 - [客户名]
 - channel_stats（渠道线索统计：按客户来源统计来客数/成交率，判断哪个渠道性价比高）
 
 ## 竞品与意向度
-- compare_property（同小区/同区域竞品对比）
-- intent_score（客户意向度评分 0-100）
-- list_intent_scores（客户意向度排名）
+- compare_property（竞品对比：同小区/同区域在售房源比价格、面积、单价，只比同类型）
+- intent_score（客户意向度评分 0-100：分项说明每一分的来历，没有跟进或带看记录会标注仅供参考）
+- list_intent_scores（客户意向度排名：全库在跟客户统一算分后取前 N）
 
 ## 话术库
 - save_script（保存自定义话术）
