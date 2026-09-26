@@ -21,6 +21,7 @@ from pathlib import Path
 # 归档目录可用环境变量改（与 gateway 的媒体缓存目录口径一致：读取时现算，不缓存到 import 期）
 ARCHIVE_DIR_ENV = "COCO_IMAGES_DIR"
 _ARCHIVE_DIR_NAME = "real_estate_images"
+_DOCS_DIR_NAME = "real_estate_docs"
 _SAFE_EXT_RE = re.compile(r"^\.[A-Za-z0-9]{1,5}$")
 
 
@@ -66,6 +67,52 @@ def _archived_name(source: Path) -> tuple[str, str]:
     if not _SAFE_EXT_RE.match(ext):
         ext = ".jpg"
     return f"{source.stem}_{fingerprint}{ext}", fingerprint
+
+
+def documents_archive_dir() -> Path:
+    """导入用的源文件留档目录（默认 `$HERMES_HOME/real_estate_docs`）"""
+    override = os.getenv("COCO_DOCS_DIR", "").strip()
+    if override:
+        path = Path(override).expanduser()
+    else:
+        try:
+            from hermes_constants import get_hermes_home
+
+            path = get_hermes_home() / _DOCS_DIR_NAME
+        except Exception:  # noqa: BLE001
+            path = Path.home() / ".hermes" / _DOCS_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def archive_document(path: str, *, copy: bool = True) -> "tuple[str, str]":
+    """把导入/留档用的源文件（Excel、合同这类）复制进留档目录。状态同 archive_one。
+
+    命名 `<日期>_<内容指纹 8 位>_<原文件名>`：同一天同一个文件重复导入只留一份，
+    不同来源的同名文件（如两次导出的「房源表.xlsx」）不会互相覆盖。
+    """
+    if not path:
+        return path, "missing"
+    source = Path(str(path)).expanduser()
+    if not source.is_file():
+        return path, "missing"
+    try:
+        import datetime
+
+        digest = hashlib.sha1()
+        with open(source, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        stamp = datetime.datetime.now().strftime("%Y%m%d")
+        target = documents_archive_dir() / f"{stamp}_{digest.hexdigest()[:8]}_{source.name}"
+        if target.exists():
+            return str(target), "already"
+        if not copy:
+            return str(target), "to-copy"
+        shutil.copy2(source, target)
+        return str(target), "copied"
+    except Exception as exc:  # noqa: BLE001 —— 留档失败不该拦住导入本身
+        return path, f"failed:{exc}"
 
 
 def archive_one(path: str, *, copy: bool = True) -> "tuple[str, str]":

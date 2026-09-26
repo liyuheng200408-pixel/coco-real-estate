@@ -264,9 +264,11 @@ class DatabaseBackup:
         - `images/`：网关媒体缓存（老 `image_cache` 与新 `cache/images` 都认；两个都在就都打包，
           不再像以前那样只认第一个）。
         - `posters/`：海报成品，只打包**当天**的（海报是一次性交付物，隔天的天天进包只会堆垃圾）。
+        - `real_estate_docs/`：导入/留档用的源文件（Excel、合同这类）。
         """
         return [
             ("real_estate_images", self._archive_dir()),
+            ("real_estate_docs", self._docs_dir()),
             ("images", Path.home() / ".hermes" / "image_cache"),
             ("images", Path.home() / ".hermes" / "cache" / "images"),
             ("images", _REPO_ROOT / ".hermes" / "cache" / "images"),
@@ -275,16 +277,23 @@ class DatabaseBackup:
 
     def _archive_dir(self) -> Path:
         """照片归档目录：口径与工具层同一处（agent/real_estate_media.images_archive_dir）"""
+        return self._media_dir("images_archive_dir", Path.home() / ".hermes" / "real_estate_images")
+
+    def _docs_dir(self) -> Path:
+        """导入源文件留档目录：同上（agent/real_estate_media.documents_archive_dir）"""
+        return self._media_dir("documents_archive_dir", Path.home() / ".hermes" / "real_estate_docs")
+
+    def _media_dir(self, fn_name: str, fallback: Path) -> Path:
         try:
             import sys
 
             if str(_REPO_ROOT) not in sys.path:
                 sys.path.insert(0, str(_REPO_ROOT))
-            from agent.real_estate_media import images_archive_dir
+            import agent.real_estate_media as media
 
-            return Path(images_archive_dir())
+            return Path(getattr(media, fn_name)())
         except Exception:  # noqa: BLE001 —— 备份不能因为导不到工具而失败，退回默认位置
-            return Path.home() / ".hermes" / "real_estate_images"
+            return fallback
 
     def _image_file_specs(self):
         """本次要进包的 (arcname, 源文件) 列表；没有可打包的文件时返回空列表"""
@@ -324,9 +333,9 @@ class DatabaseBackup:
 
     def _restore_target_for(self, prefix: str):
         """tar 内的前缀 → 解包目标目录（与备份端同一份目录清单）"""
-        if prefix in ("real_estate_images", "posters"):
-            for _prefix, src in self._image_dir_specs():
-                if _prefix == prefix:
+        if prefix != "images":
+            for known, src in self._image_dir_specs():
+                if known == prefix:
                     try:
                         src.mkdir(parents=True, exist_ok=True)
                     except Exception:

@@ -23,6 +23,23 @@ tags: [real-estate, excel, import, batch, property]
 
 ## 执行流程
 
+### Step 0: 源文件留档（导入前先做）
+经纪人发来的表放在消息缓存目录里，**第二天会被系统自动清理**（清理是上游行为，我们不改），所以先复制一份到留档目录，随时能翻出来。
+
+```python
+import hashlib, os, shutil, datetime
+src = file_path                      # 经纪人发来的 Excel/合同路径
+home = os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")
+docs = os.path.join(home, "real_estate_docs")
+os.makedirs(docs, exist_ok=True)
+with open(src, "rb") as f:
+    digest = hashlib.sha1(f.read()).hexdigest()[:8]
+target = os.path.join(docs, f"{datetime.datetime.now():%Y%m%d}_{digest}_{os.path.basename(src)}")
+if not os.path.exists(target):
+    shutil.copy2(src, target)
+print("源文件已留档：", target)
+```
+
 ### Step 1: 安装依赖
 ```python
 import subprocess, sys

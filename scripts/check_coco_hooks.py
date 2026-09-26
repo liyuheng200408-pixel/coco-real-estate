@@ -298,6 +298,15 @@ CONTENT_CHECKS = [
         "这道闸没了 = 有人一条命令就能把滞留内容全推上正式版。",
     ),
     (
+        "B08",
+        "导入源文件留档步骤",
+        "skills/real_estate/real-estate-excel-import/SKILL.md",
+        [r"real_estate_docs", r"留档"],
+        "经纪人发来的 Excel/合同放在消息缓存目录里，第二天会被系统自动清理（上游行为，我们不改），\n"
+        "所以导入前要先复制一份到 $HERMES_HOME/real_estate_docs（备份会把该目录一起打包）。\n"
+        "这段步骤没了 = 导入用过的表第二天就找不回来。",
+    ),
+    (
         "B09",
         "重复房源时的新照片提示",
         "agent/real_estate_prompt.py",

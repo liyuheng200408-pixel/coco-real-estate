@@ -109,6 +109,39 @@ def test_archive_dir_reads_env_at_call_time(tmp_path, monkeypatch):
     assert is_archived(str(tmp_path / "two" / "img_x.jpg"))
 
 
+# ---------- 导入源文件留档（Excel / 合同这类） ----------
+def test_document_is_copied_into_docs_archive(tmp_path, monkeypatch):
+    from agent.real_estate_media import archive_document, documents_archive_dir
+
+    monkeypatch.setenv("COCO_DOCS_DIR", str(tmp_path / "docs"))
+    src = tmp_path / "房源表.xlsx"
+    src.write_bytes(b"xlsx-bytes")
+
+    stored, status = archive_document(str(src))
+
+    assert status == "copied"
+    assert Path(stored).parent == documents_archive_dir() == tmp_path / "docs"
+    assert Path(stored).read_bytes() == b"xlsx-bytes"
+    assert Path(stored).name.endswith("_房源表.xlsx"), Path(stored).name
+    assert src.exists(), "原文件不动"
+
+
+def test_document_archive_is_idempotent_and_missing_is_reported(tmp_path, monkeypatch):
+    from agent.real_estate_media import archive_document, documents_archive_dir
+
+    monkeypatch.setenv("COCO_DOCS_DIR", str(tmp_path / "docs"))
+    src = tmp_path / "合同.pdf"
+    src.write_bytes(b"pdf")
+
+    first, _ = archive_document(str(src))
+    second, status = archive_document(str(src))
+    assert first == second and status == "already"
+    assert len(list(documents_archive_dir().iterdir())) == 1
+
+    gone, missing_status = archive_document(str(tmp_path / "没有这个文件.xlsx"))
+    assert missing_status == "missing" and gone.endswith("没有这个文件.xlsx")
+
+
 # ---------- 工具层：入库的是归档后的路径 ----------
 def _registry(tmp_path, monkeypatch, archive_dir):
     url = f"sqlite:///{tmp_path}/image_archive.db"
@@ -208,6 +241,7 @@ def _write(path: Path, data: bytes = b"x", age_days: float = 0):
 def test_backup_packs_archive_cache_and_todays_posters(backup_env):
     mgr, hermes, _ = backup_env
     _write(hermes / "real_estate_images" / "img_archived_11111111.jpg")
+    _write(hermes / "real_estate_docs" / "20260926_abcdef12_房源表.xlsx")
     _write(hermes / "image_cache" / "img_legacy.jpg")
     _write(hermes / "cache" / "images" / "img_new_layout.jpg")
     _write(hermes / "posters" / "poster_1_A_today.png")
@@ -218,6 +252,7 @@ def test_backup_packs_archive_cache_and_todays_posters(backup_env):
         names = set(tar.getnames())
 
     assert "real_estate_images/img_archived_11111111.jpg" in names
+    assert "real_estate_docs/20260926_abcdef12_房源表.xlsx" in names, "导入用源文件也要进包（留档才有意义）"
     assert "images/img_legacy.jpg" in names, "老缓存目录要进包"
     assert "images/img_new_layout.jpg" in names, "新缓存目录也要进包（老实现只认第一个目录）"
     assert "posters/poster_1_A_today.png" in names
@@ -235,6 +270,7 @@ def test_restore_routes_members_back_to_their_dirs(backup_env):
     src_tar = Path(mgr.backup_dir) / "real_estate_images_20260926_010101.tar.gz"
     src_tar.parent.mkdir(parents=True, exist_ok=True)
     staged = [("real_estate_images/img_archived_22222222.jpg", b"archived"),
+              ("real_estate_docs/20260926_abcdef12_房源表.xlsx", b"doc"),
               ("images/img_legacy.jpg", b"legacy"),
               ("posters/poster_1_A_x.png", b"poster")]
     with tarfile.open(src_tar, "w:gz") as tar:
@@ -246,6 +282,7 @@ def test_restore_routes_members_back_to_their_dirs(backup_env):
 
     assert mgr.restore_images(src_tar.name) is True
     assert (hermes / "real_estate_images" / "img_archived_22222222.jpg").read_bytes() == b"archived"
+    assert (hermes / "real_estate_docs" / "20260926_abcdef12_房源表.xlsx").read_bytes() == b"doc"
     assert (hermes / "posters" / "poster_1_A_x.png").read_bytes() == b"poster"
     cache_hit = any((hermes / d / "img_legacy.jpg").exists()
                     for d in ("image_cache", "cache/images"))
