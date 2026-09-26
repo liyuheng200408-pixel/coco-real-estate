@@ -262,6 +262,21 @@ class TestWeeklyData:
         assert "【渠道】" in out
         assert "【该盯的人】" in out and "小王（S级）逾期 2 天未跟进" in out
 
+    def test_channel_line_separates_customers_from_orders(self, mods, db):
+        """渠道行要分开说"多少位客户成交 / 一共多少张单"（F359）
+
+        原先写「成交 N 单」而 N 是"有成交的客户数"—— 一位客户开两张单时这行会少报，
+        且与同一条周报【活动量】段的「新增成交单 N 张」（真单数）含义冲突。
+        """
+        m = mods["coco_cron_weekly"]
+        c = make_customer(db, name="渠道客户", source="贝壳", status="active")
+        for i in range(2):
+            p = make_property(db, title=f"渠道房源{i}", price=1_500_000 + i)
+            db.add_deal(customer_id=c["id"], property_id=p["id"], price=1_500_000 + i)
+        lines = m._channel_lines(db)
+        assert lines, "渠道行没出来"
+        assert "贝壳：1 位客户（其中 1 位已成交、共 2 张单）" in lines[0], lines
+
     def test_no_simulated_funnel_numbers(self, mods, db):
         """周报只用库内真实计数；模拟口径（如"假设30%带看"）不许出现"""
         m = mods["coco_cron_weekly"]

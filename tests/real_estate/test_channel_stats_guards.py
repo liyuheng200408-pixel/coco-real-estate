@@ -94,6 +94,17 @@ class TestScopeIsSpelledOut:
         assert "有成交的客户数与客户成交率" in desc, desc
         assert "已合并" in desc, desc
 
+    def test_deal_orders_counts_orders_not_customers(self, wired):
+        """`deals` 是"有成交的客户数"、`成交单数` 是"单数"—— 一位客户两单时两者必须不同（F359）"""
+        cid = _cust(wired, "复购客户", source="贝壳", i=1)
+        for i in range(2):
+            pid = wired.add_property(title=f"复购房源{i} 1号楼101", price=1_500_000 + i, area=90.0,
+                                     property_type="second_hand", status="available")["id"]
+            wired.add_deal(customer_id=cid, property_id=pid, price=1_500_000 + i)
+        row = _stats()["channels"][0]
+        assert row["deals"] == 1, row          # 1 位客户有成交
+        assert row["成交单数"] == 2, row        # 但开了 2 张单
+
     def test_totals_add_up(self, wired):
         _cust(wired, "客1", source="贝壳", i=1)
         _cust(wired, "客2", source="抖音", i=2)

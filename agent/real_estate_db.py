@@ -3306,12 +3306,18 @@ class RealEstateDB:
 
         2026-09-26 改（F350）：来源先过 `normalize_source()` **归并同义写法**（「贝壳找房」与「贝壳」
         原先是两行），并发回该行合并了哪些写法（`spellings`，给上层如实说明用）；
-        认不出的写法原样成一行。`deals` = 该渠道**有成交的客户数**（不是成交单数），`conversion_rate`
-        = deals / customers。
+        认不出的写法原样成一行。`deals` = 该渠道**有成交的客户数**，`成交单数` = 该渠道的**成交单数**
+        （一位客户开两张单时两者不同），`conversion_rate` = deals / customers。
         """
+        from sqlalchemy import func
         with self.get_session() as s:
             # 2026-09-18 修：原先每客户查一次成交（N+1），现改为一次取出"有成交的客户集合"
             deal_customer_ids = {row[0] for row in s.query(Deal.customer_id).distinct().all()}
+            # 2026-09-26（F359）：每客户的**成交单数** —— `deals` 只是"有成交的客户数"，
+            # 一位客户开两张单时两者不同（周报要报"共 N 张单"就用这个）。一次 group by 拿回，别在下面逐客户查。
+            deal_orders = {row[0]: row[1] for row in
+                           s.query(Deal.customer_id, func.count(Deal.id))
+                           .group_by(Deal.customer_id).all()}
             channels = {}
             for c in s.query(Customer).all():
                 raw_src = (c.source or '').strip()
@@ -3319,10 +3325,11 @@ class RealEstateDB:
                 ch = channels.setdefault(src, {
                     'source': src, 'customers': 0, 'closed': 0,
                     'tiers': {'S': 0, 'A': 0, 'B': 0, 'C': 0}, 'deals': 0,
-                    'spellings': set(),
+                    '成交单数': 0, 'spellings': set(),
                 })
                 if raw_src and raw_src != src:
                     ch['spellings'].add(raw_src)
+                ch['成交单数'] += deal_orders.get(c.id, 0)      # 已关闭客户的单也算进渠道产出
                 if c.status == 'closed':
                     ch['closed'] += 1
                     continue

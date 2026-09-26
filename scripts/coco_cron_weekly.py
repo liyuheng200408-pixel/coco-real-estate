@@ -16,14 +16,20 @@ _TIER_ORDER = {"S": 0, "A": 1, "B": 2, "C": 3}
 
 
 def _channel_lines(db) -> list:
-    """渠道：来客量与成交数（真实统计，未填来源归入"未填写"）"""
+    """渠道：来客量与成交（真实统计，未填来源归入"未填写"）
+
+    2026-09-26（F359）改文案：原先写「成交 N 单」，而 N 是 `deals`＝**有成交的客户数**
+    （实测：某渠道 1 位客户开 2 单时周报写"成交 1 单"，而同一条周报【活动量】段写"新增成交单 3 张"，
+    同一份周报两个"成交"含义不同）→ 现在分开说清：多少位客户成交、一共多少张单。
+    """
     try:
         channels = db.get_channel_stats() or []
     except Exception:
         return []
     rows = sorted(channels, key=lambda c: c.get("customers", 0), reverse=True)
     return [
-        f"· {c.get('source')}：{c.get('customers', 0)} 位客户（成交 {c.get('deals', 0)} 单）"
+        f"· {c.get('source')}：{c.get('customers', 0)} 位客户（其中 {c.get('deals', 0)} 位已成交、"
+        f"共 {c.get('成交单数', c.get('deals', 0))} 张单）"
         for c in rows if c.get("customers")
     ]
 
