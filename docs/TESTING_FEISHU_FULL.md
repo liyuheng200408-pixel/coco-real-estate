@@ -81,9 +81,9 @@ coco check  # 预期 FAIL 0
 | 把[客户]的"刚需"标签移除 | remove_customer_tag | 标签移除 |
 | 给[在售房源]生成一张海报 | generate_property_poster | 出图（MEDIA） |
 | 给[在售房源]生成九宫格海报 | generate_poster_grid | 出图 |
-| 对比 1 号和 2 号房源 | compare_property | 对比表 |
-| 给[客户]计算一下对[在售房源]的意向度 | intent_score | 评分 |
-| 查看所有客户的意向评分 | list_intent_scores | 排名 |
+| [在售房源]跟同小区在售的比一下价格 | compare_property | 竞品对比表（标注同小区/同区域、该区域均价与样本套数） |
+| 给[客户]算一下意向度 | intent_score | 意向度评分（含每一分的来历；没有跟进或带看会标注仅供参考） |
+| 看看客户的意向评分排名 | list_intent_scores | 排名（说明共几位在跟客户、列了几位） |
 | 查看[在售房源]的图片 | list_property_images | 图片列表 |
 
 ### 补测：发图 + 政策（2 条）
