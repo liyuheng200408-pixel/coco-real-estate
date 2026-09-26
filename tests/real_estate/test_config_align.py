@@ -22,6 +22,7 @@ def test_standard_values_are_the_agreed_ones():
         "display.language": "zh",   # 2026-09-23 拍板：界面语言中文
         "cron.catch_up_missed": False,  # 2026-09-23 拍板：机器没开就不补跑
         "approvals.destructive_slash_confirm": False,
+        "sessions.retention_days": 3650,   # 2026-09-26 拍板：会话正文不再 90 天自动删
     }
 
 

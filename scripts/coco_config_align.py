@@ -45,6 +45,10 @@ STANDARD: "dict[str, object]" = {
     # 对话清空类命令（/new、/clear、/reset、/undo）不再弹确认框：经纪人不会输入 /always，
     # 三选一反而卡住「开新会话」；关掉后直接执行（业务数据都在库里，不受影响）。
     "approvals.destructive_slash_confirm": False,
+    # 会话记录保留期（2026-09-26 老板拍板 3650 天）：官方默认 90 天，网关启动时会**真删**
+    # 「已结束且 90 天没动静」的会话正文与磁盘转录（hermes_state_maintenance.prune_sessions）。
+    # Coco 是单人/少人用，state.db 增长极慢，没必要为了省几 MB 丢掉历史对话。
+    "sessions.retention_days": 3650,
 }
 
 # 官方 Hermes 的默认值 / 官方设置向导会写进去的值（权威来源：官方 v2026.9.14 的
@@ -63,6 +67,7 @@ OFFICIAL_DEFAULTS: "dict[str, tuple]" = {
     "display.language": ("en",),                      # 官方默认 en（不设或向导写回时都当官方默认）
     "approvals.destructive_slash_confirm": (True,),   # 官方默认 True（弹确认框）
     "cron.catch_up_missed": (True,),                  # 官方默认 True（错过会补发一次）
+    "sessions.retention_days": (90,),                 # 官方默认 90 天（到期真删会话正文）
 }
 
 
@@ -76,6 +81,7 @@ LABELS: "dict[str, str]" = {
     "cron.catch_up_missed": "漏跑不补（机器没开就不发）",
     "display.language": "界面语言",
     "approvals.destructive_slash_confirm": "清空对话类命令的确认框",
+    "sessions.retention_days": "会话记录保留天数",
 }
 
 
