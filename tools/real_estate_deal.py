@@ -4,7 +4,11 @@ Coco 房产工具 - 成交/交易管理
 import json
 from datetime import datetime
 from tools.registry import registry
-from agent.real_estate_input import clamp_limit, norm_id
+from agent.real_estate_input import (STAGE_LABELS as CUSTOMER_STAGE_LABELS, clamp_limit,
+                                     norm_date, norm_id, norm_money)
+from agent.real_estate_money import fmt_wan
+from tools.real_estate_followup import norm_followup_time, split_time_part
+from tools.real_estate_property import _STATUS_LABELS
 
 # 列表分页口径（与 list_customers/list_owners 同一套：默认 20、上限 200、≤0 与非数字按默认）
 _LIST_LIMIT_DEFAULT = 20
@@ -24,19 +28,65 @@ STAGE_LABELS = {
 
 
 def _parse_date(value: str, field_name: str):
+    """成交/交易里的日期入参 → datetime；认不出抛 ValueError（提示是中文）。
+
+    先按老写法解析（`2026-12-31` / `2026-12-31 10:00` / `2026-12-31T10:00` —— **必须保留**，
+    否则是把旧能力改坏），再交给共用的 `norm_date` + `split_time_part` 兜底：于是 `2026/12/31`、
+    `2026年12月31日`、`明天 10:00`、`周三`、`3天后` 这些说法也一并认了（与跟进、带看同一套口径，
+    「日期+时刻」的拆分只留 `split_time_part` 一处）。
+    """
     if not value:
         return None
+    text = str(value).strip()
     for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"):
         try:
-            return datetime.strptime(value.strip(), fmt)
+            return datetime.strptime(text, fmt)
         except ValueError:
             continue
-    raise ValueError(f"{field_name} 格式错误: {value}，请用 YYYY-MM-DD")
+    date_part, embedded = split_time_part(text)
+    parsed, problem = norm_date(date_part, field_name, "2026-12-31")
+    if problem:
+        raise ValueError(f"{field_name}没能识别：收到的是「{value}」。"
+                         f"请用 2026-12-31 这类写法，也认 明天/周三/3天后")
+    if embedded:
+        time_text, problem = norm_followup_time(embedded, field_name)
+        if problem or not time_text:
+            raise ValueError(f"{field_name}没能识别：收到的是「{value}」。"
+                             f"时间请用 9:30 或 9点30 这类写法")
+        hour, minute = (int(part) for part in time_text.split(':'))
+        parsed = parsed.replace(hour=hour, minute=minute)
+    return parsed
+
+
+def _norm_amount(value, label, sample):
+    """金额入参归一（复用共用的 `norm_money`）→ (元 或 None, 中文提示 或 None)
+
+    经纪人常把原话「185万」丢下来：不归一就会把文本写进整数列（生产库上整单失败，
+    SQLite 则是静默存成文本）。
+    """
+    if value is None:
+        return None, None
+    amount = norm_money(value)
+    if amount is None:
+        return None, f"{label}没能识别：收到的是「{value}」。请按元给数字（如 {sample}）"
+    return amount, None
+
+
+def _amount_changed(raw, value):
+    """入参写法与归一后的数值是否不同（不同才在回执里说明「按 N 元记的」）"""
+    try:
+        return float(raw) != float(value)
+    except (TypeError, ValueError):
+        return True
 
 
 def start_deal(customer_id: int, property_id: int, price: int = None, deposit_amount: int = None,
                deposit_date: str = None, notes: str = None, task_id: str = None) -> str:
-    """创建成交单：录入成交客户、房源、价格、定金，进入交易流程"""
+    """创建成交单：录入成交客户、房源、价格、定金，进入交易流程
+
+    副作用（会改数据，回执里必须如实说明）：房源状态改成已售（出租房 → 已租）、客户阶段推进到「成交中」。
+    写库前先认人认房（查不到就如实说明，不造孤儿成交单）；同一客户同一房源的**未完结**成交单不重复开。
+    """
     customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
@@ -47,17 +97,94 @@ def start_deal(customer_id: int, property_id: int, price: int = None, deposit_am
     customer = db.get_customer(customer_id)
     if not customer:
         return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
-    kwargs = {'price': price, 'deposit_amount': deposit_amount, 'notes': notes}
+    prop = db.get_property(property_id)
+    if not prop:
+        return json.dumps({"success": False, "error": (
+            f"房源不存在：编号 {property_id} 没找到这套房，先在房源列表里核对一下编号")}, ensure_ascii=False)
+
+    # 金额：先归一（认「185万」），再挡明显坏值（0/负数、定金高于成交价）
+    price_value, problem = _norm_amount(price, '成交价', '400万 记作 4000000')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    deposit_value, problem = _norm_amount(deposit_amount, '定金', '5万 记作 50000')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if price_value is not None and price_value <= 0:
+        return json.dumps({"success": False, "error": (
+            f"成交价要大于 0：收到的是「{price}」")}, ensure_ascii=False)
+    if deposit_value is not None and deposit_value <= 0:
+        return json.dumps({"success": False, "error": (
+            f"定金要大于 0：收到的是「{deposit_amount}」")}, ensure_ascii=False)
+    if price_value is not None and deposit_value is not None and deposit_value > price_value:
+        return json.dumps({"success": False, "error": (
+            f"定金 {fmt_wan(deposit_value)} 比成交价 {fmt_wan(price_value)} 还高，"
+            f"请核对一下哪个数写错了")}, ensure_ascii=False)
     try:
-        kwargs['deposit_date'] = _parse_date(deposit_date, '定金日期')
+        deposit_dt = _parse_date(deposit_date, '定金日期')
     except ValueError as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+    # 同一客户同一房源的未完结成交单不重复开（已交房完成的可以再开，如实说明）
+    existing = db.find_open_deal(customer_id, property_id)
+    if existing:
+        stage_label = STAGE_LABELS.get(existing.get('stage'), existing.get('stage'))
+        return json.dumps({
+            "success": True, "deal": existing, "already_started": True,
+            "message": (f"这单已经开过了（成交单编号 {existing['id']}，当前阶段：{stage_label}），"
+                        f"没有重复创建"),
+        }, ensure_ascii=False)
+
+    warnings = []
+    if (prop.get('status') or '') in ('sold', 'rented'):
+        warnings.append(f"这套房源的状态是{_STATUS_LABELS.get(prop['status'], prop['status'])}，"
+                        f"开单前先确认一下")
+    if (customer.get('status') or '') == 'closed':
+        warnings.append("这位客户已经标记为已关闭，确认还要开单吗")
+
+    kwargs = {'price': price_value, 'deposit_amount': deposit_value, 'notes': notes,
+              'deposit_date': deposit_dt}
     kwargs = {k: v for k, v in kwargs.items() if v is not None}
     result = db.add_deal(customer_id=customer_id, property_id=property_id, **kwargs)
-    return json.dumps({
-        "success": True, "deal": result,
-        "message": f"已创建成交单：{customer.get('name')} 成交 {result.get('property_title')}，当前阶段：定金；该房源已标记售出/出租，不再对外推荐"
-    }, ensure_ascii=False)
+
+    # 回执按写库后的**真实状态**说（返回"成功"不等于数据在库，读回来核对一次）
+    prop_after = db.get_property(property_id) or {}
+    customer_after = db.get_customer(customer_id) or {}
+    money_bits = []
+    if price_value is not None:
+        money_bits.append(f"成交价 {fmt_wan(price_value)}")
+    if deposit_value is not None:
+        money_bits.append(f"定金 {fmt_wan(deposit_value)}")
+    money_text = ('｜' + '｜'.join(money_bits)) if money_bits else ''
+    pstat = prop_after.get('status')
+    pstat_label = _STATUS_LABELS.get(pstat, pstat)
+    if (prop.get('status') or 'available') == 'available':
+        status_text = f"该房源已标记为{pstat_label}，不再对外推荐"
+    else:
+        status_text = f"该房源此前已是「{pstat_label}」，保持不再对外推荐"
+    name = customer.get('name')
+    stage_from, stage_to = customer.get('stage'), customer_after.get('stage')
+    to_label = CUSTOMER_STAGE_LABELS.get(stage_to, stage_to)
+    from_label = CUSTOMER_STAGE_LABELS.get(stage_from)
+    if stage_to and stage_from == stage_to:
+        stage_text = f"{name}的阶段已在「{to_label}」"
+    elif from_label:
+        stage_text = f"{name}的阶段已从「{from_label}」推进到「{to_label}」"
+    else:
+        stage_text = f"{name}的阶段已推进到「{to_label}」"
+    message = (f"已创建成交单（成交单编号 {result['id']}）：{name} 成交 "
+               f"{result.get('property_title')}{money_text}；当前阶段：{STAGE_LABELS['deposit']}。"
+               f"{status_text}；{stage_text}")
+    norm_bits = []
+    if price_value is not None and _amount_changed(price, price_value):
+        norm_bits.append(f"成交价「{price}」按 {price_value} 元记的")
+    if deposit_value is not None and _amount_changed(deposit_amount, deposit_value):
+        norm_bits.append(f"定金「{deposit_amount}」按 {deposit_value} 元记的")
+    if norm_bits:
+        message += "（" + "；".join(norm_bits) + "）"
+    payload = {"success": True, "deal": result, "message": message}
+    if warnings:
+        payload["warnings"] = warnings
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def advance_deal(deal_id: int, stage: str, date: str = None, notes: str = None, task_id: str = None) -> str:
@@ -119,15 +246,18 @@ def deal_stats(task_id: str = None) -> str:
 registry.register(
     name="start_deal",
     toolset="real_estate",
-    schema={"name": "start_deal", "description": "创建成交单：录入成交客户、房源、价格、定金，进入交易流程", "parameters": {
+    schema={"name": "start_deal", "description": (
+        "创建成交单（开单）：把一位客户与一套房源登记成一笔交易，可记成交价与定金。"
+        "开单后这套房源会被标记为已售/已租、不再对外推荐，这位客户的阶段会推进到「成交中」；"
+        "当前阶段从「意向金/定金」开始，后续往签约/贷款/过户/交房推进。"), "parameters": {
         "type": "object",
         "properties": {
-            "customer_id": {"type": "integer", "description": "客户ID"},
-            "property_id": {"type": "integer", "description": "房源ID"},
-            "price": {"type": "integer", "description": "成交价（元，如 400万=4000000）"},
-            "deposit_amount": {"type": "integer", "description": "定金（元）"},
-            "deposit_date": {"type": "string", "description": "定金日期 YYYY-MM-DD"},
-            "notes": {"type": "string", "description": "备注"},
+            "customer_id": {"type": "integer", "description": "客户编号（数字，可在客户列表里查）"},
+            "property_id": {"type": "integer", "description": "房源编号（数字，可在房源列表里查）"},
+            "price": {"type": "integer", "description": "成交价（元）：可写 4000000，也可写「400万」；必须是大于 0 的数字"},
+            "deposit_amount": {"type": "integer", "description": "定金（元）：可写 50000，也可写「5万」；不给表示还没收定金；必须大于 0 且不高于成交价"},
+            "deposit_date": {"type": "string", "description": "定金日期：认 2026-12-31、2026/12/31、2026年12月31日，也认 今天/明天/周三/3天后"},
+            "notes": {"type": "string", "description": "备注（如客户要求留车位、贷款银行）"},
         },
         "required": ["customer_id", "property_id"],
     }},
@@ -142,7 +272,7 @@ registry.register(
         "properties": {
             "deal_id": {"type": "integer", "description": "成交单ID"},
             "stage": {"type": "string", "enum": STAGES, "description": "目标阶段"},
-            "date": {"type": "string", "description": "该阶段日期 YYYY-MM-DD"},
+            "date": {"type": "string", "description": "该阶段日期：认 2026-12-31、2026/12/31、2026年12月31日，也认 今天/明天/周三/3天后"},
             "notes": {"type": "string", "description": "备注"},
         },
         "required": ["deal_id", "stage"],

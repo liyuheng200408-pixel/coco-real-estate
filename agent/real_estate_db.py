@@ -3414,6 +3414,16 @@ class RealEstateDB:
             s.commit(); s.refresh(d)
             return d.to_dict()
 
+    def find_open_deal(self, customer_id, property_id):
+        """同一客户同一房源是否已有还没走到「交房完成」的成交单（用于「不重复开单」）"""
+        with self.get_session() as s:
+            d = (s.query(Deal)
+                 .filter(Deal.customer_id == customer_id,
+                         Deal.property_id == property_id,
+                         Deal.stage != 'finalized')
+                 .order_by(Deal.id.asc()).first())
+            return d.to_dict() if d else None
+
     def update_deal(self, did, **kwargs):
         with self.get_session() as s:
             d = s.query(Deal).get(did)
