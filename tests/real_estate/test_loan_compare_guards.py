@@ -121,8 +121,10 @@ class TestProvidentFund:
         assert out["success"] is True, out
         note = out.get("note") or ""
         assert "公积金贷款额度" in note and "超过了贷款总额" in note and "我按" in note, out
-        combo = next((p for p in _plans(out) if "组合贷" in str(p["方案"])), {})
-        assert "公积金280万" in str(combo.get("方案")), combo
+        combo = next((p for p in _plans(out) if "公积金贷" in str(p["方案"])), {})
+        # 额度覆盖了全部贷款额 → 不再叫「组合贷(…+商贷0万)」，改叫「纯公积金贷 N万」
+        assert str(combo.get("方案")).startswith("纯公积金贷 280万"), combo
+        assert combo.get("年利率") == "公积金2.85%", combo
 
     def test_normal_amount_has_no_truncation_note(self):
         out = _call(price=P, down_payment_ratio=RATIO, provident_fund_loan_amount=1_000_000)
