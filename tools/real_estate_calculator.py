@@ -9,7 +9,93 @@ Coco 房产工具 - 金融计算器
 """
 import json
 import re
+from agent.real_estate_input import norm_money
 from tools.registry import registry
+
+
+# ==================== 计算族共用的入参归一与校验（2026-09-26，第 54 项）====================
+# 计算器没有数据库、没有列表，风险全在"**算错还回成功**"上：模型把 4.5% 写成 0.045、
+# 首付把 30% 写成 30、金额写「400万」，旧实现里前两种**静默算出错答案**、后一种直接崩。
+# 所以这一族统一：**认得出就归一（并在 note 里说明换算了什么），认不出就给中文提示，绝不猜着算**。
+
+def _norm_money_arg(value, label='房价', sample='400万 记作 4000000'):
+    """金额入参归一 → (元 或 None, 中文提示 或 None)；复用共用的 `norm_money`"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None, f"{label}是空的：请给一个数字（如 {sample}）"
+    if isinstance(value, bool):
+        return None, f"{label}没能识别：收到的是「{value}」。请按元给数字（如 {sample}）"
+    amount = norm_money(value)
+    if amount is None:
+        return None, f"{label}没能识别：收到的是「{value}」。请按元给数字（如 {sample}）"
+    return amount, None
+
+
+def _norm_rate_arg(value, label='年利率'):
+    """年利率归一 → (百分数 或 None, 中文提示 或 None, 是否换算过)
+
+    认 `4.5` 与 `4.5%`（都当百分数）。**`0.045` 这种小数写法给提示、不猜** ——
+    真实贷款没有 0.045% 的利率，猜错一次就是给客户算错月供。
+    """
+    if value is None:
+        return None, None, False
+    text = str(value).strip().replace('％', '%')
+    converted = False
+    if text.endswith('%'):
+        text, converted = text[:-1].strip(), True
+    try:
+        rate = float(text)
+    except (TypeError, ValueError):
+        return None, (f"{label}没能识别：收到的是「{value}」。"
+                      f"请按百分数给（4.5% 写 4.5）"), False
+    if rate <= 0:
+        return None, f"{label}要大于 0：收到的是「{value}」", False
+    if not converted and rate <= 0.5:
+        return None, (f"{label}看着不对：收到的是「{value}」。"
+                      f"请按百分数给（4.5% 写 4.5，别写 0.045）"), False
+    return rate, None, converted
+
+
+def _norm_ratio_arg(value, label='首付比例'):
+    """首付比例归一 → (0-1 的比例 或 None, 中文提示 或 None, 是否换算过)
+
+    认 `0.3`（比例）、`30`（百分数）、`30%`（带符号）。`30` 无歧义，归一成 30% 并在 note 里说明。
+    """
+    if value is None or value == '':
+        return None, None, False
+    text = str(value).strip().replace('％', '%')
+    converted = False
+    if text.endswith('%'):
+        text, converted = text[:-1].strip(), True
+    try:
+        ratio = float(text)
+    except (TypeError, ValueError):
+        return None, (f"{label}没能识别：收到的是「{value}」。"
+                      f"请写 0.3（=30%）或直接写 30"), False
+    if converted or ratio > 1:
+        # 百分数写法：30 → 30%；但首付低于 5% 不现实，多半是把别的数写进来了
+        if not 5 <= ratio <= 100:
+            return None, (f"{label}要在 0 和 1 之间：收到的是「{value}」"
+                          f"（30% 写 0.3，也可直接写 30）"), False
+        ratio, converted = ratio / 100, True
+    if not 0.05 <= ratio < 1:
+        return None, (f"{label}要在 0 和 1 之间：收到的是「{value}」"
+                      f"（30% 写 0.3，也可直接写 30）"), False
+    return ratio, None, converted
+
+
+def _norm_years_arg(value, label='贷款年限'):
+    """贷款年限归一 → (年 或 None, 中文提示 或 None, 是否换算过)；认 `30` 与 `30年`"""
+    if value is None or value == '':
+        return None, None, False
+    raw = str(value).strip()
+    converted = '年' in raw
+    try:
+        years = int(float(raw.replace('年', '')))
+    except (TypeError, ValueError):
+        return None, f"{label}没能识别：收到的是「{value}」。请写 30 或 30年", False
+    if not 1 <= years <= 40:
+        return None, f"{label}要在 1 到 40 年之间：收到的是「{value}」", False
+    return years, None, converted
 
 
 def mortgage_calculator(
@@ -22,23 +108,53 @@ def mortgage_calculator(
 ) -> str:
     """
     贷款计算器
-    
+
     参数:
-        price: 房价（元，如 400万=4000000）
-        down_payment_ratio: 首付比例（默认30%）
-        loan_years: 贷款年限（默认30年）
-        interest_rate: 年利率（默认4.5%）
+        price: 房价（元，如 400万=4000000；也认「400万」「4,000,000」）
+        down_payment_ratio: 首付比例（0.3 = 30%；也可直接写 30 或「30%」）
+        loan_years: 贷款年限（30 或「30年」，1–40 年）
+        interest_rate: 年利率（百分数，4.5 表示 4.5%；也可写「4.5%」）
         method: 还款方式 equal_installment(等额本息) / equal_principal(等额本金)
+
+    认得出的写法会归一并在 `note` 里说明；认不出（或越界）一律中文提示、**不猜着算**。
     """
-    # 转换为元
-    price_yuan = price  # 系统价格单位为元（如 400万 = 4000000）
-    down_payment = price_yuan * down_payment_ratio
+    price_yuan, problem = _norm_money_arg(price, '房价')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if price_yuan <= 0:
+        return json.dumps({"success": False, "error": (
+            f"房价要大于 0：收到的是「{price}」")}, ensure_ascii=False)
+    ratio, problem, ratio_converted = _norm_ratio_arg(down_payment_ratio)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if ratio is None:
+        ratio = 0.3
+    years, problem, years_converted = _norm_years_arg(loan_years)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if years is None:
+        years = 30
+    rate, problem, rate_converted = _norm_rate_arg(interest_rate)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if rate is None:
+        rate = 4.5
+    if method not in ("equal_installment", "equal_principal"):
+        return json.dumps({"success": False, "error": (
+            f"还款方式没能识别：收到的是「{method}」。可以说 等额本息(equal_installment) 或 "
+            f"等额本金(equal_principal)")}, ensure_ascii=False)
+
+    down_payment = price_yuan * ratio
     loan_amount = price_yuan - down_payment
-    
+    if loan_amount <= 0:
+        return json.dumps({"success": False, "error": (
+            f"首付已经覆盖整套房价（首付 {ratio * 100:g}%），没有贷款可算："
+            f"首付比例要在 0 和 1 之间")}, ensure_ascii=False)
+
     # 月利率
-    monthly_rate = interest_rate / 100 / 12
-    total_months = loan_years * 12
-    
+    monthly_rate = rate / 100 / 12
+    total_months = years * 12
+
     if method == "equal_installment":
         # 等额本息
         monthly_payment = loan_amount * monthly_rate * (1 + monthly_rate) ** total_months / ((1 + monthly_rate) ** total_months - 1)
@@ -52,21 +168,31 @@ def mortgage_calculator(
         total_payment = (first_month_payment + last_month_payment) * total_months / 2
         total_interest = total_payment - loan_amount
         monthly_payment = f"{first_month_payment:.2f} - {last_month_payment:.2f}"
-    
+
     result = {
-        "房价": f"{price/10000:.0f}万元",
-        "首付比例": f"{down_payment_ratio*100}%",
+        "房价": f"{price_yuan/10000:.0f}万元",
+        "首付比例": f"{ratio*100:g}%",
         "首付金额": f"{down_payment/10000:.2f}万元",
         "贷款金额": f"{loan_amount/10000:.2f}万元",
-        "贷款年限": f"{loan_years}年",
-        "年利率": f"{interest_rate}%",
+        "贷款年限": f"{years}年",
+        "年利率": f"{rate}%",
         "还款方式": "等额本息" if method == "equal_installment" else "等额本金",
         "月供": f"{monthly_payment:.2f}元" if isinstance(monthly_payment, float) else monthly_payment,
         "总还款额": f"{total_payment/10000:.2f}万元",
         "总利息": f"{total_interest/10000:.2f}万元",
     }
-    
-    return json.dumps({"success": True, "calculator": result}, ensure_ascii=False)
+
+    notes = []
+    if ratio_converted:
+        notes.append(f"首付比例「{down_payment_ratio}」我按 {ratio*100:g}% 算的")
+    if years_converted:
+        notes.append(f"贷款年限「{loan_years}」我按 {years} 年算的")
+    if rate_converted:
+        notes.append(f"年利率「{interest_rate}」我按 {rate}% 算的")
+    payload = {"success": True, "calculator": result}
+    if notes:
+        payload["note"] = "；".join(notes)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def tax_calculator(
@@ -402,15 +528,19 @@ def roi_calculator(
 TOOLS = [
     {
         "name": "mortgage_calculator",
-        "description": "贷款计算器 - 计算月供、总利息、还款计划",
+        "description": (
+            "贷款计算器：按房价、首付比例、贷款年限、年利率算月供与总利息，支持等额本息（equal_installment）"
+            "与等额本金（equal_principal）两种还款方式。金额按元（400万 记作 4000000，也认「400万」）；"
+            "年利率按百分数（4.5% 写 4.5）；首付比例写 0.3（=30%），也可直接写 30。"
+            "返回首付金额、贷款金额、月供、总还款额与总利息；写法被换算时会在 note 里说明。"),
         "parameters": {
             "type": "object",
             "properties": {
-                "price": {"type": "number", "description": "房价（元，如 400万=4000000）"},
-                "down_payment_ratio": {"type": "number", "description": "首付比例（默认0.3）"},
-                "loan_years": {"type": "integer", "description": "贷款年限（默认30年）"},
-                "interest_rate": {"type": "number", "description": "年利率（默认4.5%）"},
-                "method": {"type": "string", "enum": ["equal_installment", "equal_principal"], "description": "还款方式"},
+                "price": {"type": "number", "description": "房价（元）：可写 4000000，也可写「400万」；必须大于 0"},
+                "down_payment_ratio": {"type": "number", "description": "首付比例：0.3 表示 30%，也可直接写 30（=30%）；必须大于 0 且小于 1"},
+                "loan_years": {"type": "integer", "description": "贷款年限：写 30 或「30年」，1 到 40 年"},
+                "interest_rate": {"type": "number", "description": "年利率（百分数）：4.5 表示 4.5%，也可写「4.5%」；必须大于 0"},
+                "method": {"type": "string", "enum": ["equal_installment", "equal_principal"], "description": "还款方式：equal_installment(等额本息，每月还款额固定) / equal_principal(等额本金，每月递减)"},
             },
             "required": ["price"],
         },
