@@ -66,6 +66,11 @@ def test_fmt_wan_near_int_for_poster(amount, expected):
     ({"price": None, "property_type": "second_hand"}, 2, "未录入", "未录入"),
     ({"price": None, "property_type": "second_hand"}, 1, "价格待定", "价格待定"),
     ({"price": "看情况", "property_type": "second_hand"}, 2, "未录入", "未录入"),
+    # 价格列是 NOT NULL，"没填价"在库里的实际形态就是 0 —— 不许说成"0万"（2026-09-26）
+    ({"price": 0, "property_type": "second_hand"}, 1, "价格待定", "价格待定"),
+    ({"price": 0, "property_type": "rental"}, 2, "未录入", "未录入"),
+    ({"price": 0.0, "property_type": "second_hand"}, 2, "未录入", "未录入"),
+    ({"price": -100, "property_type": "second_hand"}, 2, "未录入", "未录入"),
 ])
 def test_fmt_price(prop, digits, empty, expected):
     assert fmt_price(prop, digits, empty) == expected

@@ -32,6 +32,7 @@ def fmt_price(prop, digits=2, empty="未录入", near_int=False):
 
     prop 是房源 dict（至少含 price / property_type）。空值文案与精度由调用方指定：
     房源详情/组合用默认（未录入、两位小数），文案/海报/短视频用（价格待定、一位小数）。
+    **0 与负数也按"未填"处理**（价格列 NOT NULL，没填价在库里就是 0）—— 不能说成"0万"。
     """
     price = prop.get("price")
     if price in (None, ""):
@@ -39,6 +40,10 @@ def fmt_price(prop, digits=2, empty="未录入", near_int=False):
     try:
         price = float(price)
     except (TypeError, ValueError):
+        return empty
+    if price <= 0:
+        # 价格列是 NOT NULL，"没填价"在库里的实际形态是 0 —— 说成"0万"比不说更糟
+        # （经纪人会当成"这套不要钱"，客户也会当真）
         return empty
     if prop.get("property_type") == "rental":
         return f"{price:.0f}元/月"
