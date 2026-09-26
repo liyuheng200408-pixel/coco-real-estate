@@ -5,24 +5,18 @@ Coco 房产工具 - 经营报告导出
 import json
 from datetime import datetime, timedelta
 
+from agent.real_estate_period import norm_period, period_window
 from tools.registry import registry
 
 # 周期口径（2026-09-26 老板拍板 B 方案）：周报 = 近 7 天、月报 = 近 30 天，都是**滚动窗口**
 # （不是自然周/自然月）—— 所以标题、段落名与工具描述里一律写明"近 N 天"与具体日期区间，
 # 别让"周报"三个字被读成自然周（t74a 实测：标题写"周报"、数字却是累计值，经纪人会当真）。
+# 别名表与窗口计算在共用件 `agent/real_estate_period.py`（一处定义，别在别处再写一套）。
 _PERIODS = {
-    "week": (7, "周报", "近 7 天"),
-    "month": (30, "月报", "近 30 天"),
+    "week": ("周报", "近 7 天"),
+    "month": ("月报", "近 30 天"),
 }
-_PERIOD_ALIASES = {
-    "week": "week", "weekly": "week", "7天": "week", "七天": "week",
-    "周报": "week", "周": "week", "本周": "week", "这周": "week", "这个星期": "week", "这星期": "week",
-    "一周": "week", "近一周": "week", "最近一周": "week", "近7天": "week", "最近7天": "week",
-    "month": "month", "monthly": "month", "30天": "month", "三十天": "month",
-    "月报": "month", "月": "month", "本月": "month", "这个月": "month", "这月": "month",
-    "一月": "month", "近一月": "month", "最近一月": "month", "近一个月": "month", "最近一个月": "month",
-    "近30天": "month", "最近30天": "month",
-}
+_PERIOD_ALLOWED = ("week", "month")
 _PERIOD_HINT = "周期只认「周报」或「月报」（也可以说「本周/这周」「本月/近 30 天」）"
 OVERDUE_SHOW = 10       # 报告里最多列 10 条逾期明细，超出要说清还有几位没列
 
@@ -33,12 +27,8 @@ def _get_db():
 
 
 def _norm_period(value):
-    """周期归一 → (键, None) 或 (None, 中文提示)。认英文 week/month（大小写不敏感）与中文说法，不猜。"""
-    raw = "" if value is None else str(value).strip().lower().replace(" ", "")
-    key = _PERIOD_ALIASES.get(raw)
-    if not key:
-        return None, _PERIOD_HINT
-    return key, None
+    """周期归一（走共用件，只认周/月两档）→ (键, None) 或 (None, 中文提示)"""
+    return norm_period(value, allowed=_PERIOD_ALLOWED, hint=_PERIOD_HINT)
 
 
 def generate_report(period: str = "week", task_id: str = None) -> str:
@@ -53,10 +43,9 @@ def generate_report(period: str = "week", task_id: str = None) -> str:
     if hint:
         return json.dumps({"success": False, "error": hint}, ensure_ascii=False)
 
-    days, name, span_label = _PERIODS[key]
+    name = _PERIODS[key][0]
     now = datetime.now()
-    start = now - timedelta(days=days)
-    range_text = f'{start.strftime("%m-%d")} ~ {now.strftime("%m-%d")}'
+    start, range_text, span_label = period_window(key, now)
     today = now.strftime("%m-%d")
     title = f"{name}（{span_label}：{range_text}）"
 
