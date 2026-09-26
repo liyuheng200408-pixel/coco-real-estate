@@ -198,3 +198,35 @@ class TestTemplateBShowsThem:
         prop["orientation"] = None
         svg = template_b(dict(self.BASE, properties=[prop]))
         assert "—" in svg
+
+
+class TestElevatorNotAssumed:
+    """电梯没提到就不许按「有」记（2026-09-26）
+
+    默认值 1 会把"经纪人从没说过"变成文案/口播稿里的卖点（"有电梯"）。改成留空后：
+    库里存 NULL、详情显示「未录入」，显式 1/0 照旧。
+    """
+
+    def _add(self, registry, title, **kw):
+        import json
+
+        out = registry.get_entry("add_property").handler(
+            {"title": title, "price": 1_000_000, "area": 80.0, **kw},
+            session_id="agent:main:feishu:dm:oc_x",
+        )
+        return json.loads(out)["property"]
+
+    def test_unspecified_stays_empty(self, tmp_path, monkeypatch):
+        import json
+
+        registry = _registry(tmp_path, monkeypatch)
+        p = self._add(registry, "电梯未提到 1号楼101")
+        assert p["has_elevator"] is None, p.get("has_elevator")
+        detail = json.loads(
+            registry.get_entry("get_property_detail").handler({"property_id": p["id"]}))
+        assert "电梯 未录入" in detail["message"], detail["message"]
+
+    def test_explicit_yes_and_no_kept(self, tmp_path, monkeypatch):
+        registry = _registry(tmp_path, monkeypatch)
+        assert self._add(registry, "电梯有 2号楼102", has_elevator=1)["has_elevator"] == 1
+        assert self._add(registry, "电梯无 3号楼103", has_elevator=0)["has_elevator"] == 0

@@ -24,7 +24,7 @@ def add_property(
     rooms: int = None, halls: int = None, bathrooms: int = None,
     floor: str = None, orientation: str = None,
     renovation: str = None, year_built: int = None,
-    has_elevator: int = 1, parking: int = 0,
+    has_elevator: int = None, parking: int = 0,
     property_type: str = "second_hand",
     tags: str = None, images: str = None,
     image_paths: str = None, agent_id: str = None,
@@ -530,6 +530,13 @@ def _fmt_field(value) -> str:
     return str(value) if value not in (None, "") else "未录入"
 
 
+def _fmt_yesno(value) -> str:
+    """1/0 → 有/无；**None 是"还没确认"，不能当成"无"**（电梯录入已改成留空，见 _missing_poster_info 同族）"""
+    if value in (None, ""):
+        return "未录入"
+    return "有" if value else "无"
+
+
 def _fmt_area(value) -> str:
     """面积展示：整数就显示整数（100㎡），有小数才带小数（128.5㎡）"""
     if value in (None, ""):
@@ -588,8 +595,8 @@ def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
                    if prop.get("rooms") else "未录入")
         + f" | 楼层 {_fmt_field(prop.get('floor'))} | 朝向 {_fmt_field(prop.get('orientation'))}"
         + f" | 装修 {_fmt_field(prop.get('renovation'))} | 年份 {_fmt_field(prop.get('year_built'))}"
-        + f" | 电梯 {'有' if prop.get('has_elevator') else '无'}"
-        + f" | 车位 {'有' if prop.get('parking') else '无'}"
+        + f" | 电梯 {_fmt_yesno(prop.get('has_elevator'))}"
+        + f" | 车位 {_fmt_yesno(prop.get('parking'))}"
     )
     region = " ".join(x for x in [prop.get("district"), prop.get("community"), prop.get("address")] if x)
     if region:
@@ -775,7 +782,7 @@ TOOLS = [
             "floor": {"type": "string", "description": "楼层。经纪人怎么说都行（3楼/十六楼/16F/5/18层/低楼层/中楼层/高楼层/顶层），系统会归一成「16层」「5层（共18层）」这类写法"},
             "orientation": {"type": "string", "description": "朝向。如 南/北/东/西/东南/西南/东北/西北/南北通透（朝南、南向、南北通都会归一）"},
             "year_built": {"type": "integer", "description": "建造年份，如 2015"},
-            "has_elevator": {"type": "integer", "description": "有无电梯：1=有，0=无（默认 1）"},
+            "has_elevator": {"type": "integer", "description": "有无电梯：1=有，0=无；经纪人没提到就别传（留空＝还没确认，不会当成「有」）"},
             "parking": {"type": "integer", "description": "有无车位：1=有，0=无（默认 0）"},
             "tags": {"type": "string", "description": "特色标签，多个用逗号分隔，如 学区房,地铁房,精装修"},
             "force": {"type": "boolean", "description": "默认 false。true=跳过房源查重强制新增（仅当老板确认是不同期数/楼栋而要保留同名时用）"},

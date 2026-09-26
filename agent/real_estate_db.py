@@ -400,7 +400,7 @@ class Property(Base):
     orientation = Column(String(50))
     renovation = Column(String(50))
     year_built = Column(Integer)
-    has_elevator = Column(Integer, default=1)
+    has_elevator = Column(Integer)  # 1=有 / 0=无 / NULL=还没确认（别再默认成"有"）
     property_type = Column(String(20), default="second_hand")  # new/second_hand/rental
     parking = Column(Integer, default=0)
     tags = Column(Text)
