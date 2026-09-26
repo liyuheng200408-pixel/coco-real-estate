@@ -253,6 +253,31 @@ def birthday_matches_month_day(stored, month=None, day=None):
     return False
 
 
+# ==================== 逗号串参数（图片路径 / 标签这类"一串多个值"） ====================
+
+def as_comma_text(value):
+    """「一串多个值」的参数（图片路径、标签…）→ 统一的逗号串。
+
+    模型把这类参数**当数组传是常态**（`images=["a.jpg","b.jpg"]`、`tags=["近地铁","学区房"]`），
+    历史实现直接 `.split(',')` 或原样塞进数据库 → **AttributeError / 数据库绑定报错**
+    （2026-09-26 实测：`add_property` 的 images/image_paths/tags、`update_property.tags` 全中）。
+
+    规则：
+    - `None` / 空串 / 空数组 → `None`（"没给"与"给了空"一个样，别往库里写空串）；
+    - 数组（list/tuple）→ 元素逐个转文本、去首尾空白、丢空项，用逗号连起来；
+    - 字符串 → **原样返回**（不拆分不重排，保持各自的归一化口径不变）。
+    """
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        items = [str(x).strip() for x in value]
+        items = [x for x in items if x]
+        return ','.join(items) if items else None
+    if isinstance(value, str):
+        return value if value.strip() else None
+    return str(value)
+
+
 # ==================== 条数（limit） ====================
 
 def clamp_limit(value, default, maximum=200):
