@@ -176,10 +176,14 @@ class TestStageAdvance:
         assert "stage_change" not in out, out
 
 
-# ==================== ③ 取代逾期提醒时如实说明 ====================
-class TestOverdueSuperseded:
+# ==================== ③ 逾期提醒不受带看影响（F215 起如实说明） ====================
+class TestOverdueNotSuperseded:
+    """2026-09-26（F215，老板拍板全库统一）：逾期按「最新一条**人为**跟进」判定，
+    带看自动写的两条跟进不算 —— 于是记完带看，原来那条逾期提醒**依然有效**（不再被取代）。
+    这组用例钉的就是修后的行为（修前钉的是"被取代"，见 FINDINGS F215）。"""
+
     def _make_overdue(self, wired, cid, pid):
-        """造一条已逾期的提醒（该客户"最新一条跟进"是逾期状态）—— 走 db 层，避免碰到真库"""
+        """造一条已逾期的提醒（该客户"最新一条人为跟进"是逾期状态）—— 走 db 层，避免碰到真库"""
         row = wired.add_followup(
             customer_id=cid, property_id=pid, type="call", content="约他回电（已过期）",
             next_date=datetime.now() - timedelta(days=2), next_time="09:00")
@@ -188,20 +192,20 @@ class TestOverdueSuperseded:
         assert latest and str(latest["next_date"])[:10] == \
             (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d"), latest
 
-    def test_overdue_is_reported_when_superseded(self, wired, cid, pid):
+    def test_overdue_still_valid_after_viewing(self, wired, cid, pid):
+        """原来那条逾期提醒仍然有效（带看记录不算人工跟进）—— 如实说明，不静默"""
         self._make_overdue(wired, cid, pid)
         vid = _schedule(cid, pid)
         out = _record(viewing_id=vid, status="已完成", result="感兴趣")
-        assert any("原来那条逾期提醒已经随这次带看更新客户状态" in w for w in out["warnings"]), \
-            out.get("warnings")
+        assert any("原来那条提醒仍然有效" in w for w in out["warnings"]), out.get("warnings")
 
     def test_no_overdue_no_warning(self, wired, cid, pid):
         vid = _schedule(cid, pid)
         out = _record(viewing_id=vid, status="已完成")
-        assert not any("逾期提醒" in w for w in (out.get("warnings") or [])), out.get("warnings")
+        assert not any("仍然有效" in w for w in (out.get("warnings") or [])), out.get("warnings")
 
-    def test_overdue_no_longer_reported_by_get_overdue(self, wired, followup_wired, cid, pid):
-        """带看跟进成了最新一条 → 该客户的旧逾期不再出现在逾期清单里（老板认可的口径）"""
+    def test_overdue_still_reported_by_get_overdue(self, wired, followup_wired, cid, pid):
+        """带看自动写的跟进不算人工跟进 → 记完带看，这条旧逾期**照旧**在逾期清单里（F215 修后的口径）"""
         import tools.real_estate_followup as f
 
         self._make_overdue(wired, cid, pid)
@@ -210,7 +214,7 @@ class TestOverdueSuperseded:
         vid = _schedule(cid, pid)
         _record(viewing_id=vid, status="已完成")
         after = json.loads(f.get_overdue())
-        assert not any(x.get("customer_id") == cid for x in (after.get("overdue") or [])), after
+        assert any(x.get("customer_id") == cid for x in (after.get("overdue") or [])), after
 
 
 # ==================== ④ 回执里的下一步建议 ====================

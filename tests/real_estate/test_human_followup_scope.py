@@ -116,10 +116,11 @@ class TestAutoFollowupsAreNotContact:
         assert _stale(wired, cid) is None
 
 
-# ==================== ② 逾期口径保持原样（别顺手统一掉） ====================
+# ==================== ② 逾期口径也只看人为跟进（全库一刀切，老板 2026-09-26 拍板） ====================
 
-class TestOverdueKeepsAutoReminders:
-    def test_auto_callback_reminder_still_reaches_overdue_list(self, wired):
+class TestOverdueCountsHumanOnly:
+    def test_auto_callback_reminder_is_not_overdue(self, wired):
+        """带看自动建的回访提醒不再进逾期清单（修前它是那 1 条）"""
         cid = _customer(wired)
         pid = _property(wired)
         _done_viewing(wired, cid, pid)
@@ -130,10 +131,20 @@ class TestOverdueKeepsAutoReminders:
                       {"t": datetime.now() - timedelta(days=1), "i": cid})
             s.commit()
         overdue = [x for x in wired.get_overdue() if x.get("customer_id") == cid]
-        assert len(overdue) == 1, overdue
-        assert overdue[0].get("type") == "reminder", overdue
+        assert overdue == [], overdue
+
+    def test_auto_reminder_does_not_hide_an_older_human_overdue(self, wired):
+        """人工跟进的逾期照旧报：自动记录不占"最新一条人为跟进"的位置"""
+        cid = _customer(wired)
+        pid = _property(wired)
+        wired.add_followup(customer_id=cid, content="约他回电（已过期）", type="call",
+                           next_date=datetime.now() - timedelta(days=2))
+        _done_viewing(wired, cid, pid)
+        overdue = [x for x in wired.get_overdue() if x.get("customer_id") == cid]
+        assert len(overdue) == 1 and overdue[0].get("type") == "call", overdue
 
     def test_overdue_count_matches_the_list(self, wired):
+        """逾期计数与清单必须同一口径（自动记录两边都不算）"""
         cid = _customer(wired)
         pid = _property(wired)
         _done_viewing(wired, cid, pid)
@@ -142,4 +153,7 @@ class TestOverdueKeepsAutoReminders:
                            " WHERE customer_id = :i AND type = 'reminder'"),
                       {"t": datetime.now() - timedelta(days=1), "i": cid})
             s.commit()
+        assert wired.count_overdue_followups() == len(wired.get_overdue()) == 0
+        wired.add_followup(customer_id=cid, content="逾期的人工提醒", type="call",
+                           next_date=datetime.now() - timedelta(days=1))
         assert wired.count_overdue_followups() == len(wired.get_overdue()) == 1

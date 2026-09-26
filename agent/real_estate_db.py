@@ -2657,13 +2657,15 @@ class RealEstateDB:
         return (items, total) if with_total else items
 
     def get_latest_followup(self, customer_id):
-        """该客户最新一条跟进（按 created_at，同一时刻按 id 最大）→ dict 或 None
+        """该客户最新一条**人为**跟进（按 created_at，同一时刻按 id 最大）→ dict 或 None
 
         「设提醒会不会顶掉旧的逾期」这类判断要用它（口径与 get_overdue 一致）。
+        2026-09-26（F215）：带看档 3 自动写的那两条不算（`source_viewing_id` 非空），
+        否则"最新一条"会被系统自造记录占住，判断跟着错。
         """
         with self.get_session() as s:
-            row = (s.query(Followup)
-                   .filter(Followup.customer_id == customer_id)
+            row = (_only_human_followups(
+                       s.query(Followup).filter(Followup.customer_id == customer_id))
                    .order_by(Followup.created_at.desc(), Followup.id.desc())
                    .first())
             return row.to_dict() if row else None
@@ -2742,18 +2744,23 @@ class RealEstateDB:
             # 2026-09-25（F140c）：改成 SQL 侧取"每位客户最新一条跟进"（created_at 最大、
             # 同一时刻按 id 最大），不再把全表跟进读进内存再聚合（1.2 万客户 + 3.6 万跟进：
             # 0.6s → 预计 0.05s）。口径与原来一致：每客户只看最新一条。
+            # 2026-09-26（F215，老板拍板全库统一）：只认**人为**跟进 —— 带看档 3 自动写的带看跟进/
+            # 回访提醒不算"联系过"（见 `_only_human_followups`）。**两处子查询与主查询必须同一口径**，
+            # 否则主查询按人为过滤、子查询却取到自动记录的时间戳 → 一条都匹配不上、逾期清单整片变空。
             from sqlalchemy import func
             from sqlalchemy.orm import aliased
             other = aliased(Followup)
             max_created = (s.query(func.max(other.created_at))
-                           .filter(other.customer_id == Followup.customer_id)
+                           .filter(other.customer_id == Followup.customer_id,
+                                   other.source_viewing_id.is_(None))
                            .scalar_subquery())
             max_id = (s.query(func.max(other.id))
                       .filter(other.customer_id == Followup.customer_id,
-                              other.created_at == Followup.created_at)
+                              other.created_at == Followup.created_at,
+                              other.source_viewing_id.is_(None))
                       .scalar_subquery())
             now = before or datetime.now()
-            rows = (s.query(Followup)
+            rows = (_only_human_followups(s.query(Followup))
                     .filter(Followup.customer_id.isnot(None),
                             Followup.created_at == max_created,
                             Followup.id == max_id,
@@ -3157,17 +3164,21 @@ class RealEstateDB:
 
     # ---------- 统计 ----------
     def count_overdue_followups(self):
-        """逾期跟进数（SQL 聚合；口径与 get_overdue 完全一致：每位客户只看最新一条跟进且已过期）
+        """逾期跟进数（SQL 聚合；口径与 get_overdue 完全一致：每位客户只看最新一条**人为**跟进且已过期）
 
         2026-09-24 改：统计里原先用 len(self.get_overdue())，会把**全部跟进记录**拉进内存再数
         —— 1.2 万客户 / 2.4 万跟进下约 0.5 秒，而同一口径的 SQL 聚合只要 0.014 秒。
+        2026-09-26（F215）：排除带看档 3 自动写的两条（`source_viewing_id` 非空），
+        子查询与主查询同一口径，与 `get_overdue` 保持一致。
         """
         from sqlalchemy import text as _text
         with self.get_session() as s:
             row = s.execute(_text(
                 "SELECT COUNT(*) FROM re_followups f"
                 " WHERE f.customer_id IS NOT NULL AND f.next_date IS NOT NULL AND f.next_date < :now"
+                "   AND f.source_viewing_id IS NULL"
                 "   AND f.id = (SELECT x.id FROM re_followups x WHERE x.customer_id = f.customer_id"
+                "               AND x.source_viewing_id IS NULL"
                 "               ORDER BY x.created_at DESC, x.id DESC LIMIT 1)"),
                 {"now": datetime.now()}).fetchone()
             return int(row[0]) if row else 0

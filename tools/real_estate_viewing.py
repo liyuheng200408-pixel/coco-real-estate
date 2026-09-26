@@ -56,7 +56,11 @@ def _next_step_advice(result, status):
 
 
 def _has_overdue_followup(db, customer_id):
-    """这位客户当前是否有逾期提醒（按"每客户最新一条跟进"的口径，与 get_overdue 一致）"""
+    """这位客户当前是否有逾期提醒（按"每客户最新一条**人为**跟进"的口径，与 get_overdue 一致）
+
+    2026-09-26（F215）：带看档 3 自动写的两条跟进不算「人为跟进」—— 记完这次带看也不会
+    改变逾期状态，所以下面那句回执说的是"原来那条提醒仍然有效"。
+    """
     latest = db.get_latest_followup(customer_id)
     if not latest or not latest.get('next_date'):
         return False
@@ -297,9 +301,9 @@ def record_viewing(viewing_id: int, status: str = None, result: str = None, feed
             reminder_error = type(exc).__name__
             warnings.append("回访提醒这次没建起来 —— 你手动记一条也行，或者再说一次我重试")
 
-        # 带看跟进成了"最新一条跟进" → 该客户原来那条逾期提醒从此不再报（如实说明）
+        # 带看跟进不算"人工联系"（F215 起逾期只看人为跟进）→ 记完这次带看，原来那条逾期提醒**依然有效**
         if followup and prior_overdue:
-            warnings.append("这位客户原来那条逾期提醒已经随这次带看更新客户状态。")
+            warnings.append("这位客户原来那条提醒仍然有效（带看记录不算人工跟进），回访后记得处理它")
 
     # 缺陷标签反哺（2026-08-28 功能3）：记录带看结果后自动重扫该房缺陷
     defect_refreshed = None
