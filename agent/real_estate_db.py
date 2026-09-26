@@ -149,6 +149,21 @@ def _change_trace_value(model, field, value):
     return f"{text[:2]}{'*' * 4}"
 
 
+def _only_human_followups(query):
+    """只算「经纪人/客户真实互动」的跟进记录（排除系统自动生成的那两条）。
+
+    带看「档 3」（2026-09-25）在带看完成后自动写两条跟进：`type='visit'` 的带看跟进 +
+    `type='reminder'` 的回访提醒，两条都带 `source_viewing_id`（迁移 014 的幂等键）。
+    它们**不代表经纪人联系过客户**，所以「客户是否被冷落」这一族判定必须把它们排除 ——
+    否则带看后没人跟的客户永远不进流失名单、流失预警的「带看后无跟进」信号在生产上永不触发
+    （2026-09-26 实测：带看完成的客户风险分 None、不在流失名单；删掉两条自动记录后立刻 60 分 + 该信号）。
+
+    **逾期一族不适用本函数**（`get_overdue` / 逾期计数 / cron 逾期推送 / 带看侧 `_prior_overdue`）：
+    那边算的是「哪件待办到点了」，带看自动建的回访提醒正是它要送达的待办（档 3 的回访机制靠它）。
+    """
+    return query.filter(Followup.source_viewing_id.is_(None))
+
+
 def _as_money(value, default):
     """把库里的金额读成数字。
 
@@ -1122,6 +1137,9 @@ class RealEstateDB:
     def churn_risk_customers(self, min_risk=40):
         """流失风险评分：>14天未联系+30 / >30天+50 / 带看后沉默+20 / S级×1.5
 
+        「未联系」与「带看后沉默」都按**人为**跟进算 —— 带看档 3 自动写的带看跟进/回访提醒
+        不算经纪人联系过客户（见 `_only_human_followups`）。
+
         返回 [{customer, risk_score, risk_level, signals, reason_hint}] 按
         风险降序；min_risk 过滤（默认40，即中危起步）。
         """
@@ -1139,9 +1157,11 @@ class RealEstateDB:
                 return []
             dealt_ids = {row[0] for row in s.query(Deal.customer_id).distinct().all()
                          if row[0] is not None}
+            # 「最后一次联系」= 最后一次**人为**跟进（排除带看档 3 自动写的两条，见 _only_human_followups）
             last_followup = {row[0]: row[1] for row in
-                             s.query(Followup.customer_id, func.max(Followup.created_at))
-                             .filter(Followup.customer_id.isnot(None))
+                             _only_human_followups(
+                                 s.query(Followup.customer_id, func.max(Followup.created_at))
+                                 .filter(Followup.customer_id.isnot(None)))
                              .group_by(Followup.customer_id).all()}
             done_viewing_count = {row[0]: row[1] for row in
                                   s.query(Viewing.customer_id, func.count(Viewing.id))
@@ -1168,7 +1188,8 @@ class RealEstateDB:
                 elif days_since > 14:
                     score += 30
                     signals.append(f"{days_since}天未联系")
-                # 信号2：带看完成后零跟进（最后一次带看之后没有任何跟进）
+                # 信号2：带看完成后零跟进（最后一次带看之后没有任何**人为**跟进 ——
+                # 带看档 3 自动写的那两条不算，否则这个信号在生产上永不触发，见 _only_human_followups）
                 done_viewings = done_viewing_count.get(cid, 0)
                 if done_viewings > 0:
                     viewing_at = last_done_viewing.get(cid)
@@ -2747,15 +2768,17 @@ class RealEstateDB:
         """流失预警：按最后互动时间计算超期客户
         
         S级>5天 / A级>10天 / B级>30天 / C级>60天 无互动 → 预警。
-        最后互动时间 = 最后一条跟进记录时间；无跟进则取客户创建时间。
+        最后互动时间 = 最后一次**人为**跟进（带看档 3 自动写的带看跟进/回访提醒不算，见
+        `_only_human_followups` —— 它们会把「带看后没人跟」这件事掩盖掉）；无跟进则取客户创建时间。
         """
         with self.get_session() as s:
             # 2026-09-25（F140a）：原先"每位活跃客户单独查一次最新跟进"= 1.2 万次查询（≈7.7 秒），
             # 改成一次 group by 聚合取每客户最新跟进时间再合并（≈0.05 秒），口径不变。
             from sqlalchemy import func
             last_followup = {row[0]: row[1] for row in
-                             s.query(Followup.customer_id, func.max(Followup.created_at))
-                             .filter(Followup.customer_id.isnot(None))
+                             _only_human_followups(
+                                 s.query(Followup.customer_id, func.max(Followup.created_at))
+                                 .filter(Followup.customer_id.isnot(None)))
                              .group_by(Followup.customer_id).all()}
             now = datetime.now()
             result = []
