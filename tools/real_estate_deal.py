@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from tools.registry import registry
 from agent.real_estate_input import (STAGE_LABELS as CUSTOMER_STAGE_LABELS, clamp_limit,
-                                     norm_date, norm_id, norm_money)
+                                     clean_text, norm_date, norm_id, norm_money)
 from agent.real_estate_money import fmt_wan
 from tools.real_estate_followup import norm_followup_time, split_time_part
 from tools.real_estate_property import _STATUS_LABELS
@@ -25,6 +25,42 @@ STAGE_LABELS = {
     'deposit': '意向金/定金', 'signing': '签约', 'loan': '贷款审批',
     'transfer': '过户', 'finalized': '交房完成',
 }
+# 阶段 → 该阶段的日期列。**必须走这张表**：终态列在模型里叫 `finalize_date`，
+# 按 `f'{stage}_date'` 拼出来的 `finalized_date` 不存在，会被 `update_deal` 的 `hasattr` 静默丢掉
+# （2026-09-26 F216：经纪人填的交房日期当场消失，且回执还说推进成功）。
+STAGE_DATE_FIELDS = {
+    'deposit': 'deposit_date', 'signing': 'signing_date', 'loan': 'loan_date',
+    'transfer': 'transfer_date', 'finalized': 'finalize_date',
+}
+# 经纪人嘴里的阶段说法（与带看状态/跟进类型同一口径：认中文，提示中文在前、英文值括号对照）
+STAGE_ALIASES = {
+    '定金': 'deposit', '意向金': 'deposit', '付定金': 'deposit', '交定金': 'deposit',
+    '意向金/定金': 'deposit',
+    '签约': 'signing', '签合同': 'signing', '签了合同': 'signing', '已签约': 'signing',
+    '贷款': 'loan', '贷款审批': 'loan', '办贷款': 'loan', '面签': 'loan',
+    '过户': 'transfer', '办过户': 'transfer', '过户完成': 'transfer',
+    '交房': 'finalized', '交房完成': 'finalized', '结单': 'finalized', '成交完成': 'finalized',
+}
+
+
+def stages_options_text() -> str:
+    """阶段的可选说法（中文在前、英文值括号对照，由枚举表生成，别手写一份字符串）"""
+    return '、'.join(f'{STAGE_LABELS[s]}({s})' for s in STAGES)
+
+
+def norm_deal_stage(value):
+    """成交阶段归一 → (规范值 或 None, 中文提示 或 None)；没给/空串按"没要求改"返回 (None, None)"""
+    if value is None:
+        return None, None
+    text = str(value).strip()
+    if not text:
+        return None, None
+    key = text.lower()
+    if key in STAGE_LABELS:
+        return key, None
+    if key in STAGE_ALIASES:
+        return STAGE_ALIASES[key], None
+    return None, f"阶段没能识别：收到的是「{value}」。可以说 {stages_options_text()}"
 
 
 def _parse_date(value: str, field_name: str):
@@ -188,30 +224,97 @@ def start_deal(customer_id: int, property_id: int, price: int = None, deposit_am
     return json.dumps(payload, ensure_ascii=False)
 
 
-def advance_deal(deal_id: int, stage: str, date: str = None, notes: str = None, task_id: str = None) -> str:
-    """推进交易阶段：deposit(定金)→signing(签约)→loan(贷款)→transfer(过户)→finalized(交房)"""
+def advance_deal(deal_id: int, stage: str, date: str = None, notes: str = None,
+                 replace_notes: bool = False, task_id: str = None) -> str:
+    """推进交易阶段：意向金/定金 → 签约 → 贷款审批 → 过户 → 交房完成
+
+    - 阶段认中文说法（「签约」「交房完成」都行），认不出给中英对照提示；
+    - **越级**（跳过中间几步）与**回退**（往回走）不拦，只在 `warnings` 里如实说明；
+    - 备注默认**追加**（`[阶段 日期] 备注`，原备注保留），要纠正错记才用 `replace_notes=True` 覆盖；
+    - 推进到「交房完成」时，客户阶段自动从「成交中」挪到「售后维护」（已在售后维护、已关闭客户不动），
+      走 `update_stage` 留痕并在回执里如实说明。
+    """
     deal_id, problem = norm_id(deal_id, '成交单编号', '，可在成交列表里查')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
-    if stage not in STAGES:
-        return json.dumps({"success": False, "error": f"阶段必须是 {'/'.join(STAGES)}"}, ensure_ascii=False)
+    stage_value, problem = norm_deal_stage(stage)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if not stage_value:
+        return json.dumps({"success": False, "error": (
+            f"要说一下推进到哪个阶段，比如「签约」({STAGE_LABELS['signing']} 对应 signing)")},
+            ensure_ascii=False)
     db = _get_db()
     deal = db.get_deal(deal_id)
     if not deal:
         return json.dumps({"success": False, "error": "成交单不存在"}, ensure_ascii=False)
-    kwargs = {'stage': stage}
+    before_stage = deal.get('stage')
+    kwargs = {'stage': stage_value}
+    date_dt = None
     if date:
         try:
-            kwargs[f'{stage}_date'] = _parse_date(date, f'{STAGE_LABELS[stage]}日期')
+            date_dt = _parse_date(date, f'{STAGE_LABELS[stage_value]}日期')
         except ValueError as e:
             return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
-    if notes is not None:
-        kwargs['notes'] = notes
+        # 列名按映射表取：终态列叫 finalize_date，用 f'{stage}_date' 拼出来的 finalized_date
+        # 在模型上不存在，会被 update_deal 的 hasattr 静默丢掉（经纪人填的日期当场消失）
+        kwargs[STAGE_DATE_FIELDS[stage_value]] = date_dt
+
+    warnings = []
+    if before_stage in STAGES:
+        cur, target = STAGES.index(before_stage), STAGES.index(stage_value)
+        if target > cur + 1:
+            skipped = '、'.join(STAGE_LABELS[s] for s in STAGES[cur + 1:target])
+            warnings.append(f"这一步跳过了「{skipped}」—— 如果是笔误，跟我说一声我改回来")
+        elif target < cur:
+            warnings.append(f"这一步是从「{STAGE_LABELS[before_stage]}」退回到"
+                            f"「{STAGE_LABELS[stage_value]}」—— 如果不是笔误就不用管")
+
+    # 备注默认**追加**（把原备注整段覆盖会让"客户要求留车位"这类信息凭空消失）；
+    # 要纠正错记时才显式 replace_notes=True 覆盖。追加带 [阶段 日期] 前缀，免得看不出哪句是哪一步说的。
+    note_text = clean_text(notes)
+    notes_mode = None
+    if note_text:
+        if replace_notes or not clean_text(deal.get('notes')):
+            kwargs['notes'] = note_text
+            notes_mode = 'replace' if replace_notes else 'new'
+        else:
+            stamp = f"[{STAGE_LABELS[stage_value]}{' ' + date_dt.strftime('%Y-%m-%d') if date_dt else ''}]"
+            kwargs['notes'] = f"{deal['notes']}\n{stamp} {note_text}"
+            notes_mode = 'append'
+
     updated = db.update_deal(deal_id, **kwargs)
-    return json.dumps({
-        "success": True, "deal": updated,
-        "message": f"交易已推进至：{STAGE_LABELS[stage]}"
-    }, ensure_ascii=False)
+
+    # 交房完成 = 这单结掉了 → 客户阶段从「成交中」挪到「售后维护」（已在售后维护的不动，
+    # 已关闭客户不动；走 update_stage 留痕，与带看档 3 同一套）
+    stage_advance = None
+    if stage_value == 'finalized' and updated:
+        customer = db.get_customer(updated['customer_id']) or {}
+        cur_stage = customer.get('stage')
+        if cur_stage != 'maintain' and (customer.get('status') or '') != 'closed':
+            db.update_stage(updated['customer_id'], 'maintain')
+            stage_advance = {
+                'from': cur_stage, 'to': 'maintain',
+                'from_label': CUSTOMER_STAGE_LABELS.get(cur_stage, cur_stage or '未设'),
+                'to_label': CUSTOMER_STAGE_LABELS['maintain'],
+            }
+
+    message = f"交易已推进至：{STAGE_LABELS[stage_value]}（成交单编号 {deal_id}）"
+    if date_dt:
+        message += f"｜{STAGE_LABELS[stage_value]}日期 {date_dt.strftime('%Y-%m-%d')}"
+    if notes_mode == 'append':
+        message += "；备注已追加（原备注保留）"
+    elif notes_mode == 'replace':
+        message += "；备注已按你说的替换"
+    if stage_advance:
+        message += (f"；{customer.get('name')}的阶段已从「{stage_advance['from_label']}」"
+                    f"推进到「{stage_advance['to_label']}」")
+    payload = {"success": True, "deal": updated, "message": message}
+    if stage_advance:
+        payload['stage_advance'] = stage_advance
+    if warnings:
+        payload['warnings'] = warnings
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def get_deal(deal_id: int, task_id: str = None) -> str:
@@ -268,13 +371,18 @@ registry.register(
 registry.register(
     name="advance_deal",
     toolset="real_estate",
-    schema={"name": "advance_deal", "description": "推进交易阶段：deposit(定金)→signing(签约)→loan(贷款)→transfer(过户)→finalized(交房)", "parameters": {
+    schema={"name": "advance_deal", "description": (
+        "推进成交单的交易阶段：意向金/定金 → 签约 → 贷款审批 → 过户 → 交房完成。"
+        "阶段可以直接说中文（「签约」「交房完成」）。跳步（越级）或往回走（回退）都不拦，只在 warnings 里说明；"
+        "备注默认追加到原备注后面（带 [阶段 日期] 前缀），要纠正错记才用 replace_notes=True 覆盖。"
+        "推进到「交房完成」时，客户阶段会自动从「成交中」挪到「售后维护」（回执里说明）。"), "parameters": {
         "type": "object",
         "properties": {
-            "deal_id": {"type": "integer", "description": "成交单ID"},
-            "stage": {"type": "string", "enum": STAGES, "description": "目标阶段"},
+            "deal_id": {"type": "integer", "description": "成交单编号（数字，可在成交列表里查）"},
+            "stage": {"type": "string", "enum": STAGES, "description": "目标阶段：认中文说法（签约/贷款审批/过户/交房完成），也认英文值"},
             "date": {"type": "string", "description": "该阶段日期：认 2026-12-31、2026/12/31、2026年12月31日，也认 今天/明天/周三/3天后"},
-            "notes": {"type": "string", "description": "备注"},
+            "notes": {"type": "string", "description": "这一步的备注（默认追加到原备注后面，不会覆盖）"},
+            "replace_notes": {"type": "boolean", "description": "默认 false。true=用 notes 整段替换原备注（只在纠正写错的备注时用）"},
         },
         "required": ["deal_id", "stage"],
     }},
