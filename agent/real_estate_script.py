@@ -87,15 +87,17 @@ def _clean(value):
     return "" if value is None else str(value).strip().lower().replace(" ", "").replace("　", "")
 
 
-def options_text(keys, kind="scenario"):
+def options_text(keys, kind="scenario", labels=None):
     """档位清单 → 「①开场白（greeting）②异议处理（objection_handling）」这种可念的串
 
     `keys` 的顺序即清单顺序（调用方给的顺序就是给经纪人看的顺序）。
+    `labels`：自定义中文名表（如消息模板名）；不传就用场景/子场景那两张表。
     """
+    table = labels if labels is not None else (SUB_SCENARIO_LABELS if kind == "sub" else SCENARIO_LABELS)
     out = []
     for i, k in enumerate(keys):
         num = _CIRCLED[i] if i < len(_CIRCLED) else f"{i + 1}."
-        out.append(f"{num}{label_of(k, kind)}（{k}）")
+        out.append(f"{num}{table.get(k) or k}（{k}）")
     return "".join(out)
 
 
