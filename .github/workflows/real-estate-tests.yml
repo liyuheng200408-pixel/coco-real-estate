@@ -19,7 +19,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 分钟会撞上限：这套用例正常跑 4 分钟，但 GitHub 偶尔给出被降速的 runner
+    # （实测同一次提交跑到 52% 就耗掉 9.5 分钟，比正常慢近 5 倍）→ 直接判 cancelled，
+    # 看起来像代码坏了。给足 20 分钟，宁可等也别误报红灯。
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
