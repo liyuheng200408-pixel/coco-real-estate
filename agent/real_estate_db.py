@@ -3241,7 +3241,33 @@ class RealEstateDB:
                                         'available_by_type 只统计在售（new=一手房 / second_hand=二手房 / rental=出租）'),
                 'overdue_followups': overdue,
             }
-    
+
+    def period_stats(self, start):
+        """某个时间点之后的**活动计数**（经营报告"本期"那段用）→ dict
+
+        - `new_customers`：本期新增客户（按建档时间，含已关闭）
+        - `new_properties`：本期新增房源（含已售已租）
+        - `viewings_done` / `viewings_interested`：本期**已完成**的带看数 / 其中感兴趣的位数
+          （按带看时间算；待带看的时间通常在未来，所以只统计已完成的，避免把预约算成"
+          本期看过 N 次"）
+        - `new_deals`：本期新开的成交单
+
+        2026-09-26 加（F337）：经营报告此前把**累计**数字挂在"周报"标题下报，经纪人会把累计
+        当成本期业绩（t74a 实测：本周成交 1 单、报告写 2 单）。口径与展示都在
+        `tools/real_estate_report.py` 一处，别在别处重写一套。
+        """
+        with self.get_session() as s:
+            return {
+                'new_customers': s.query(Customer).filter(Customer.created_at >= start).count(),
+                'new_properties': s.query(Property).filter(Property.created_at >= start).count(),
+                'viewings_done': s.query(Viewing).filter(
+                    Viewing.status == 'done', Viewing.viewing_time >= start).count(),
+                'viewings_interested': s.query(Viewing).filter(
+                    Viewing.status == 'done', Viewing.result == 'interested',
+                    Viewing.viewing_time >= start).count(),
+                'new_deals': s.query(Deal).filter(Deal.created_at >= start).count(),
+            }
+
     def get_channel_stats(self):
         """渠道线索统计：按客户来源分组统计客户数、分级、成交数、成交率
 
