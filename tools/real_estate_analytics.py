@@ -138,25 +138,56 @@ registry.register(
 def channel_stats(task_id: str = None) -> str:
     """渠道线索统计：按客户来源分组统计客户数、S/A/B/C分级、成交数、成交率
 
-    来源为固定选项：安居客/贝壳/抖音/转介绍/门店/58/其他（未填写归入"未填写"）。
+    2026-09-26 改（F350–F352）：
+    ① 来源先**归并同义写法**（实测「贝壳找房」与「贝壳」原先是两行、各 100% 成交率，
+       据此判断投放性价比会看错），并在回执里如实说明合并了哪些写法、还有哪些写法没合并；
+    ② `成交率 = 该渠道有成交的客户数 ÷ 该渠道在跟客户数` —— 这句口径写进描述与给经纪人的话里
+       （`deals` 是"有成交的客户数"，不是成交单数，别让人读成千分之一）；
+    ③ 空库分开说；④ 补合计字段与中文 message。
     """
+    from agent.real_estate_db import CHANNEL_ALIASES, UNSPECIFIED_SOURCE
+
     db = _get_db()
     channels = db.get_channel_stats()
-    return json.dumps({
+    customers_total = sum(c.get('customers', 0) for c in channels)
+    closed_total = sum(c.get('closed', 0) for c in channels)
+    merged = [(c['source'], c.get('spellings') or []) for c in channels if c.get('spellings')]
+    known = set(CHANNEL_ALIASES.values()) - {UNSPECIFIED_SOURCE}
+    unmerged = sorted(s for s in (c['source'] for c in channels)
+                      if s not in known and s != UNSPECIFIED_SOURCE)
+
+    out = {
         "success": True,
         "channels": channels,
         "total_channels": len(channels),
-        "message": "各渠道线索量与成交率一览，可据此判断广告投放性价比",
-    }, ensure_ascii=False)
+        "渠道数": len(channels),
+        "在跟客户合计": customers_total,
+        "已关闭合计": closed_total,
+    }
+    if not channels:
+        out["message"] = "库里还没有客户，先登记客户再看渠道数据"
+    else:
+        message = ("各渠道线索量与成交率一览（成交率 = 该渠道有成交的客户数 ÷ 该渠道在跟客户数），"
+                   "可据此判断广告投放性价比")
+        if merged:
+            message += "；已合并同一渠道的不同写法：" + "、".join(
+                f"{'、'.join(spellings)}→{src}" for src, spellings in merged)
+        if unmerged:
+            message += (f"；另有 {len(unmerged)} 种来源写法没合并（{'、'.join(unmerged)}），"
+                        f"如果它们其实是同一个渠道，跟我说一声我就并进去")
+        out["message"] = message
+    return json.dumps(out, ensure_ascii=False)
 
 
 registry.register(
     name="channel_stats",
     toolset="real_estate",
-    schema={"name": "channel_stats", "description": "渠道线索统计：按客户来源分组统计客户数、分级、成交数、成交率（客户数只算在跟客户，已关闭单列 closed），判断哪个渠道来客多、成交率高", "parameters": {
-        "type": "object",
-        "properties": {},
-    }},
+    schema={"name": "channel_stats",
+            "description": "渠道线索统计：按客户来源分组，给各渠道的在跟客户数、S/A/B/C 分级、有成交的客户数与客户成交率（同一渠道的不同写法已合并；来源没填的算「未填写」；渠道按客户数从多到少排）",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            }},
     handler=lambda args, **kw: channel_stats(**args),
 )
 

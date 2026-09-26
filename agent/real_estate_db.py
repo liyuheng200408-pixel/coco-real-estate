@@ -788,6 +788,36 @@ def _norm_district_cached(value):
     return RealEstateDB._norm_district(value)
 
 
+# ==================== 客户来源（渠道）归一（2026-09-26 F350） ====================
+# 只做**统计侧**归并：同一个渠道的不同写法在渠道统计里合并成一行（实测「贝壳找房」与「贝壳」原先
+# 各占一行、各 100% 成交率）。**不改写入**（录入照原样存经纪人说的写法），**也不猜** ——
+# 表里没有的写法一律原样成一行，由上层如实说明"这几种写法没合并"。
+CHANNEL_ALIASES = {
+    # 贝壳
+    '贝壳': '贝壳', '贝壳找房': '贝壳', '贝壳网': '贝壳', '贝壳app': '贝壳', 'beike': '贝壳',
+    # 安居客
+    '安居客': '安居客', '安居客网': '安居客', '安居客app': '安居客', 'anjuke': '安居客',
+    # 抖音
+    '抖音': '抖音', '抖音短视频': '抖音', '抖音号': '抖音', '抖音直播': '抖音', 'douyin': '抖音',
+    # 58
+    '58': '58', '58同城': '58', '58网': '58', '58.com': '58',
+    # 转介绍
+    '转介绍': '转介绍', '老客户介绍': '转介绍', '客户介绍': '转介绍', '推荐': '转介绍',
+    '转介': '转介绍', '老带新': '转介绍',
+    # 门店
+    '门店': '门店', '门店到访': '门店', '上门': '门店', '自然到访': '门店', '进店': '门店',
+}
+UNSPECIFIED_SOURCE = '未填写'
+
+
+def normalize_source(value):
+    """客户来源（渠道）归并 → 渠道名。空值算「未填写」；表里没有的写法**原样返回**（不猜）。"""
+    raw = (value or '').strip()
+    if not raw:
+        return UNSPECIFIED_SOURCE
+    return CHANNEL_ALIASES.get(raw) or CHANNEL_ALIASES.get(raw.lower()) or raw
+
+
 class RealEstateDB:
     """Coco 的数据库"""
     
@@ -3273,17 +3303,26 @@ class RealEstateDB:
 
         2026-09-23 改：已关闭客户不再算进渠道来客数（该渠道单列 closed）——客户关了就不再
         跟进，继续算进"这个渠道来了多少人"会让渠道量越用越虚。
+
+        2026-09-26 改（F350）：来源先过 `normalize_source()` **归并同义写法**（「贝壳找房」与「贝壳」
+        原先是两行），并发回该行合并了哪些写法（`spellings`，给上层如实说明用）；
+        认不出的写法原样成一行。`deals` = 该渠道**有成交的客户数**（不是成交单数），`conversion_rate`
+        = deals / customers。
         """
         with self.get_session() as s:
             # 2026-09-18 修：原先每客户查一次成交（N+1），现改为一次取出"有成交的客户集合"
             deal_customer_ids = {row[0] for row in s.query(Deal.customer_id).distinct().all()}
             channels = {}
             for c in s.query(Customer).all():
-                src = (c.source or '').strip() or '未填写'
+                raw_src = (c.source or '').strip()
+                src = normalize_source(raw_src)
                 ch = channels.setdefault(src, {
                     'source': src, 'customers': 0, 'closed': 0,
                     'tiers': {'S': 0, 'A': 0, 'B': 0, 'C': 0}, 'deals': 0,
+                    'spellings': set(),
                 })
+                if raw_src and raw_src != src:
+                    ch['spellings'].add(raw_src)
                 if c.status == 'closed':
                     ch['closed'] += 1
                     continue
@@ -3294,6 +3333,7 @@ class RealEstateDB:
                     ch['deals'] += 1
             result = sorted(channels.values(), key=lambda x: -x['customers'])
             for ch in result:
+                ch['spellings'] = sorted(ch['spellings'])
                 ch['conversion_rate'] = round(ch['deals'] / ch['customers'] * 100, 1) if ch['customers'] else 0
             return result
     
