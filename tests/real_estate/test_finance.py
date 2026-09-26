@@ -37,8 +37,13 @@ class TestLoanCompare:
         """等额本金总利息 < 同年限等额本息"""
         d = parse(loan_compare(price=3_000_000, loan_years_list="30", commercial_rate=3.6))
         plans = {p["方案"]: p for p in d["loan_compare"]["方案对比"]}
-        ei = float(plans["纯商贷 30年 等额本息"]["总利息"].replace("万", ""))
-        ep = float(plans["纯商贷 30年 等额本金"]["总利息"].replace("万", ""))
+        # 2026-09-26（F247）：金额口径统一成两位小数「133.71万元」（原先是「133.7万」）——
+        # 先把「万元」剥掉再剥「万」，否则会剩下一个「元」把 float() 卡住
+        def _wan(text):
+            return float(text.replace("万元", "").replace("万", ""))
+
+        ei = _wan(plans["纯商贷 30年 等额本息"]["总利息"])
+        ep = _wan(plans["纯商贷 30年 等额本金"]["总利息"])
         assert ep < ei
 
     def test_invalid_price_rejected(self):

@@ -10,6 +10,7 @@ Coco 房产工具 - 金融计算器
 import json
 import re
 from agent.real_estate_input import norm_money
+from agent.real_estate_money import fmt_wan
 from tools.registry import registry
 
 
@@ -81,6 +82,36 @@ def _norm_ratio_arg(value, label='首付比例'):
         return None, (f"{label}要在 0 和 1 之间：收到的是「{value}」"
                       f"（30% 写 0.3，也可直接写 30）"), False
     return ratio, None, converted
+
+
+def _norm_years_list(value, label='贷款年限'):
+    """年限列表归一 → (年限列表 或 None, 中文提示 或 None, 是否需要说明)
+
+    认 `20,30` / `20，30`（中文逗号）/ `20年,30年` / `20、30`；每个年限都要在 1–40 年之间。
+    乱值**不许静默退回默认**（原先 `abc` 会被悄悄换成 20,30）。
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return [20, 30], None, False
+    raw = str(value)
+    text = (raw.replace('，', ',').replace('、', ',').replace(';', ',').replace('；', ',')
+               .replace('年', '').replace(' ', ''))
+    years = []
+    for part in text.split(','):
+        if not part.strip():
+            continue
+        try:
+            years.append(int(float(part.strip())))
+        except ValueError:
+            return None, (f"{label}没能识别：收到的是「{value}」。"
+                          f"请写 20,30 这样的年限列表（每个 1–40 年）"), False
+    if not years:
+        return None, (f"{label}没能识别：收到的是「{value}」。"
+                      f"请写 20,30 这样的年限列表（每个 1–40 年）"), False
+    if any(not 1 <= y <= 40 for y in years):
+        return None, f"{label}要在 1 到 40 年之间：收到的是「{value}」", False
+    years = sorted(set(years))
+    converted = raw.strip() != ','.join(str(y) for y in years)
+    return years, None, converted
 
 
 def _norm_years_arg(value, label='贷款年限'):
@@ -273,16 +304,36 @@ def loan_compare(
         provident_fund_loan_amount: 公积金贷款额度（元），传了才出组合贷方案
         city: 城市名（用于查询当地政策利率）
     """
-    price_yuan = price
-    if price_yuan <= 0 or down_payment_ratio <= 0 or down_payment_ratio >= 1:
-        return json.dumps({"success": False, "error": "房价需>0且首付比例需在(0,1)之间"}, ensure_ascii=False)
+    price_yuan, problem = _norm_money_arg(price, '房价')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if price_yuan <= 0:
+        return json.dumps({"success": False, "error": (
+            f"房价要大于 0：收到的是「{price}」")}, ensure_ascii=False)
+    ratio, problem, ratio_converted = _norm_ratio_arg(down_payment_ratio)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if ratio is None:
+        ratio = 0.3
+    years, problem, years_converted = _norm_years_list(loan_years_list)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    notes = []
+    if ratio_converted:
+        notes.append(f"首付比例「{down_payment_ratio}」我按 {ratio*100:g}% 算的")
+    if years_converted:
+        notes.append(f"贷款年限列表「{loan_years_list}」我按 {years} 算的")
 
-    down_payment = price_yuan * down_payment_ratio
+    down_payment = price_yuan * ratio
     loan_amount = price_yuan - down_payment
+    if loan_amount <= 0:
+        return json.dumps({"success": False, "error": (
+            f"首付已经覆盖整套房价（首付 {ratio * 100:g}%），没有贷款可算："
+            f"首付比例要在 0 和 1 之间")}, ensure_ascii=False)
 
-    # 利率：显式传入 > 政策库查询 > 默认值
+    # 利率：显式传入 > 政策库查询 > 默认值（都过同一套归一，小数写法一律给提示）
     if commercial_rate is None:
-        commercial_rate = 3.6
+        commercial_rate, rate_source = 3.6, "没给利率，按常见商贷 3.6% 算的"
         if city:
             try:
                 from tools.real_estate_policy import get_loan_policy
@@ -292,16 +343,27 @@ def loan_compare(
                 m = re.search(r"(\d+\.?\d*)\s*%", text.replace("：", ":"))
                 if m:
                     commercial_rate = float(m.group(1))
+                    rate_source = f"按{city}的政策库查到 {commercial_rate}%"
             except Exception:
                 pass
-
-    years = []
-    for y in str(loan_years_list).split(","):
-        y = y.strip()
-        if y and y.isdigit():
-            years.append(int(y))
-    if not years:
-        years = [20, 30]
+    else:
+        commercial_rate, problem, _c = _norm_rate_arg(commercial_rate, '商贷年利率')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+        rate_source = f"你说的是 {commercial_rate}%"
+    provident_fund_rate, problem, _c = _norm_rate_arg(provident_fund_rate, '公积金年利率')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if provident_fund_rate is None:
+        provident_fund_rate = 2.85
+    if provident_fund_loan_amount is not None:
+        provident_fund_loan_amount, problem = _norm_money_arg(provident_fund_loan_amount,
+                                                              '公积金贷款额度')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+        if provident_fund_loan_amount > loan_amount:
+            notes.append(f"公积金贷款额度 {fmt_wan(provident_fund_loan_amount)} 超过了贷款总额 "
+                         f"{fmt_wan(loan_amount)}，我按 {fmt_wan(loan_amount)} 算的")
 
     def installment_monthly(amount, annual_rate, months):
         mr = annual_rate / 100 / 12
@@ -313,16 +375,16 @@ def loan_compare(
 
     plans = []
     # 方案1..N：等额本息 各年限
-    for y in sorted(years):
+    for y in years:
         months = y * 12
         mp = installment_monthly(loan_amount, commercial_rate, months)
         total_interest = mp * months - loan_amount
         plans.append({
             "方案": f"纯商贷 {y}年 等额本息",
-            "贷款额": f"{loan_amount/10000:.1f}万",
+            "贷款额": f"{loan_amount/10000:.2f}万元",
             "年利率": f"{commercial_rate}%",
-            "月供": f"{mp:,.0f}元",
-            "总利息": f"{total_interest/10000:.1f}万",
+            "月供": f"{mp:,.2f}元",
+            "总利息": f"{total_interest/10000:.2f}万元",
             "适合人群": f"月供压力要小、打算长期还款" if y >= 30 else "利息总额与月供的平衡",
         })
 
@@ -332,16 +394,15 @@ def loan_compare(
         comm = loan_amount - gf
         y = max(years)
         months = y * 12
-        mp_gf = installment_monthly(gf, provident_fund_rate, months)
-        mp_comm = installment_monthly(comm, commercial_rate, months)
-        mp = mp_gf + mp_comm
+        mp = installment_monthly(gf, provident_fund_rate, months) + \
+            installment_monthly(comm, commercial_rate, months)
         total_interest = (mp * months) - loan_amount
         plans.insert(0, {
             "方案": f"组合贷(公积金{gf/10000:.0f}万+商贷{comm/10000:.0f}万) {y}年 等额本息",
-            "贷款额": f"{loan_amount/10000:.1f}万",
+            "贷款额": f"{loan_amount/10000:.2f}万元",
             "年利率": f"公积金{provident_fund_rate}%+商贷{commercial_rate}%",
-            "月供": f"{mp:,.0f}元",
-            "总利息": f"{total_interest/10000:.1f}万",
+            "月供": f"{mp:,.2f}元",
+            "总利息": f"{total_interest/10000:.2f}万元",
             "适合人群": "有公积金额度，想省利息",
         })
 
@@ -352,10 +413,10 @@ def loan_compare(
     total_interest_principal = loan_amount * commercial_rate / 100 * (months + 1) / 2 / 12
     plans.append({
         "方案": f"纯商贷 {y}年 等额本金",
-        "贷款额": f"{loan_amount/10000:.1f}万",
+        "贷款额": f"{loan_amount/10000:.2f}万元",
         "年利率": f"{commercial_rate}%",
-        "月供": f"首月{first_mp:,.0f}元逐月递减",
-        "总利息": f"{total_interest_principal/10000:.1f}万",
+        "月供": f"首月{first_mp:,.2f}元逐月递减",
+        "总利息": f"{total_interest_principal/10000:.2f}万元",
         "适合人群": "前期还款能力强、打算提前还款",
     })
 
@@ -366,14 +427,17 @@ def loan_compare(
     ]
 
     result = {
-        "房价": f"{price_yuan/10000:.0f}万元",
-        "首付": f"{down_payment_ratio*100:.0f}% = {down_payment/10000:.1f}万",
-        "贷款总额": f"{loan_amount/10000:.1f}万",
-        "商贷利率来源": f"{city}政策库" if (city and commercial_rate != 3.6) else ("手动指定" if commercial_rate else "默认值"),
+        "房价": f"{price_yuan/10000:.2f}万元",
+        "首付": f"{ratio*100:g}% = {fmt_wan(down_payment)}",
+        "贷款总额": f"{loan_amount/10000:.2f}万元",
+        "商贷利率来源": rate_source,
         "方案对比": plans,
         "温馨提示": tips,
     }
-    return json.dumps({"success": True, "loan_compare": result}, ensure_ascii=False)
+    payload = {"success": True, "loan_compare": result}
+    if notes:
+        payload["note"] = "；".join(notes)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def tax_breakdown_report(
@@ -563,17 +627,21 @@ TOOLS = [
     },
     {
         "name": "loan_compare",
-        "description": "贷款方案对比器 - 一次输出纯商贷/组合贷/等额本金多方案对比表（月供、总利息、适合人群），可直接转发客户",
+        "description": (
+            "贷款方案对比器：一次给出纯商贷（各年限等额本息）、组合贷（有公积金额度时）、"
+            "纯商贷等额本金的多方案对比（贷款额、年利率、月供、总利息、适合人群），可直接转发客户。"
+            "金额按元（400万 记作 4000000，也认「400万」）；年利率按百分数（4.5% 写 4.5）；"
+            "首付比例写 0.3（=30%），也可直接写 30；年限列表写「20,30」。写法被换算时会用 note 说明。"),
         "parameters": {
             "type": "object",
             "properties": {
-                "price": {"type": "number", "description": "房价（元，如 400万=4000000）"},
-                "down_payment_ratio": {"type": "number", "description": "首付比例（默认0.3）"},
-                "loan_years_list": {"type": "string", "description": "商贷年限列表，逗号分隔（默认'20,30'）"},
-                "commercial_rate": {"type": "number", "description": "商贷年利率%（不传则按城市查政策，查不到用默认）"},
-                "provident_fund_rate": {"type": "number", "description": "公积金年利率%（默认2.85）"},
-                "provident_fund_loan_amount": {"type": "number", "description": "公积金贷款额度（元），传了才出组合贷方案"},
-                "city": {"type": "string", "description": "城市名（查询当地政策利率用）"},
+                "price": {"type": "number", "description": "房价（元）：可写 4000000，也可写「400万」；必须大于 0"},
+                "down_payment_ratio": {"type": "number", "description": "首付比例：0.3 表示 30%，也可直接写 30（=30%）；必须大于 0 且小于 1"},
+                "loan_years_list": {"type": "string", "description": "商贷年限列表：如「20,30」（也认「20年,30年」中文逗号），每个 1–40 年；不传按 20,30"},
+                "commercial_rate": {"type": "number", "description": "商贷年利率（百分数）：4.5 表示 4.5%；不传则按城市政策库查、查不到用 3.6%"},
+                "provident_fund_rate": {"type": "number", "description": "公积金年利率（百分数，默认 2.85）"},
+                "provident_fund_loan_amount": {"type": "number", "description": "公积金贷款额度（元）；传了才出组合贷方案，超过贷款总额时按贷款总额算并说明"},
+                "city": {"type": "string", "description": "城市名（不给商贷利率时用来查当地政策）"},
             },
             "required": ["price"],
         },
