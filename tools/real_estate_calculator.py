@@ -84,6 +84,113 @@ def _norm_ratio_arg(value, label='首付比例'):
     return ratio, None, converted
 
 
+def _tax_assessment(price_yuan, area, hold_years, is_first_home, is_only_home, property_class,
+                    original_price=None):
+    """契税 / 增值税（及附加）/ 个人所得税 的**权威口径**（一处定义，两个工具共用）
+
+    `tax_breakdown_report`（客户版税费明细单）与 `tax_calculator` 都调它 —— 免得"同一个场景两个工具两个数"
+    （2026-09-26 F248–F250 就是这么来的：一个拿"买方首套"当"卖方唯一"、一个漏了非普宅档、一个按 5.6% 全额算增值税）。
+    """
+    ordinary = (property_class != "non_ordinary")
+    full_two = hold_years >= 2
+    full_five_only = hold_years >= 5 and is_only_home
+    if is_first_home:
+        deed_rate = 0.01 if area <= 90 else (0.015 if ordinary else 0.03)
+    else:
+        deed_rate = 0.03
+    deed = price_yuan * deed_rate
+    if full_two:
+        if ordinary:
+            vat, vat_note = 0.0, "满2年普通住宅免征"
+        else:
+            base = price_yuan - (original_price or 0)
+            vat = base * 0.05 / 1.05
+            vat_note = (f"满2年非普宅按差额(现价-原价{original_price/10000:.0f}万元)5%"
+                        if original_price else "非普宅需提供原购入价按差额计税")
+    else:
+        vat, vat_note = price_yuan / 1.05 * 0.05, "未满2年全额5%（增值税及附加约5.6%口径内）"
+    if full_five_only:
+        personal, personal_note = 0.0, "满五唯一免征"
+    elif hold_years >= 5:
+        personal, personal_note = price_yuan * 0.01, "满五不唯一 → 差额20%或核定1%（本单按1%）"
+    else:
+        personal, personal_note = price_yuan * 0.01, "未满五年 → 差额20%或核定1%（本单按1%）"
+    return {
+        "ordinary": ordinary, "full_two": full_two, "full_five_only": full_five_only,
+        "deed": deed, "deed_rate": deed_rate,
+        "vat": vat, "vat_note": vat_note,
+        "personal": personal, "personal_note": personal_note,
+    }
+
+
+def _norm_area_arg(value, label='面积'):
+    """面积归一 → (㎡ 或 None, 中文提示 或 None)；认 `89` / `89.5` / `89平` / `89㎡` / `89平方米`"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None, f"{label}是空的：请给平方米数字（如 89 或 89平）"
+    text = str(value).strip().replace('平方米', '').replace('平米', '').replace('㎡', '') \
+        .replace('平', '').replace('m2', '').replace('M2', '').replace(' ', '')
+    try:
+        area = float(text)
+    except (TypeError, ValueError):
+        return None, f"{label}没能识别：收到的是「{value}」。请给平方米数字（如 89 或 89平）"
+    if area <= 0:
+        return None, f"{label}要大于 0：收到的是「{value}」"
+    return area, None
+
+
+def _norm_years_value(value, label='持有年限', low=0, high=100):
+    """年限归一（可带小数）→ (年 或 None, 中文提示 或 None)；认 `2` / `2.5` / `2年` / `两年`"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None, None
+    raw = str(value).strip()
+    cn = {'零': 0, '一': 1, '两': 2, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7,
+          '八': 8, '九': 9, '十': 10}
+    text = raw.replace('年', '').strip()
+    try:
+        years = float(text)
+    except (TypeError, ValueError):
+        years = float(cn.get(text, -1)) if text in cn else None
+        if years is None or years < 0:
+            return None, f"{label}没能识别：收到的是「{value}」。请给年数（如 2 或 2.5）"
+    if not low <= years <= high:
+        return None, f"{label}要在 {low} 到 {high} 年之间：收到的是「{value}」"
+    return years, None
+
+
+def _norm_bool_arg(value, label, true_words, false_words):
+    """是/否类参数归一 → (bool 或 None, 中文提示 或 None)
+
+    必须归一：`is_first_home='否'` 在 Python 里是"真"，旧实现会把它当**首套**算（契税按 1% 而不是 3%）。
+    """
+    if value is None:
+        return None, None
+    if isinstance(value, bool):
+        return value, None
+    text = str(value).strip().lower()
+    if text in ('true', '1', 'yes', 'y'):
+        return True, None
+    if text in ('false', '0', 'no', 'n'):
+        return False, None
+    if text in true_words:
+        return True, None
+    if text in false_words:
+        return False, None
+    return None, (f"{label}没能识别：收到的是「{value}」。请说 是 或 否"
+                  f"（也可以说 {'/'.join(true_words[:2])} / {'/'.join(false_words[:2])}）")
+
+
+def _norm_property_class(value, label='住宅类型'):
+    """普通/非普通住宅归一 → ('ordinary'/'non_ordinary' 或 None, 中文提示 或 None)"""
+    if value is None:
+        return None, None
+    text = str(value).strip().lower()
+    if text in ('ordinary', 'common', '普通', '普通住宅', '普宅', '是'):
+        return 'ordinary', None
+    if text in ('non_ordinary', 'non-ordinary', 'nonordinary', '非普通', '非普通住宅', '非普宅', '否'):
+        return 'non_ordinary', None
+    return None, f"{label}没能识别：收到的是「{value}」。请说 普通住宅(ordinary) 或 非普通住宅(non_ordinary)"
+
+
 def _norm_years_list(value, label='贷款年限'):
     """年限列表归一 → (年限列表 或 None, 中文提示 或 None, 是否需要说明)
 
@@ -230,56 +337,83 @@ def tax_calculator(
     price: float,
     area: float,
     is_first_home: bool = True,
-    hold_years: int = 2,
+    is_only_home: bool = True,
+    hold_years: float = 2,
+    property_class: str = "ordinary",
     task_id: str = None,
 ) -> str:
     """
     税费计算器
-    
+
     参数:
-        price: 房价（元，如 400万=4000000）
-        area: 面积（㎡）
-        is_first_home: 是否首套房
-        hold_years: 持有年限
+        price: 房价（元，如 400万=4000000；也认「400万」）
+        area: 面积（㎡，如 89 或「89平」）
+        is_first_home: 买方是否首套（是/否）
+        is_only_home: 卖方是否唯一住房（满五唯一免个税的关键）
+        hold_years: 房产证持有年限（年，可小数如 1.5）
+        property_class: ordinary(普通住宅) / non_ordinary(非普通住宅)
+
+    口径与「税费明细单」（客户版）**共用一处**（`_tax_assessment`），两个出口不会给出两个数。
     """
-    price_yuan = price  # 系统价格单位为元（如 400万 = 4000000）
-    
-    # 契税
-    if is_first_home:
-        if area <= 90:
-            deed_tax_rate = 0.01  # 1%
-        else:
-            deed_tax_rate = 0.015  # 1.5%
-    else:
-        deed_tax_rate = 0.03  # 3%
-    deed_tax = price_yuan * deed_tax_rate
-    
-    # 增值税（卖方缴纳，但可能转嫁给买方）
-    if hold_years >= 2:
-        vat = 0  # 满2年免征
-    else:
-        vat = price_yuan * 0.056  # 5.6%
-    
-    # 个人所得税（卖方缴纳）
-    if hold_years >= 5 and is_first_home:
-        personal_tax = 0  # 满5年且唯一免征
-    else:
-        personal_tax = price_yuan * 0.01  # 1%或差额20%
-    
-    total_tax = deed_tax + vat + personal_tax
-    
+    price_yuan, problem = _norm_money_arg(price, '房价')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if price_yuan <= 0:
+        return json.dumps({"success": False, "error": (
+            f"房价要大于 0：收到的是「{price}」")}, ensure_ascii=False)
+    area_value, problem = _norm_area_arg(area)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    hold_years_value, problem = _norm_years_value(hold_years)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if hold_years_value is None:
+        hold_years_value = 2
+    first_home, problem = _norm_bool_arg(is_first_home, '买方是否首套',
+                                         ('是', '首套', '首套房', '首套住房'),
+                                         ('否', '不是', '二套', '二套房'))
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if first_home is None:
+        first_home = True
+    only_home, problem = _norm_bool_arg(is_only_home, '卖方是否唯一住房',
+                                        ('是', '唯一', '唯一住房'), ('否', '不唯一', '非唯一'))
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if only_home is None:
+        only_home = True
+    pclass, problem = _norm_property_class(property_class)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if pclass is None:
+        pclass = 'ordinary'
+
+    rules = _tax_assessment(price_yuan, area_value, hold_years_value, first_home, only_home, pclass)
+    total_tax = rules["deed"] + rules["vat"] + rules["personal"]
+
     result = {
-        "房价": f"{price/10000:.0f}万元",
-        "面积": f"{area}㎡",
-        "是否首套": "是" if is_first_home else "否",
-        "持有年限": f"{hold_years}年",
-        "契税": f"{deed_tax/10000:.2f}万元 ({deed_tax_rate*100}%)",
-        "增值税": f"{vat/10000:.2f}万元" if vat > 0 else "免征（满2年）",
-        "个人所得税": f"{personal_tax/10000:.2f}万元" if personal_tax > 0 else "免征（满5年唯一）",
+        "房价": f"{price_yuan/10000:.2f}万元",
+        "面积": f"{area_value:g}㎡",
+        "是否首套": "是" if first_home else "否",
+        "是否唯一": "是" if only_home else "否",
+        "持有年限": f"{hold_years_value:g}年",
+        "住宅类型": "普通住宅" if rules["ordinary"] else "非普通住宅",
+        "契税": f"{rules['deed']/10000:.2f}万元 ({rules['deed_rate']*100:.1f}%)",
+        "增值税": f"{rules['vat']/10000:.2f}万元" if rules["vat"] > 0 else "免征",
+        "个人所得税": f"{rules['personal']/10000:.2f}万元" if rules["personal"] > 0 else "免征",
         "税费合计": f"{total_tax/10000:.2f}万元",
     }
-    
-    return json.dumps({"success": True, "calculator": result}, ensure_ascii=False)
+    notes = []
+    if rules["vat"] <= 0:
+        notes.append(f"增值税：{rules['vat_note']}")
+    else:
+        notes.append(f"增值税：{rules['vat_note']}")
+    notes.append(f"个人所得税：{rules['personal_note']}")
+    if not rules["ordinary"] and rules["full_two"]:
+        notes.append("非普通住宅满 2 年按差额计税，需要卖方原购入价；这里按现价全额估算，"
+                     "要精确请用税费明细单")
+    payload = {"success": True, "calculator": result, "note": "；".join(notes)}
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def loan_compare(
@@ -397,10 +531,17 @@ def loan_compare(
         mp = installment_monthly(gf, provident_fund_rate, months) + \
             installment_monthly(comm, commercial_rate, months)
         total_interest = (mp * months) - loan_amount
+        # 公积金额度覆盖全部贷款额时其实没有商贷部分 —— 别叫「组合贷(公积金X万+商贷0万)」（老板 2026-09-26 点头改）
+        if comm <= 0:
+            plan_title = f"纯公积金贷 {fmt_wan(gf)} {y}年 等额本息"
+            plan_rate = f"公积金{provident_fund_rate}%"
+        else:
+            plan_title = f"组合贷(公积金{gf/10000:.0f}万+商贷{comm/10000:.0f}万) {y}年 等额本息"
+            plan_rate = f"公积金{provident_fund_rate}%+商贷{commercial_rate}%"
         plans.insert(0, {
-            "方案": f"组合贷(公积金{gf/10000:.0f}万+商贷{comm/10000:.0f}万) {y}年 等额本息",
+            "方案": plan_title,
             "贷款额": f"{loan_amount/10000:.2f}万元",
-            "年利率": f"公积金{provident_fund_rate}%+商贷{commercial_rate}%",
+            "年利率": plan_rate,
             "月供": f"{mp:,.2f}元",
             "总利息": f"{total_interest/10000:.2f}万元",
             "适合人群": "有公积金额度，想省利息",
@@ -464,58 +605,65 @@ def tax_breakdown_report(
         original_price: 卖方原购入价（元），非普宅/满二差额计税用
         city: 城市（展示政策依据用）
     """
-    price_yuan = price
-    if price_yuan <= 0 or area <= 0:
+    price_yuan, problem = _norm_money_arg(price, '成交价')
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if price_yuan <= 0:
         return json.dumps({"success": False, "error": "房价和面积需>0"}, ensure_ascii=False)
+    area_value, problem = _norm_area_arg(area)
+    if problem:
+        return json.dumps({"success": False, "error": "房价和面积需>0"}, ensure_ascii=False)
+    area = area_value
+    hold_years_value, problem = _norm_years_value(hold_years)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    hold_years = 2 if hold_years_value is None else hold_years_value
+    first_home, problem = _norm_bool_arg(is_first_home, '买方是否首套',
+                                         ('是', '首套', '首套房', '首套住房'),
+                                         ('否', '不是', '二套', '二套房'))
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    is_first_home = True if first_home is None else first_home
+    only_home, problem = _norm_bool_arg(is_only_home, '卖方是否唯一住房',
+                                        ('是', '唯一', '唯一住房'), ('否', '不唯一', '非唯一'))
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    is_only_home = True if only_home is None else only_home
+    pclass, problem = _norm_property_class(property_class)
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    property_class = 'ordinary' if pclass is None else pclass
 
-    full_two = hold_years >= 2
-    full_five_only = hold_years >= 5 and is_only_home
-    ordinary = (property_class == "ordinary")
+    # 口径与 tax_calculator 共用一处（`_tax_assessment`）——两个出口不能再出现两个数
+    rules = _tax_assessment(price_yuan, area, hold_years, is_first_home, is_only_home,
+                            property_class, original_price=original_price)
+    ordinary, full_two, full_five_only = rules["ordinary"], rules["full_two"], rules["full_five_only"]
+    deed, vat, personal_tax = rules["deed"], rules["vat"], rules["personal"]
 
     items = []
 
     # 1. 契税（买方）
-    if is_first_home:
-        deed_rate = 0.01 if area <= 90 else (0.015 if ordinary else 0.03)
-    else:
-        deed_rate = 0.03
-    deed = price_yuan * deed_rate
     items.append({
         "税目": "契税", "承担": "买方",
-        "金额": f"{deed/10000:.2f}万 ({deed_rate*100:.1f}%)",
-        "依据": f"{'首套' if is_first_home else '二套'}+{area}㎡ → 税率{deed_rate*100:.1f}%",
+        "金额": f"{deed/10000:.2f}万元 ({rules['deed_rate']*100:.1f}%)",
+        "依据": f"{'首套' if is_first_home else '二套'}+{area}㎡ → 税率{rules['deed_rate']*100:.1f}%",
     })
 
     # 2. 增值税（卖方，常转嫁买方）
-    if full_two:
-        if ordinary:
-            vat, vat_note = 0, "满2年普通住宅免征"
-        else:
-            # 非普宅满2年差额计税
-            base = price_yuan - (original_price or 0)
-            vat, vat_note = base * 0.05 / 1.05, f"满2年非普宅按差额(现价-原价{original_price/10000 if original_price else 0:.0f}万)5%" if original_price else "非普宅需提供原购入价按差额计税"
-    else:
-        vat, vat_note = price_yuan / 1.05 * 0.05, "未满2年全额5%（增值税及附加约5.6%口径内）"
     items.append({
         "税目": "增值税及附加", "承担": "卖方(常转嫁)",
-        "金额": f"{vat/10000:.2f}万" if vat > 0 else "免征",
-        "依据": vat_note,
+        "金额": f"{vat/10000:.2f}万元" if vat > 0 else "免征",
+        "依据": rules["vat_note"],
     })
 
     # 3. 个人所得税（卖方）
-    if full_five_only:
-        pt, pt_note = 0, "满五唯一免征"
-    elif hold_years >= 5:
-        pt, pt_note = price_yuan * 0.01, "满五不唯一 → 差额20%或核定1%（本单按1%）"
-    else:
-        pt, pt_note = price_yuan * 0.01, "未满五年 → 差额20%或核定1%（本单按1%）"
     items.append({
         "税目": "个人所得税", "承担": "卖方(常转嫁)",
-        "金额": f"{pt/10000:.2f}万" if pt > 0 else "免征",
-        "依据": pt_note,
+        "金额": f"{personal_tax/10000:.2f}万元" if personal_tax > 0 else "免征",
+        "依据": rules["personal_note"],
     })
 
-    total = deed + vat + pt
+    total = deed + vat + personal_tax
     lines = ["📋 税费明细单（客户版）", "=" * 32,
              f"成交价: {price_yuan/10000:.0f}万元 | {area}㎡ | {city or ''}{'（普宅）' if ordinary else '（非普宅）'}",
              f"房本: 满{hold_years:.0f}年{'且唯一' if is_only_home else '非唯一'} | 买方{'首套' if is_first_home else '二套'}",
@@ -612,14 +760,19 @@ TOOLS = [
     },
     {
         "name": "tax_calculator",
-        "description": "税费计算器 - 计算契税、增值税、个税",
+        "description": (
+            "税费计算器：按房价、面积、买方是否首套、卖方是否唯一、持有年限、普通/非普通住宅，"
+            "算契税、增值税与个人所得税，给出各税种金额与税费合计。金额按元（400万 记作 4000000，也认「400万」）；"
+            "面积按㎡（写 89 或「89平」）。要出可直接转发客户的税费明细单（带政策依据），用税费明细单。"),
         "parameters": {
             "type": "object",
             "properties": {
-                "price": {"type": "number", "description": "房价（元，如 400万=4000000）"},
-                "area": {"type": "number", "description": "面积（㎡）"},
-                "is_first_home": {"type": "boolean", "description": "是否首套房"},
-                "hold_years": {"type": "integer", "description": "持有年限"},
+                "price": {"type": "number", "description": "房价（元）：可写 4000000，也可写「400万」；必须大于 0"},
+                "area": {"type": "number", "description": "面积（㎡）：写 89 或「89平」；必须大于 0"},
+                "is_first_home": {"type": "boolean", "description": "买方是否首套（是/否）：首套契税 1%（≤90㎡）或 1.5%（>90㎡，非普宅 3%），二套 3%"},
+                "is_only_home": {"type": "boolean", "description": "卖方是否唯一住房（是/否）：满五年且唯一才免个人所得税"},
+                "hold_years": {"type": "number", "description": "房产证持有年限（年，可写小数如 1.5）：满 2 年免增值税，满 5 年且唯一免个税"},
+                "property_class": {"type": "string", "enum": ["ordinary", "non_ordinary"], "description": "普通住宅(ordinary) / 非普通住宅(non_ordinary)：非普宅且面积>90㎡ 时首套契税按 3%"},
             },
             "required": ["price", "area"],
         },
