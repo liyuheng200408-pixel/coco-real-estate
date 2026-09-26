@@ -3,7 +3,7 @@ Coco 房产工具 - 竞品对比与客户意向度
 """
 import json
 from tools.registry import registry
-from agent.real_estate_input import clamp_limit, norm_id
+from agent.real_estate_input import clamp_limit, norm_id, norm_tier
 from agent.real_estate_money import fmt_budget
 
 
@@ -130,23 +130,50 @@ def intent_score(customer_id: int, task_id: str = None) -> str:
 
 
 def list_intent_scores(tier: str = None, limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
-    """列出客户意向度评分排名"""
+    """客户意向度排名（对全库在跟客户统一算分后取前 N）"""
+    if tier not in (None, ''):
+        tier_value, ok = norm_tier(tier)
+        if not ok:
+            return json.dumps({"success": False, "error":
+                               f"客户等级筛选没能识别：收到的是「{tier}」。等级只能是 S / A / B / C"},
+                              ensure_ascii=False)
+        tier = tier_value
+    else:
+        tier = None
     limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
     db = _get_db()
-    customers = db.list_customers(tier=tier, status='active', limit=limit)
+    # 一次聚合拿回**全部在跟客户**的分项（原先先取"最新 limit 位"再逐位算分：
+    # 名单被截断 + 每位 4~5 次查询，200 位 = 801 次 SQL）
     scored = []
     failed = []
-    for c in customers:
+    for comp in db.intent_components(tier=tier):
         try:
-            comps = db.intent_components(customer_id=c['id'])
-            if comps:
-                scored.append(_score_intent(comps[0]))
+            scored.append(_score_intent(comp))
         except Exception as exc:
             # 单个客户算分失败不能悄悄跳过：否则排名少人，经纪人以为这些客户不在库里
-            failed.append(f"{c.get('name') or c['id']}（{type(exc).__name__}）")
-    # 安全排序：个别客户的 score 可能为空（数据不足），不能让整个排名崩掉
-    scored.sort(key=lambda x: (x.get('score') if x.get('score') is not None else 0), reverse=True)
-    out = {"success": True, "rankings": scored, "count": len(scored)}
+            failed.append(f"{comp.get('customer_name') or comp.get('customer_id')}"
+                          f"（{type(exc).__name__}）")
+    # 排序：分数降序 → 同分按最近跟进时间（新在前）→ 再按客户编号降序。
+    # 三级键写死是为了**顺序可复现**：并入新客户、换库、换数据库都不能让同分客户跳来跳去。
+    scored.sort(key=lambda x: (x.get('score') or 0,
+                               x.get('last_followup_at') or '',
+                               x.get('customer_id') or 0), reverse=True)
+    total = len(scored)
+    top = scored[:limit]
+    insufficient = [x for x in top if not x.get('data_sufficient')]
+    scope = f"{tier}级在跟客户" if tier else "在跟客户"
+    out = {"success": True, "rankings": top, "count": len(top), "total": total,
+           "truncated": total > len(top), "insufficient_count": len(insufficient)}
+    if total == 0:
+        out["message"] = (f"库里还没有{tier}级在跟客户，先登记客户再来排名" if tier
+                          else "库里还没有在跟客户，先登记客户再来排名")
+    else:
+        parts = [f"按意向度排了前 {len(top)} 位（共 {total} 位{scope}）"]
+        if out["truncated"]:
+            parts.append(f"还有 {total - len(top)} 位没列出来")
+        if insufficient:
+            parts.append(f"其中 {len(insufficient)} 位还没有带看或跟进记录，分数仅供参考")
+        out["message"] = "；".join(parts) + "。"
     if failed:
         out["warning_scores"] = f"{len(failed)} 位客户意向评分计算失败，未计入排名：" + "、".join(failed[:5])
     return json.dumps(out, ensure_ascii=False)
@@ -186,10 +213,15 @@ registry.register(
 registry.register(
     name="list_intent_scores",
     toolset="real_estate",
-    schema={"name": "list_intent_scores", "description": "客户意向度评分排名", "parameters": {
+    schema={"name": "list_intent_scores", "description":
+            "客户意向度排名：对全库在跟客户统一算分后从高到低列出（默认前 20 位，最多 200 位）。"
+            "同分按最近跟进时间、再按客户编号排序。会说明共几位在跟客户、这里列了几位；"
+            "没有跟进或带看记录的客户单独标注。要看某一位的分数来历用 intent_score。",
+            "parameters": {
         "type": "object",
         "properties": {
-            "tier": {"type": "string", "enum": ["S", "A", "B", "C"]},
+            "tier": {"type": "string", "enum": ["S", "A", "B", "C"],
+                     "description": "只看某个等级（S/A/B/C，可不传）"},
             "limit": {"type": "integer", "description": "返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
         },
     }},
