@@ -20,7 +20,7 @@ class TestMarketBrief:
         assert r["success"] is True
         assert r["stats"]["new_listings"] == 2
         assert "自家盘况" in r["message"]
-        assert "网络检索" in r["message"]  # 声明来源
+        assert "联网检索" in r["message"]  # 声明来源（2026-09-26 改：标注来源与检索日期）
 
     def test_no_city_skips_web(self, db, monkeypatch):
         monkeypatch.setattr("tools.real_estate_analytics._get_db", lambda: db)

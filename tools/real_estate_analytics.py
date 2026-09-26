@@ -3,7 +3,7 @@ Coco 房产工具 - 数据分析
 业绩看板、渠道统计、市场简报
 """
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from agent.real_estate_period import norm_period, period_window
 from tools.registry import registry
@@ -193,64 +193,94 @@ registry.register(
 
 
 def market_brief(city: str = None, district: str = None, task_id: str = None) -> str:
-    """市场行情简报：自家真实盘况 + 联网行情（标注来源）+ 行动建议"""
+    """市场行情简报（**内部用**）：自家真实盘况 + 联网行情（标注来源与检索日期）+ 行动建议
+
+    2026-09-26 改（F353–F358）：
+    ① **联网那条从来没成功过** —— 原先 `from hermes_tools import web_search` 是 execute_code 沙箱里才有的模块，
+       工具进程里必然 ModuleNotFoundError，每次都回「联网检索暂不可用（No module named 'hermes_tools'）」
+       还把那句英文报错念给经纪人 → 改用 `tools.web_tools.web_search_tool`（真检索；失败只说
+       "这次没查到、稍后再试"，**不编内容、不露内部报错**）；来源标注补上检索日期与检索词；
+    ② 「本周」全篇没写日期区间 → 按共用的周期口径写明（`近 7 天：09-19 ~ 09-26`）；
+    ③ 描述写着"可直接转发朋友圈/客户群"，正文却是内部盘况与建议 → 描述改"内部用"，正文注明；
+    ④ 空库照样给「在售房源偏少：联系房东补盘」→ 空库与"本期为空"分开说；
+    ⑤ 带看转化率的分母口径写明（现在是"近 7 天带看次数"，含预约与已取消）。
+    """
     db = _get_db()
-    from datetime import datetime, timedelta
-    week_ago = datetime.now() - timedelta(days=7)
+    start, range_text, span_label = period_window('week')
+    today = datetime.now().strftime('%m-%d')
 
     # ① 自家盘况（真实统计）
     _brief_warning = None
+    no_library = False
     try:
         with db.get_session() as s:
-            from agent.real_estate_db import Property, Viewing, Deal
-            new_props = s.query(Property).filter(Property.created_at >= week_ago).count()
+            from agent.real_estate_db import Customer, Property, Viewing, Deal
+            new_props = s.query(Property).filter(Property.created_at >= start).count()
             avail = s.query(Property).filter(Property.status == 'available').count()
-            viewings_week = s.query(Viewing).filter(Viewing.viewing_time >= week_ago).count()
-            deals_week = s.query(Deal).filter(Deal.created_at >= week_ago).count()
+            viewings_week = s.query(Viewing).filter(Viewing.viewing_time >= start).count()
+            deals_week = s.query(Deal).filter(Deal.created_at >= start).count()
+            no_library = not s.query(Property).count() and not s.query(Customer).count()
     except Exception as exc:
         # 同上：失败要标出来，不能假装是 0
         new_props = avail = viewings_week = deals_week = None
         _brief_warning = f"自家盘况统计失败（{type(exc).__name__}: {exc}），下面的数字不可信"
 
-    conversion = f"{deals_week / viewings_week * 100:.0f}%" if viewings_week else "暂无数据"
-    _d = lambda v: "统计失败" if v is None else v      # 失败时显示“统计失败”，不显示 None 也不假装 0
+    own_section = [f"一、自家盘况（系统数据，{span_label}：{range_text}）"]
+    if _brief_warning:
+        own_section += [f"· 本周新增房源: 统计失败 套", f"· 当前在售: 统计失败 套",
+                        "· 本周带看: 统计失败 次", "· 本周成交: 统计失败 单"]
+    elif no_library:
+        # 空库不能给"在售偏少、联系房东补盘"这种建议（会让人以为盘子里有房）
+        own_section.append("· 库里还没有客户和房源，先登记房源再看盘况")
+    else:
+        conversion = f"{deals_week / viewings_week * 100:.0f}%" if viewings_week else "暂无数据"
+        own_section += [
+            f"· 本周新增房源: {new_props} 套",
+            f"· 当前在售: {avail} 套",
+            f"· 本周带看: {viewings_week} 次",
+            f"· 本周成交: {deals_week} 单（带看转化率 {conversion}，"
+            f"按本周新开成交单 ÷ 本周带看次数算）",
+        ]
+        if not any((new_props, viewings_week, deals_week)):
+            own_section.append(f"· {span_label}没有新增房源、带看与成交（库里现有数据都在更早）")
 
-    own_section = [
-        "一、自家盘况（系统数据）",
-        f"· 本周新增房源: {_d(new_props)} 套",
-        f"· 当前在售: {_d(avail)} 套",
-        f"· 本周带看: {_d(viewings_week)} 次",
-        f"· 本周成交: {_d(deals_week)} 单（带看转化率 {conversion}）",
-    ]
-
-    # ② 联网行情（标注来源；失败不阻塞）
-    news_section = ["\n二、市场动态（来源: 网络检索，仅供参考）"]
-    news_items = []
-    if city:
+    # ② 联网行情（标注来源与检索日期；失败不阻塞，也不编内容）
+    query = f"{city} 楼市 最新政策 房价" + (f" {district}" if district else "") if city else ""
+    news_section = []
+    if not city:
+        news_section = ["二、市场动态（来源：联网检索）",
+                        "· 未指定城市，这次跳过联网行情（告诉我城市名就能查）"]
+    else:
+        news_items = []
         try:
-            from hermes_tools import web_search
-            query = f"{city} 楼市 最新政策 房价" + (f" {district}" if district else "")
-            res = web_search(query, limit=5)
-            items = (res.get("data") or {}).get("web") or []
+            from tools.web_tools import web_search_tool
+            res = json.loads(web_search_tool(query, limit=5))
+            items = ((res.get("data") or {}).get("web") or []) if res.get("success") else []
             for it in items[:3]:
                 title = (it.get("title") or "").strip()
                 if title:
                     news_items.append(f"· {title}")
-                    news_items.append(f"  {it.get('url', '')}")
-        except Exception as e:
-            news_items.append(f"· 联网检索暂不可用（{str(e)[:50]}），建议稍后重试")
-    else:
-        news_items.append("· 未指定城市，这次跳过联网行情（告诉我城市名就能查）")
-    news_section.extend(news_items or ["· 无结果"])
+                    if it.get("url"):
+                        news_items.append(f"  {it['url']}")
+        except Exception:
+            news_items = []
+        if news_items:
+            news_section = [f"二、市场动态（来源：联网检索，检索日期 {today}；检索词「{query}」）"] + news_items
+        else:
+            news_section = [f"二、市场动态（来源：联网检索，检索日期 {today}）",
+                            "· 这次没查到相关动态（检索没返回结果），稍后我可以再试一次"]
 
-    # ③ 行动建议（基于自家数据生成）
-    advice = ["\n三、本周行动建议"]
+    # ③ 行动建议（基于自家数据生成；这段是内部参考，别直接转发）
+    advice = ["三、本周行动建议（内部参考，别直接转发给客户）"]
     if _brief_warning:
         advice.append("· 自家盘况统计这次没取到，本周建议先按人工判断（我稍后再试一次）")
-    elif deals_week == 0 and viewings_week > 0:
-        advice.append("· 有带看无成交：回访本周带看客户，优先推进最接近成交的")
-    if avail is not None and avail < 10:
-        advice.append("· 在售房源偏少：联系房东补盘，优先谈委托快到期的房东续期")
+    elif no_library:
+        advice.append("· 库里还没有房源，先登记房源（有房才有得卖）")
+    else:
+        if deals_week == 0 and viewings_week > 0:
+            advice.append("· 有带看无成交：回访本周带看客户，优先推进最接近成交的")
+        if avail is not None and avail < 10:
+            advice.append("· 在售房源偏少：联系房东补盘，优先谈委托快到期的房东续期")
     high = db.churn_risk_customers(min_risk=60)
     if high:
         advice.append(f"· {len(high)} 位客户流失风险高危，建议优先挽回（要我拉名单就说一声）")
@@ -261,6 +291,7 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
     out = {
         "success": True,
         "city": city, "district": district,
+        "统计区间": f"{span_label}（{range_text}）",
         "stats": {"new_listings": new_props, "available": avail,
                   "viewings": viewings_week, "deals": deals_week},
         "message": report,
@@ -273,12 +304,14 @@ def market_brief(city: str = None, district: str = None, task_id: str = None) ->
 registry.register(
     name="market_brief",
     toolset="real_estate",
-    schema={"name": "market_brief", "description": "市场行情简报：自家盘况+联网行情（标注来源）+本周行动建议，可直接转发朋友圈/客户群", "parameters": {
-        "type": "object",
-        "properties": {
-            "city": {"type": "string", "description": "城市（启用联网行情检索）"},
-            "district": {"type": "string", "description": "区域（可选）"},
-        },
-    }},
+    schema={"name": "market_brief",
+            "description": "市场行情简报（内部用）：自家盘况（近 7 天新增/在售/带看/成交）+ 联网行情（标注来源与检索日期，查不到就如实说）+ 本周行动建议。正文含门店经营信息，别直接转发给客户",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "城市名（如 海口），填了才会联网检索当地楼市动态"},
+                    "district": {"type": "string", "description": "区域（可选，填了会一起带去检索）"},
+                },
+            }},
     handler=lambda args, **kw: market_brief(**args),
 )
