@@ -624,10 +624,12 @@ def tax_breakdown_report(
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     if price_yuan <= 0:
-        return json.dumps({"success": False, "error": "房价和面积需>0"}, ensure_ascii=False)
+        return json.dumps({"success": False, "error": (
+            f"房价要大于 0：收到的是「{price}」")}, ensure_ascii=False)
     area_value, problem = _norm_area_arg(area)
     if problem:
-        return json.dumps({"success": False, "error": "房价和面积需>0"}, ensure_ascii=False)
+        # 分字段说（原先房价 0 与面积 0 都回「房价和面积需>0」，看不出是哪一个）
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     area = area_value
     hold_years_value, problem = _norm_years_value(hold_years)
     if problem:
@@ -649,9 +651,21 @@ def tax_breakdown_report(
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     property_class = 'ordinary' if pclass is None else pclass
 
+    # 卖方原购入价：归一 + 坏值同一句提示（与税calculator 一致；原先 0/负数会被静默按"没给"算，
+    # 负数还会把差额算得更大）
+    original_value = None
+    if original_price is not None and str(original_price).strip() != '':
+        original_value, problem = _norm_money_arg(original_price, '卖方原购入价')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+        if original_value <= 0:
+            return json.dumps({"success": False, "error": (
+                f"卖方原购入价要大于 0：收到的是「{original_price}」"
+                f"（不给就按现价估算，清单里会说明）")}, ensure_ascii=False)
+
     # 口径与 tax_calculator 共用一处（`_tax_assessment`）——两个出口不能再出现两个数
     rules = _tax_assessment(price_yuan, area, hold_years, is_first_home, is_only_home,
-                            property_class, original_price=original_price)
+                            property_class, original_price=original_value)
     ordinary, full_two, full_five_only = rules["ordinary"], rules["full_two"], rules["full_five_only"]
     deed, vat, personal_tax = rules["deed"], rules["vat"], rules["personal"]
 
@@ -661,7 +675,7 @@ def tax_breakdown_report(
     items.append({
         "税目": "契税", "承担": "买方",
         "金额": f"{deed/10000:.2f}万元 ({rules['deed_rate']*100:.1f}%)",
-        "依据": f"{'首套' if is_first_home else '二套'}+{area}㎡ → 税率{rules['deed_rate']*100:.1f}%",
+        "依据": f"{'首套' if is_first_home else '二套'}+{area:g}㎡ → 税率{rules['deed_rate']*100:.1f}%",
     })
 
     # 2. 增值税（卖方，常转嫁买方）
@@ -680,11 +694,14 @@ def tax_breakdown_report(
 
     total = deed + vat + personal_tax
     lines = ["📋 税费明细单（客户版）", "=" * 32,
-             f"成交价: {price_yuan/10000:.0f}万元 | {area}㎡ | {city or ''}{'（普宅）' if ordinary else '（非普宅）'}",
+             f"成交价: {price_yuan/10000:.2f}万元 | {area:g}㎡ | "
+             f"{city or ''}{'（普宅）' if ordinary else '（非普宅）'}",
              f"房本: 满{hold_years:.0f}年{'且唯一' if is_only_home else '非唯一'} | 买方{'首套' if is_first_home else '二套'}",
              "-" * 32]
     for it in items:
-        lines.append(f"{it['税目']}（{it['承担']}）: {it['金额']}")
+        # 承担那一栏原来是「卖方(常转嫁)」—— 嵌在中文括号里读着别扭，渲染时换成中文逗号
+        bearer = str(it['承担']).replace('(', '，').replace(')', '')
+        lines.append(f"{it['税目']}（{bearer}）: {it['金额']}")
         lines.append(f"  └ {it['依据']}")
     lines.append("-" * 32)
     lines.append(f"税费合计: {total/10000:.2f}万元（实际以税务局核定为准）")
@@ -818,7 +835,10 @@ TOOLS = [
     },
     {
         "name": "tax_breakdown_report",
-        "description": "税费明细单（客户版）- 满二/满五唯一/首套二套/普宅非普宅联动判定，生成可直接转发客户的税费清单",
+        "description": (
+            "税费明细单（客户版）：按成交价、面积、买卖双方情况（首套/唯一）、房本年限、普通/非普通住宅，"
+            "逐项算出契税、增值税及附加、个人所得税并给出政策依据，生成可直接转发客户的清单；"
+            "只要一个总额、不向客户展示明细时用税费计算器。"),
         "parameters": {
             "type": "object",
             "properties": {
