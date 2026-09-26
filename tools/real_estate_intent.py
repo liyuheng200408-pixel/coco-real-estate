@@ -3,8 +3,9 @@ Coco 房产工具 - 竞品对比与客户意向度
 """
 import json
 from tools.registry import registry
+from tools.real_estate_property import _property_display
 from agent.real_estate_input import clamp_limit, norm_id, norm_tier
-from agent.real_estate_money import fmt_budget
+from agent.real_estate_money import fmt_budget, fmt_wan
 
 
 # 条数口径：对比默认 5/上限 20（一次列太多没意义）；列表默认 20/上限 200（与其它列表同一套）
@@ -12,6 +13,9 @@ _COMPARE_LIMIT_DEFAULT = 5
 _COMPARE_LIMIT_MAX = 20
 _LIST_LIMIT_DEFAULT = 20
 _LIST_LIMIT_MAX = 200
+
+# 竞品来源标签：同小区不足时补同区域，两个来源必须能分辨（原先混在一张表里无标注）
+_COMPARE_SCOPE_LABELS = {'same_community': '同小区', 'same_district': '同区域'}
 
 # 意向度权重（**唯一实现**：两处计分都调 `_score_intent`，别在别处再写一份）
 _TIER_BASE = {'S': 40, 'A': 25, 'B': 15, 'C': 5}
@@ -102,8 +106,30 @@ def _intent_message(intent):
     return message
 
 
+def _compare_message(target, competitors, total, avg_label, avg_scope, sample):
+    """给经纪人看的那句话：附近几套可比、这套多少钱、竞品什么价、这类房的行情是多少。"""
+    what = target.get('property_type_label')
+    where = target.get('community') or target.get('district') or '同区域'
+    price_bits = [f"这套 {target.get('price_label')} / {target.get('area_label')}㎡"]
+    if target.get('unit_price_label'):
+        price_bits.append(target['unit_price_label'])
+    if not competitors:
+        parts = [f"{where}附近没有在售的{what}可比", " / ".join(price_bits)]
+    else:
+        n_comm = sum(1 for c in competitors if c.get('scope') == 'same_community')
+        n_dist = len(competitors) - n_comm
+        scope_desc = "、".join(x for x in (f"同小区 {n_comm} 套" if n_comm else "",
+                                           f"同区域其它小区 {n_dist} 套" if n_dist else "") if x)
+        listed = "、".join(str(c.get('price_label')) for c in competitors[:3])
+        parts = [f"{where}附近在售{what}共 {total} 套", " / ".join(price_bits),
+                 f"这里列了 {len(competitors)} 套（{scope_desc}）：{listed}"]
+    if avg_label:
+        parts.append(f"{avg_scope} {avg_label}（{sample} 套样本）")
+    return "；".join(parts) + "。"
+
+
 def compare_property(property_id: int, limit: int = 5, task_id: str = None) -> str:
-    """同小区/同区域竞品对比：显示指定房源与周边在售房源的价格、面积、单价对比"""
+    """同小区/同区域竞品对比（只比同类型：卖比卖、租比租）"""
     property_id, problem = norm_id(property_id, '房源编号')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
@@ -112,7 +138,43 @@ def compare_property(property_id: int, limit: int = 5, task_id: str = None) -> s
     result = db.compare_properties(property_id, limit)
     if result is None:
         return json.dumps({"success": False, "error": "房源不存在"}, ensure_ascii=False)
-    return json.dumps({"success": True, "comparison": result}, ensure_ascii=False)
+
+    target = _property_display(result.get('target'))
+    competitors = [dict(_property_display(c), scope=c.get('scope'),
+                        scope_label=_COMPARE_SCOPE_LABELS.get(c.get('scope'), c.get('scope')))
+                   for c in (result.get('competitors') or [])]
+    total = result.get('competitor_total') or 0
+    is_rental = target.get('property_type') == 'rental'
+    avg = result.get('district_avg_price')
+    sample = result.get('avg_sample') or 0
+    # 均价口径必须自己说清楚：是"哪个区域 + 哪种类型"的均价；房源没填区域时如实说这是全库口径
+    if result.get('avg_is_global'):
+        avg_scope = f"全库在售{target.get('property_type_label')}均价（这套房源没填区域）"
+    else:
+        avg_scope = f"{result.get('avg_district')}在售{target.get('property_type_label')}均价"
+    avg_label = None if avg is None else (f"{float(avg):.0f}元/月" if is_rental else fmt_wan(avg))
+    # 均价不含这套自己（比的是"邻居什么价"），口径写进 scope 里，免得被当成"含自己在内的均价"
+    avg_scope = f"{avg_scope}（不含这套）" if avg_label else avg_scope
+
+    warnings = []
+    if target.get('status') != 'available':
+        warnings.append(f"这套房源现在是「{target.get('status_label')}」，竞品取的是在售房源，只能当参考")
+    if not target.get('community') and not target.get('district'):
+        warnings.append("这套房源没填小区也没填区域，找不到同小区/同区域的竞品，先补上区域再对比")
+    elif not target.get('community'):
+        warnings.append("这套房源没填小区，只能按同区域找竞品")
+
+    comparison = {
+        'target': target, 'competitors': competitors,
+        'count': len(competitors), 'total': total, 'truncated': total > len(competitors),
+        'district_avg_price': avg, 'avg_label': avg_label, 'avg_scope': avg_scope,
+        'avg_sample': sample, 'target_unit_price': result.get('target_unit_price'),
+    }
+    out = {"success": True, "comparison": comparison,
+           "message": _compare_message(target, competitors, total, avg_label, avg_scope, sample)}
+    if warnings:
+        out['warnings'] = warnings
+    return json.dumps(out, ensure_ascii=False)
 
 
 def intent_score(customer_id: int, task_id: str = None) -> str:
@@ -182,10 +244,15 @@ def list_intent_scores(tier: str = None, limit: int = _LIST_LIMIT_DEFAULT, task_
 registry.register(
     name="compare_property",
     toolset="real_estate",
-    schema={"name": "compare_property", "description": "同小区/同区域竞品对比", "parameters": {
+    schema={"name": "compare_property", "description":
+            "竞品对比：把一套房源与同小区、同区域的在售房源比价格、面积、单价"
+            "（卖房比卖房、租房比租房，只比同类型）。返回目标房源、竞品明细（标明是同一个小区"
+            "还是同区域）、该区域同类型在售均价与样本套数；目标房源已售或已租时会提醒。"
+            "默认列 5 套、最多 20 套，被截断会说明。", "parameters": {
         "type": "object",
         "properties": {
-            "property_id": {"type": "integer", "description": "房源ID"},
+            "property_id": {"type": "integer",
+                            "description": "房源编号（数字，如 12；可在房源列表里查）"},
             "limit": {"type": "integer", "description": "对比条数（默认 5，最多 20；传 0/负数/非数字按默认 5）"},
         },
         "required": ["property_id"],

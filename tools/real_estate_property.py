@@ -548,6 +548,28 @@ def _prop_brief(prop: dict) -> dict:
     }
 
 
+def _property_display(prop: dict) -> dict:
+    """房源在"对比/列表"里怎么念（**只补不替换**：原值一律保留给机器读）
+
+    - 价格：「150万」/「2500元/月」（走共用 `fmt_price`，出租不再是"0万"）
+    - 面积：整数不带 `.0`（`90㎡`）；单价补单位（出租 `元/㎡/月`、其它 `元/㎡`）
+    - 状态/类型：补中文（原值保留，认不出回落原样）
+    """
+    item = dict(prop or {})
+    item["price_label"] = fmt_price(item)
+    item["area_label"] = _fmt_area(item.get("area"))
+    unit = item.get("unit_price")
+    if unit:
+        suffix = "元/㎡/月" if item.get("property_type") == "rental" else "元/㎡"
+        item["unit_price_label"] = f"{fmt_unit_price(unit)}{suffix}"
+    else:
+        item["unit_price_label"] = None
+    item["status_label"] = _STATUS_LABELS.get(item.get("status"), item.get("status") or "未录入")
+    item["property_type_label"] = _TYPE_LABELS.get(item.get("property_type"),
+                                                   item.get("property_type") or "未录入")
+    return item
+
+
 def _detail_message(prop: dict, owner, image_count: int, history: list) -> str:
     """房源详情的人类可读摘要（模型照抄即可，避免它自己拼表时漏字段）"""
     lines = [f"【房源】{prop.get('title')}（编号 {prop.get('id')}）"]

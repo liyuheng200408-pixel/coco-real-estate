@@ -3507,38 +3507,64 @@ class RealEstateDB:
 
     # ---------- 竞品对比 ----------
     def compare_properties(self, property_id, limit=5):
-        """同小区/同区域竞品对比：返回指定房源及周边在售房源对比"""
+        """同小区/同区域竞品对比（**只比同类型**：卖房比卖房、租房比租房）。
+
+        返回（房源不存在给 None）：
+        - `target`：目标房源（原样，展示口径由 `_property_display` 补）
+        - `competitors`：竞品明细，每条带 `scope`（`same_community`/`same_district`）
+          —— 同小区优先，同小区不足 3 套时补同区域，两个来源必须能分辨；
+        - `competitor_total`：符合条件的竞品**总数**（与本次列出条数分开，供上层说"列了 N 套、共 M 套"）
+        - `district_avg_price` / `avg_sample` / `avg_district` / `avg_property_type` /
+          `avg_is_global`：均价口径（同区域 + 同类型；房源没填区域时按全库同类型，`avg_is_global=True`）
+
+        2026-09-26 改（探针 t64a 实测）：① 原先均价是**全库在售均价**（含别的区域、含出租房），
+        却叫 `district_avg_price` —— 朝阳区与海淀区两套房源拿到同一个数；② 原先竞品里
+        出售房与出租房混在一张表（160 万与 2500 元/月并排）；③ 原先没有总数，被截断也不说。
+        """
+        from sqlalchemy import func
         with self.get_session() as s:
             target = s.query(Property).get(property_id)
             if not target:
                 return None
             target_dict = target.to_dict()
-            q = s.query(Property).filter(Property.status == 'available')
-            if target.community:
-                q = q.filter(Property.community == target.community, Property.id != property_id)
-                same_community = [p.to_dict() for p in q.limit(limit).all()]
-            else:
-                same_community = []
-            # 若同小区不足，补同区域
-            if len(same_community) < 3 and target.district:
-                q2 = s.query(Property).filter(
-                    Property.status == 'available',
-                    Property.district == target.district,
-                    Property.id != property_id,
-                )
-                existing_ids = {p['id'] for p in same_community}
-                for p in q2.limit(limit).all():
-                    if p.id not in existing_ids:
-                        same_community.append(p.to_dict())
-                        existing_ids.add(p.id)
-            # 计算均价
-            all_available = [p.to_dict() for p in s.query(Property).filter(Property.status == 'available').all()]
-            prices = [p['price'] for p in all_available if p.get('price')]
-            avg_price = round(sum(prices) / len(prices)) if prices else None
+            base = s.query(Property).filter(Property.status == 'available',
+                                            Property.property_type == target.property_type,
+                                            Property.id != property_id)
+            # 同小区竞品（按价格从低到高，便于"贵在哪"一眼看清；同价按编号）
+            comm_q = base.filter(Property.community == target.community) if target.community else None
+            competitors = []
+            if comm_q is not None:
+                competitors = [dict(p.to_dict(), scope='same_community')
+                               for p in comm_q.order_by(Property.price, Property.id).limit(limit).all()]
+            dist_q = base.filter(Property.district == target.district) if target.district else None
+            if len(competitors) < 3 and dist_q is not None:
+                seen = {p['id'] for p in competitors}
+                for p in dist_q.order_by(Property.price, Property.id).limit(limit).all():
+                    if p.id not in seen:
+                        competitors.append(dict(p.to_dict(), scope='same_district'))
+                        seen.add(p.id)
+            competitors = competitors[:limit]
+
+            # 竞品总数 = 同小区 ∪ 同区域（两层各自计数后扣掉交集，别把两批拼起来数长度）
+            n_comm = comm_q.count() if comm_q is not None else 0
+            n_dist = dist_q.count() if dist_q is not None else 0
+            n_both = (comm_q.filter(Property.district == target.district).count()
+                      if (comm_q is not None and target.district) else 0)
+            competitor_total = n_comm + n_dist - n_both
+
+            # 均价：同区域 + 同类型（没填区域 → 全库同类型，上层必须如实说明这是全库口径）
+            avg_q = base.filter(Property.district == target.district) if target.district else base
+            avg_sample = avg_q.count()
+            avg_price = avg_q.with_entities(func.avg(Property.price)).scalar()
             return {
                 'target': target_dict,
-                'competitors': same_community[:limit],
-                'district_avg_price': avg_price,
+                'competitors': competitors,
+                'competitor_total': competitor_total,
+                'district_avg_price': round(float(avg_price)) if avg_price is not None else None,
+                'avg_sample': avg_sample,
+                'avg_district': target.district,
+                'avg_property_type': target.property_type,
+                'avg_is_global': target.district is None,
                 'target_unit_price': target_dict.get('unit_price'),
             }
 
