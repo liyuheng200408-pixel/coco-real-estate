@@ -298,6 +298,14 @@ CONTENT_CHECKS = [
         "这道闸没了 = 有人一条命令就能把滞留内容全推上正式版。",
     ),
     (
+        "B09",
+        "重复房源时的新照片提示",
+        "agent/real_estate_prompt.py",
+        [r"note_image_archive"],
+        "命中重复房源时，新带来的照片会先归档但**不入库** → 必须让 Coco 如实说明，\n"
+        "否则经纪人以为照片已经录进去了（要加图他会说“加图”）。",
+    ),
+    (
         "17",
         "用户可见命令文案（设置向导收尾屏）",
         "hermes_cli/setup_summary.py",
@@ -466,6 +474,7 @@ PATH_CHECKS = [
     ("A26", "PATH 兜底脚本", "scripts/path_guard.sh", "file", 1, "PATH 兜底脚本丢失（coco 入口装到 ~/.local/bin 时用户会敲不到命令）"),
     ("A27", "定时任务脚本", "scripts/coco_cron_*.py", "glob", 5, "定时任务脚本丢失（逾期哨兵/机会提醒/早报/收工小结/周报的数据收集都在这里）"),
     ("A28", "照片归档共用件", "agent/real_estate_media.py", "file", 1, "照片归档共用件丢失（房源照片会留在会被 24 小时清理的缓存目录里，一天后消失）"),
+    ("A29", "照片存量修复脚本", "scripts/recover_property_images.py", "file", 1, "照片存量修复脚本丢失（历史房源里已丢的照片没法从备份捞回）"),
                     ]
 
 

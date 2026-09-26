@@ -72,6 +72,13 @@ def add_property(
         normalized['property_type'] = f"类型「{property_type}」不认识，已按二手房记（要改就说一声）"
         property_type = "second_hand"
     price, area = price_value, area_value
+    # 合并 images 和 image_paths，并**先归档**：网关缓存目录里的文件 24 小时后会被自动清理
+    # （见 agent/real_estate_media.py），所以照片要在进库前就搬进不会被清理的目录。
+    img_list = []
+    for src in (images, image_paths):
+        if src:
+            img_list.extend([x.strip() for x in src.split(',') if x.strip()])
+    merged_images, image_archive = archive_images(','.join(img_list) if img_list else None)
     # 录入前查重（2026-08-29 老板要求：跟客户一致，重复就不录入；2026-09-21 改按身份要素判定）
     suspected = None
     if not force:
@@ -83,21 +90,22 @@ def add_property(
                         "year_built": year_built, "has_elevator": has_elevator, "parking": parking,
                         "property_type": property_type, "tags": tags,
                         "tenant_requirements": tenant_requirements}
-            return json.dumps({
+            payload = {
                 "success": False, "duplicate": True, "existing_property": dup,
                 "merge_preview": _merge_preview(dup, incoming),
                 "options": _MERGE_OPTIONS,
                 "error": (f"该房源已存在（id={dup['id']} {dup['title']}，{dup.get('price')}元 {dup.get('area')}平），"
                           f"本次未重复录入。请经纪人选：① 合并更新（用新值覆盖）"
                           f"② 只补空缺（保留已有值，只补没填的）③ 这其实是另一套（另建一条）。"),
-            }, ensure_ascii=False)
-    # 合并 images 和 image_paths
-    img_list = []
-    for src in (images, image_paths):
-        if src:
-            img_list.extend([x.strip() for x in src.split(',') if x.strip()])
-    # 照片先归档再入库：网关缓存目录里的文件 24 小时后会被自动清理（见 agent/real_estate_media.py）
-    merged_images, image_archive = archive_images(','.join(img_list) if img_list else None)
+            }
+            # 这次带来的新照片：已经归档留住了（不入库也不会 24 小时后消失），但**没有**记到房源上 ——
+            # 必须如实说明，否则经纪人以为照片已经录进去了
+            if image_archive["archived"]:
+                payload["image_archive"] = image_archive
+                payload["note_image_archive"] = (
+                    "这次带来的新照片已先存进长期目录（不会被自动清理），"
+                    "但**没有**记到这套房源上：要加就说「加图」。")
+            return json.dumps(payload, ensure_ascii=False)
     inferred = {}
     if floor is None:
         guess, why = infer_floor(title, address)

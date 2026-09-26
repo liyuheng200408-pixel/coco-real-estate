@@ -68,6 +68,34 @@ def _archived_name(source: Path) -> tuple[str, str]:
     return f"{source.stem}_{fingerprint}{ext}", fingerprint
 
 
+def archive_one(path: str, *, copy: bool = True) -> "tuple[str, str]":
+    """单张图片 → `(要存进库的路径, 状态)`。状态 ∈ copied / to-copy / already / url / missing / failed:原因
+
+    这是唯一的归档实现：`archive_images()`（录入入口用）与存量修复脚本都走它，口径不会漂。
+    `copy=False` 时**不落盘**，只算出「要复制到哪个文件名」（演练用，保证演练没有副作用）。
+    """
+    if not path:
+        return path, "missing"
+    if _is_url(path):
+        return path, "url"
+    if is_archived(path):
+        return path, "already"
+    source = Path(path).expanduser()
+    if not source.is_file():
+        return path, "missing"
+    try:
+        name, _ = _archived_name(source)
+        target = images_archive_dir() / name
+        if target.exists():
+            return str(target), "already"
+        if not copy:
+            return str(target), "to-copy"
+        shutil.copy2(source, target)
+        return str(target), "copied"
+    except Exception as exc:  # noqa: BLE001 —— 归档失败不拦录入，保留原路径（由调用方如实说明）
+        return path, f"failed:{exc}"
+
+
 def archive_images(value):
     """把「一串图片」（逗号串或数组，已是归一化后的逗号串也认）里的本机文件复制进归档目录。
 
@@ -87,25 +115,14 @@ def archive_images(value):
 
     out = []
     for item in [x.strip() for x in text.split(",") if x.strip()]:
-        if _is_url(item) or is_archived(item):
-            out.append(item)
+        stored, status = archive_one(item)
+        out.append(stored)
+        if status == "copied":
+            detail["archived"] += 1
+        elif status in ("already", "url"):
             detail["already"] += 1
-            continue
-        source = Path(item).expanduser()
-        if not source.is_file():
-            out.append(item)
+        elif status == "missing":
             detail["missing"].append(item)
-            continue
-        try:
-            name, _ = _archived_name(source)
-            target = images_archive_dir() / name
-            if not target.exists():
-                shutil.copy2(source, target)
-                detail["archived"] += 1
-            else:
-                detail["already"] += 1
-            out.append(str(target))
-        except Exception as exc:  # noqa: BLE001 —— 归档失败不拦录入，保留原路径（由调用方如实说明）
-            out.append(item)
-            detail["failed"].append((item, str(exc)))
+        else:
+            detail["failed"].append((item, status.split(":", 1)[-1]))
     return ",".join(out) if out else None, detail

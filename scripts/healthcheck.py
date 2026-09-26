@@ -490,7 +490,8 @@ except Exception as ex:
             ok(f"房源照片 {total} 张全部可读")
         else:
             warn(f"{missing} / {total} 张房源照片在本机找不到（这类房出海报会取不到照片，退成不带照片的版式）",
-                 "让经纪人把照片重发一次即可补上；历史照片可从备份包恢复（见 docs/BACKUP_MIGRATION.md）")
+                 "让经纪人把照片重发一次即可补上；历史照片可从备份捞回："
+                 "python3 scripts/recover_property_images.py（先演练，确认后加 --apply）")
         # 归档目录只增不减（照片不做自动清理），给个体积数字，超阈值提示人工处理
         if "ARCH files=" in out16:
             arch = out16.split("ARCH files=")[1].split("\n")[0]
