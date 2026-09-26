@@ -5,7 +5,8 @@ import json
 from datetime import datetime
 from tools.registry import registry
 from agent.real_estate_input import (STAGE_LABELS as CUSTOMER_STAGE_LABELS, clamp_limit,
-                                     clean_text, norm_date, norm_id, norm_money)
+                                     clean_text, money_limit_problem, norm_date, norm_id,
+                                     norm_money)
 from agent.real_estate_money import fmt_wan
 from tools.real_estate_followup import norm_followup_time, split_time_part
 from tools.real_estate_property import _STATUS_LABELS
@@ -176,6 +177,10 @@ def start_deal(customer_id: int, property_id: int, price: int = None, deposit_am
     if deposit_value is not None and deposit_value <= 0:
         return json.dumps({"success": False, "error": (
             f"定金要大于 0：收到的是「{deposit_amount}」")}, ensure_ascii=False)
+    for _value, _label in ((price_value, '成交价'), (deposit_value, '定金')):
+        _problem = money_limit_problem(_value, _label)
+        if _problem:
+            return json.dumps({"success": False, "error": _problem}, ensure_ascii=False)
     if price_value is not None and deposit_value is not None and deposit_value > price_value:
         return json.dumps({"success": False, "error": (
             f"定金 {fmt_wan(deposit_value)} 比成交价 {fmt_wan(price_value)} 还高，"

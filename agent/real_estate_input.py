@@ -68,6 +68,27 @@ def norm_money(value):
     return int(round(num * multiplier))
 
 
+# ==================== 数据库金额上限 ====================
+
+# 生产库（PostgreSQL）里金额列是 INTEGER（int4），能记的最大值是 2147483647（约 21.4 亿）——
+# 超过它写库会**直接报错**（本地 SQLite 会静默存下，所以本地测不出来）。录入前统一挡住并给中文提示，
+# 别让经纪人看到一句"执行失败"（2026-09-26 老板拍板）。
+MONEY_DB_MAX = 2_147_483_647
+
+
+def money_limit_problem(amount, label='金额'):
+    """金额是否超过数据库能记的上限 → 中文提示 或 None（成交价/定金/客户预算共用）"""
+    if amount is None:
+        return None
+    try:
+        if float(amount) > MONEY_DB_MAX:
+            return (f"{label}超过系统能记的上限（21.4 亿），请核对："
+                    f"收到的是 {int(amount)} 元")
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
 # ==================== 手机号 ====================
 
 def norm_phone(value):

@@ -6,9 +6,9 @@ import json
 from agent.real_estate_display import attach_key_warning, mask_contacts, safe_contact
 from agent.real_estate_money import fmt_budget, fmt_wan
 from agent.real_estate_input import (STAGES, STAGE_LABELS, clamp_limit, clean_tags,
-                                     norm_birthday, norm_customer_type, norm_id, norm_money,
-                                     norm_phone, norm_stage, norm_tags, norm_tier,
-                                     stage_options_text)
+                                     money_limit_problem, norm_birthday, norm_customer_type,
+                                     norm_id, norm_money, norm_phone, norm_stage, norm_tags,
+                                     norm_tier, stage_options_text)
 from tools.registry import registry
 
 # "够不着"的硬冲突理由：匹配结果全是这些时，不能说"有 N 套可能符合需求"
@@ -155,6 +155,9 @@ def add_customer(
             return _fail(f"{label}没能识别：收到的是「{raw}」。请按元给数字（300万 记作 3000000）")
         if value < 0:
             return _fail(f"{label}不能是负数：收到的是「{raw}」")
+        problem = money_limit_problem(value, label)
+        if problem:
+            return _fail(problem)
         if field_name == 'budget_min':
             budget_min = value
         else:
@@ -294,6 +297,9 @@ def update_customer(
             return _fail(f"{label}没能识别：收到的是「{raw}」。请按元给数字（300万 记作 3000000）")
         if value < 0:
             return _fail(f"{label}不能是负数：收到的是「{raw}」")
+        problem = money_limit_problem(value, label)
+        if problem:
+            return _fail(problem)
         if field_name == 'budget_min':
             budget_min = value
         else:
