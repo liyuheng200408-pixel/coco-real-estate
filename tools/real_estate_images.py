@@ -88,16 +88,33 @@ def add_property_images(property_id: int, images: str, task_id: str = None) -> s
 
 
 def list_property_images(property_id: int, task_id: str = None) -> str:
-    """查看房源图片列表"""
+    """查看房源图片列表（**已售/已租房源也能查**；没有图片时如实说明，不说成"房源不存在"）"""
     property_id, problem = norm_id(property_id, '房源编号')
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
-    p = db.get_available_property(property_id)
+    p = db.get_property(property_id)          # 已售/已租也要能查（原先只查在售 → 成交后图就查不到了）
     if p is None:
-        return json.dumps({"success": False, "error": "房源不存在或不在售"}, ensure_ascii=False)
-    images = [x.strip() for x in (p.get('images') or '').split(',') if x.strip()]
-    return json.dumps({"success": True, "property_id": property_id, "images": images, "count": len(images)}, ensure_ascii=False)
+        error, _label = unavailable_property_note(property_id, None, action="查图片")
+        return json.dumps({"success": False, "error": error}, ensure_ascii=False)
+    images = _split_images(p.get('images'))
+    count = len(images)
+    if count:
+        shown = '、'.join(images[:3]) + ('…' if count > 3 else '')
+        message = (f"这套房源有 {count} 张图片：{shown}（要发出去，用 MEDIA:<路径> 直接发图）")
+    else:
+        message = "这套房源还没有图片：要加图跟我说一声（把图片路径或链接发我就行）。"
+    payload = {
+        "success": True,
+        "property_id": property_id,
+        "images": images,
+        "count": count,
+        "message": message,
+    }
+    warnings = _status_warning(p)
+    if warnings:
+        payload["warnings"] = [w.replace("图片照样记上了", "图片照常给你") for w in warnings]
+    return json.dumps(payload, ensure_ascii=False)
 
 
 registry.register(
@@ -117,9 +134,9 @@ registry.register(
 registry.register(
     name="list_property_images",
     toolset="real_estate",
-    schema={"name": "list_property_images", "description": "查看房源图片列表", "parameters": {
+    schema={"name": "list_property_images", "description": "查看某套房源的图片列表（**已售/已租的房源也能查**）：返回图片路径与张数，并说清一共有几张；**没有图片时会如实说明**（不会说成「房源不存在」）。要把图发出去，用 MEDIA:<路径> 直接发", "parameters": {
         "type": "object",
-        "properties": {"property_id": {"type": "integer", "description": "房源ID"}},
+        "properties": {"property_id": {"type": "integer", "description": "房源编号（房源列表或详情里的编号，纯数字）"}},
         "required": ["property_id"],
     }},
     handler=lambda args, **kw: list_property_images(**args),
