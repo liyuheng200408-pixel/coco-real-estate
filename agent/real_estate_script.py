@@ -82,6 +82,21 @@ def label_of(key, kind="scenario"):
     return table.get(key) or str(key)
 
 
+def type_word(value):
+    """参数类型不对时给的大白话类型名（话术族各工具共用，别再各写一份）"""
+    if isinstance(value, str):
+        return "文字"
+    if isinstance(value, bool):
+        return "真假值"
+    if isinstance(value, (int, float)):
+        return "数字"
+    if isinstance(value, (list, tuple, set)):
+        return "一串值"
+    if isinstance(value, dict):
+        return "一份表格"
+    return "这种写法"
+
+
 def _clean(value):
     """归一待比较的写法：去首尾空白、转小写、去掉中间空格（「跟进 维护」也认）"""
     return "" if value is None else str(value).strip().lower().replace(" ", "").replace("　", "")

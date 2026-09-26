@@ -16,6 +16,7 @@ from agent.real_estate_script import (
     norm_scenario,
     norm_sub_scenario,
     options_text,
+    type_word,
 )
 
 _ALL_SCENARIOS = ["greeting", "objection_handling", "closing", "follow_up", "custom"]
@@ -125,3 +126,18 @@ def test_option_lists_cover_every_declared_key():
 def test_options_text_keeps_caller_order():
     assert options_text(["closing", "greeting"]) == "①逼定成交（closing）②开场白（greeting）"
     assert options_text(["first_contact"], "sub") == "①首次联系（first_contact）"
+
+
+# ---------- ④ 类型不对时的大白话类型名（话术族共用，别再各写一份）----------
+
+@pytest.mark.parametrize("value,expected", [
+    ("abc", "文字"), (1, "数字"), (1.5, "数字"), (True, "真假值"),
+    (["a"], "一串值"), (("a",), "一串值"), ({"a": 1}, "一份表格"),
+])
+def test_type_word_is_human_readable(value, expected):
+    assert type_word(value) == expected
+
+
+def test_options_text_accepts_a_custom_label_table():
+    """模板名清单就是这么来的（use_template），自定义表要能盖掉默认那两张"""
+    assert options_text(["custom"], labels={"custom": "自定义"}) == "①自定义（custom）"

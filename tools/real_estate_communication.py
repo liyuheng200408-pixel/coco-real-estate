@@ -5,7 +5,7 @@ Coco 房产工具 - 沟通工具
 import json
 import re
 from tools.registry import registry
-from agent.real_estate_script import label_of, norm_scenario, norm_sub_scenario, options_text
+from agent.real_estate_script import label_of, norm_scenario, norm_sub_scenario, options_text, type_word
 
 # get_script 真正认的场景（顺序即提示里给经纪人念的清单顺序）——「自定义」不在这里，
 # 那是 save_script 的事；中文说法与英文别名由共用件 agent/real_estate_script.py 归一。
@@ -167,19 +167,6 @@ _CN_DIGITS = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五":
               "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 
 
-def _type_word(value):
-    """给"类型不对"的提示用的大白话类型名"""
-    if isinstance(value, str):
-        return "文字"
-    if isinstance(value, bool):
-        return "真假值"
-    if isinstance(value, (int, float)):
-        return "数字"
-    if isinstance(value, (list, tuple, set)):
-        return "一串值"
-    return "这种写法"
-
-
 def _parse_number(text):
     """从文本里抠出数字（认千分位与夹带单位）→ float 或 None"""
     m = re.search(r"-?\d+(?:\.\d+)?", str(text).replace(",", "").replace("，", ""))
@@ -315,7 +302,7 @@ def use_template(
     if variables is not None and not isinstance(variables, dict):
         return json.dumps({"success": False, "error": (
             f"模板变量要成对给我（例如：小区=格子小区，价格=150万）。"
-            f"这次收到的是{_type_word(variables)}，我没法用。")}, ensure_ascii=False)
+            f"这次收到的是{type_word(variables)}，我没法用。")}, ensure_ascii=False)
 
     variables = variables or {}
     label = TEMPLATE_LABELS.get(key, key)
