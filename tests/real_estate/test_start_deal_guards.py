@@ -314,7 +314,53 @@ class TestReceipt:
         assert "｜成交价" not in out["message"] and "｜定金" not in out["message"], out
 
 
-# ==================== ⑧ 框架层契约（走真实 dispatch） ====================
+# ==================== ⑨ 阶段推进留痕（F214） ====================
+
+class TestStageTrail:
+    def test_deal_advance_is_recorded_in_change_history(self, wired):
+        """开单推进阶段必须走带留痕的路径（原先直接赋值 → 变更历史空白）"""
+        cid = _customer(wired)
+        pid = _property(wired)
+        wired.update_stage(cid, "negotiating")
+        before = len(wired.get_customer_changes(cid, limit=100))
+        out = _start(customer_id=cid, property_id=pid, price=1_500_000)
+        assert out["success"] is True, out
+        rows = wired.get_customer_changes(cid, limit=100)
+        assert len(rows) == before + 1, rows
+        stage_row = next(r for r in rows if r.get("field") == "stage")
+        assert stage_row.get("old_value") == "negotiating" and stage_row.get("new_value") == "dealing", stage_row
+
+    def test_change_history_tool_shows_the_move(self, wired, monkeypatch):
+        """用户视角：问「这位客户改过什么」必须看得到这次推进"""
+        import tools.real_estate_customer as m_cust
+
+        monkeypatch.setattr(m_cust, "_get_db", lambda: wired)
+        cid = _customer(wired)
+        pid = _property(wired)
+        assert _start(customer_id=cid, property_id=pid, price=1_500_000)["success"] is True
+        hist = json.loads(m_cust.customer_change_history(customer_id=cid))
+        fields = [c.get("field") for c in (hist.get("changes") or [])]
+        assert "stage" in fields, hist
+        row = next(c for c in hist["changes"] if c.get("field") == "stage")
+        assert row.get("new_display") == "成交中", row
+
+    def test_customer_already_dealing_gets_no_extra_trail(self, wired):
+        cid = _customer(wired)
+        pid = _property(wired)
+        wired.update_stage(cid, "dealing")
+        before = len(wired.get_customer_changes(cid, limit=100))
+        assert _start(customer_id=cid, property_id=pid, price=1_500_000)["success"] is True
+        assert len(wired.get_customer_changes(cid, limit=100)) == before
+
+    def test_missing_customer_message_names_the_number(self, wired):
+        """客户侧与房源侧同一句式（业主侧也一样）"""
+        pid = _property(wired)
+        out = _start(customer_id=999999, property_id=pid, price=1_500_000)
+        assert out.get("success") is not True, out
+        assert "客户不存在" in out["error"] and "999999" in out["error"], out
+
+
+# ==================== ⑩ 框架层契约（走真实 dispatch） ====================
 
 def test_dispatch_boolean_id_does_not_hit_id_one(wired, monkeypatch):
     """框架层：bool 编号要拦成中文提示，不许张冠李戴命中 id=1"""

@@ -3407,12 +3407,16 @@ class RealEstateDB:
             p = s.query(Property).get(property_id)
             if p and p.status == 'available':
                 p.status = 'rented' if p.property_type == 'rental' else 'sold'
-            # 生命周期联动：开单自动推进到 dealing（2026-08-28 功能5，防忘）
             cust = s.query(Customer).get(customer_id)
-            if cust and getattr(cust, 'stage', None) not in ('dealing', 'maintain'):
-                cust.stage = 'dealing'
+            has_customer = cust is not None
+            stage_before = getattr(cust, 'stage', None) if cust else None
             s.commit(); s.refresh(d)
-            return d.to_dict()
+            result = d.to_dict()
+        # 生命周期联动：开单自动推进到 dealing（2026-08-28 功能5，防忘）
+        # 走 update_stage 而不是直接赋值 —— 「客户变更历史」里要能看到这次推进（与带看档 3 同一套留痕）
+        if has_customer and stage_before not in ('dealing', 'maintain'):
+            self.update_stage(customer_id, 'dealing')
+        return result
 
     def find_open_deal(self, customer_id, property_id):
         """同一客户同一房源是否已有还没走到「交房完成」的成交单（用于「不重复开单」）"""

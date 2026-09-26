@@ -96,7 +96,8 @@ def start_deal(customer_id: int, property_id: int, price: int = None, deposit_am
     db = _get_db()
     customer = db.get_customer(customer_id)
     if not customer:
-        return json.dumps({"success": False, "error": "客户不存在"}, ensure_ascii=False)
+        return json.dumps({"success": False, "error": (
+            f"客户不存在：编号 {customer_id} 没找到这位客户，先在客户列表里核对一下编号")}, ensure_ascii=False)
     prop = db.get_property(property_id)
     if not prop:
         return json.dumps({"success": False, "error": (
