@@ -3731,6 +3731,18 @@ class RealEstateDB:
                         'created_at': sc.created_at.isoformat() if sc.created_at else None}
             return None
 
+    def list_scripts_by_name(self, name):
+        """按名字取**全部**同名的（编号升序）—— 存量数据可能重名，读的时候要能说清有几份
+
+        （`get_script_by_name` 只取第一条，是写入侧查重用的；读取侧的份数走这里。）
+        """
+        with self.get_session() as s:
+            rows = s.query(Script).filter(Script.name == name).order_by(Script.id.asc()).all()
+            return [{'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
+                     'content': sc.content,
+                     'created_at': sc.created_at.isoformat() if sc.created_at else None}
+                    for sc in rows]
+
     def update_script(self, sid, name=None, content=None, scenario=None):
         """改一条话术（只改给进来的字段）→ 更新后的 dict；找不到返回 None
 

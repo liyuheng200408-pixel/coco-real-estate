@@ -5,7 +5,7 @@ Coco 房产工具 - 话术库沉淀
 import json
 from tools.registry import registry
 from agent.real_estate_input import clean_text, clip_text, norm_id
-from agent.real_estate_script import label_of, norm_scenario, type_word
+from agent.real_estate_script import label_of, norm_scenario, norm_sub_scenario, type_word
 
 # 话术库认的场景（顺序即提示里给经纪人念的清单顺序）—— 与内置话术同一套档位
 SCRIPT_SCENARIOS = ["greeting", "objection_handling", "closing", "follow_up", "custom"]
@@ -90,13 +90,57 @@ def save_script(name: str, content: str, scenario: str = "custom",
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _builtin_script_hint(name):
+    """名字不在话术库里时，看它是不是**内置话术**的场景名/子场景名 → 说清两个库的分工
+
+    内置话术（get_script 那 12 条）与话术库是两个数据源（2026-09-26 老板拍板 A 方案保持这样），
+    但读取侧要能说清"你问的这个名字属于哪一半、下一步该怎么问"，不能都说"话术不存在"。
+    """
+    from tools.real_estate_communication import SCRIPTS, SCENARIO_ORDER
+
+    key, _ = norm_scenario(name, SCENARIO_ORDER)
+    if key:
+        return (f"「{name}」不在话术库里 —— 它是内置话术的场景名。"
+                f"要看内置话术，跟我说「{label_of(key)}的话术」；要看你自己存的话术，就说「列一下话术库」。")
+    for sc, subs in SCRIPTS.items():
+        sub, _ = norm_sub_scenario(name, list(subs), scenario_key=sc)
+        if sub:
+            return (f"「{name}」不在话术库里 —— 它是内置话术「{label_of(sc)}」里的子场景。"
+                    f"要看那条话术，跟我说「{label_of(sc)}的{label_of(sub, 'sub')}」。")
+    return None
+
+
 def get_script_by_name(name: str, task_id: str = None) -> str:
-    """按名称获取话术"""
+    """按名称获取话术（话术库里的；内置话术用 get_script 按场景取）"""
+    name, problem = _script_field(name, "话术名称", "一个名字（如「议价话术」）")
+    if problem:
+        return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if not name:
+        return json.dumps({"success": False, "error": "话术名称不能为空，告诉我名字我帮你取。"}, ensure_ascii=False)
+
     db = _get_db()
-    result = db.get_script_by_name(name)
-    if result:
-        return json.dumps({"success": True, "script": result}, ensure_ascii=False)
-    return json.dumps({"success": False, "error": f"话术不存在: {name}"}, ensure_ascii=False)
+    rows = db.list_scripts_by_name(name)
+    if rows:
+        result = rows[0]                       # 存量重名时给编号最小那条（与 force 覆盖的是同一条）
+        result["scenario_label"] = label_of(result["scenario"])
+        message = f"「{name}」（编号 {result['id']}，场景：{result['scenario_label']}）：{result['content']}"
+        payload = {"success": True, "script": result, "message": message}
+        if len(rows) > 1:
+            ids = "、".join(str(r["id"]) for r in rows)
+            payload["duplicate_count"] = len(rows)
+            payload["message"] = (message + f"\n话术库里有 {len(rows)} 份叫「{name}」的（编号 {ids}），"
+                                             f"这里给你编号 {result['id']} 那份；"
+                                             f"要合成一份就说「用这版覆盖{name}」。")
+        return json.dumps(payload, ensure_ascii=False)
+
+    hint = _builtin_script_hint(name)
+    if hint:
+        return json.dumps({"success": False, "error": hint}, ensure_ascii=False)
+    if not db.list_scripts(limit=1):
+        return json.dumps({"success": False, "error": (
+            "话术库里还一条话术都没存过。先存一条（跟我说「存一条话术」），再按名字取。")}, ensure_ascii=False)
+    return json.dumps({"success": False, "error": (
+        f"话术库里没有叫「{name}」的。要看库里都有什么，跟我说「列一下话术库」。")}, ensure_ascii=False)
 
 
 def list_scripts(scenario: str = None, task_id: str = None) -> str:
@@ -136,9 +180,9 @@ registry.register(
 registry.register(
     name="get_script_by_name",
     toolset="real_estate",
-    schema={"name": "get_script_by_name", "description": "按名称获取话术", "parameters": {
+    schema={"name": "get_script_by_name", "description": "按名字取一条自己存的话术（话术库里的那些）。名字前后空白会自动忽略；库里有几份同名会告诉你；这是查\"自己的话术库\"，内置那 12 条标准话术用 get_script 按场景取。", "parameters": {
         "type": "object",
-        "properties": {"name": {"type": "string", "description": "话术名称"}},
+        "properties": {"name": {"type": "string", "description": "话术名称（原样匹配，但首尾空白会忽略；不确定叫什么就先让我列一下话术库）"}},
         "required": ["name"],
     }},
     handler=lambda args, **kw: get_script_by_name(**args),
