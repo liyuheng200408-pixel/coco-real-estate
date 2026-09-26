@@ -278,6 +278,8 @@ def update_property(
     if problem:
         return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
+    # 「一串多个值」的参数先归一：模型常把 tags 当数组传（数组与逗号串都认）
+    tags = as_comma_text(tags)
     # 入参归一与校验（2026-09-24 加，与 add_property 同一套）：经纪人原话（"185万"）先换算成元/㎡，
     # 认不出的、非正面积的、非法状态/类型都挡在写库之前 —— 避免把库里已有数据改成坏值。
     if price is not None:

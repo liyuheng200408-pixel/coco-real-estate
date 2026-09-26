@@ -66,6 +66,37 @@ def _add(registry, **kw):
     return json.loads(out)
 
 
+class TestUpdatePropertyAcceptsArrays:
+    """update_property 的 tags 传数组原先崩在数据库层（type 'list' is not supported）"""
+
+    def _update(self, registry, pid, **kw):
+        args = {"property_id": pid}
+        args.update(kw)
+        out = registry.get_entry("update_property").handler(args, session_id="agent:main:feishu:dm:oc_x")
+        return json.loads(out)
+
+    def test_tags_as_array(self, tmp_path, monkeypatch):
+        registry = _registry(tmp_path, monkeypatch)
+        pid = _add(registry, title="改标签 2号楼201")["property"]["id"]
+        data = self._update(registry, pid, tags=["电梯房", "南北通透"])
+        assert data["success"] is True, data
+        assert data["property"]["tags"] == "电梯房,南北通透", data["property"].get("tags")
+
+    def test_tags_comma_string_unchanged(self, tmp_path, monkeypatch):
+        registry = _registry(tmp_path, monkeypatch)
+        pid = _add(registry, title="改标签 2号楼202")["property"]["id"]
+        data = self._update(registry, pid, tags="电梯房,南北通透")
+        assert data["property"]["tags"] == "电梯房,南北通透", data["property"].get("tags")
+
+    def test_empty_tags_array_keeps_missing(self, tmp_path, monkeypatch):
+        """空数组＝没给（按"未填"处理，不写空串）"""
+        registry = _registry(tmp_path, monkeypatch)
+        pid = _add(registry, title="改标签 2号楼203")["property"]["id"]
+        data = self._update(registry, pid, tags=[])
+        assert data["success"] is True, data
+        assert data["property"]["tags"] is None, data["property"].get("tags")
+
+
 class TestAddPropertyAcceptsArrays:
     """数组写法不许崩（原先 image_paths/images 抛 AttributeError、tags 崩在数据库层）"""
 
