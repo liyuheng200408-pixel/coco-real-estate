@@ -356,14 +356,47 @@ def get_deal(deal_id: int, task_id: str = None) -> str:
     return json.dumps({"success": False, "error": "成交单不存在"}, ensure_ascii=False)
 
 
-def list_deals(stage: str = None, limit: int = _LIST_LIMIT_DEFAULT, task_id: str = None) -> str:
-    """列出成交单，可按阶段筛选"""
+def list_deals(stage: str = None, customer_id: int = None, limit: int = _LIST_LIMIT_DEFAULT,
+               task_id: str = None) -> str:
+    """列出成交单：默认最新登记优先，可按阶段（认中文）或某位客户筛选
+
+    返回 `count`(本次条数) / `total`(符合条件总数，SQL 聚合) / `truncated`，被截断时给一句说明；
+    空态分两种说法（库里还没有成交单 / 有成交单但筛选没命中）。
+    """
     limit = clamp_limit(limit, _LIST_LIMIT_DEFAULT, _LIST_LIMIT_MAX)
+    stage_value = None
+    if stage is not None:
+        stage_value, problem = norm_deal_stage(stage)
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
+    if customer_id is not None:
+        customer_id, problem = norm_id(customer_id, '客户编号', '，可在客户列表里查')
+        if problem:
+            return json.dumps({"success": False, "error": problem}, ensure_ascii=False)
     db = _get_db()
-    result = db.list_deals(stage=stage, limit=limit)
-    for d in result:
-        d['stage_label'] = STAGE_LABELS.get(d.get('stage'), d.get('stage'))
-    return json.dumps({"success": True, "deals": result, "count": len(result)}, ensure_ascii=False)
+    if customer_id is not None and not db.get_customer(customer_id):
+        return json.dumps({"success": False, "error": (
+            f"客户不存在：编号 {customer_id} 没找到这位客户，先在客户列表里核对一下编号")},
+            ensure_ascii=False)
+    rows, total = db.list_deals(stage=stage_value, customer_id=customer_id, limit=limit,
+                                with_total=True)
+    deals = [_deal_display(d) for d in rows]
+    payload = {"success": True, "deals": deals, "count": len(deals), "total": total,
+               "truncated": bool(total and total > len(deals))}
+    if not total:
+        if customer_id is not None and stage_value is not None:
+            payload["message"] = f"这位客户没有「{STAGE_LABELS[stage_value]}」阶段的成交单"
+        elif customer_id is not None:
+            payload["message"] = "这位客户还没有成交单"
+        elif stage_value is not None:
+            _, all_total = db.list_deals(limit=1, with_total=True)
+            payload["message"] = (f"没有「{STAGE_LABELS[stage_value]}」阶段的成交单"
+                                  f"（库里共 {all_total} 单）")
+        else:
+            payload["message"] = "还没有任何成交单，开单后这里就能看到"
+    elif payload["truncated"]:
+        payload["message"] = f"共 {total} 单成交，这里列最近 {len(deals)} 单（要我多列就说一声）"
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def deal_stats(task_id: str = None) -> str:
@@ -435,10 +468,14 @@ registry.register(
 registry.register(
     name="list_deals",
     toolset="real_estate",
-    schema={"name": "list_deals", "description": "列出成交单，可按阶段筛选", "parameters": {
+    schema={"name": "list_deals", "description": (
+        "列出成交单（默认最新登记优先；默认列 20 条、最多 200 条），可按阶段筛选（认中文，如「签约」）"
+        "或只看某位客户的成交单。返回 total=符合条件的总数、count=本次返回条数、truncated；"
+        "被截断时会说明。想更快推进某单，用推进交易阶段。"), "parameters": {
         "type": "object",
         "properties": {
-            "stage": {"type": "string", "enum": STAGES, "description": "阶段筛选"},
+            "stage": {"type": "string", "enum": STAGES, "description": "阶段筛选：认中文说法（签约/贷款审批/过户/交房完成），也认英文值"},
+            "customer_id": {"type": "integer", "description": "只看这位客户的成交单（可单独用，也可与阶段叠加）"},
             "limit": {"type": "integer", "description": "返回条数（默认 20，最多 200；传 0/负数/非数字按默认 20）"},
         },
     }},

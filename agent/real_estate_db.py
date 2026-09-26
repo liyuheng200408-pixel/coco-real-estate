@@ -3476,12 +3476,23 @@ class RealEstateDB:
             d = s.query(Deal).get(did)
             return d.to_dict() if d else None
 
-    def list_deals(self, stage=None, customer_id=None, limit=50):
+    def list_deals(self, stage=None, customer_id=None, limit=50, with_total=False):
+        """成交单列表（按登记时间倒序，最新在前）
+
+        `with_total=True` 时返回 (本页明细, 符合条件总数) —— 总数走 SQL 聚合，别拿本页条数当总数（2026-09-26 F226）。
+        `customer_name`/`property_title` 走**一次联表**取回：原先每条各懒加载一次客户与房源
+        （20 条 = 41 次查询，实测 F229），联表后与条数无关。
+        """
+        from sqlalchemy.orm import joinedload
         with self.get_session() as s:
-            q = s.query(Deal)
+            q = (s.query(Deal)
+                 .options(joinedload(Deal.customer), joinedload(Deal.property)))
             if stage: q = q.filter(Deal.stage == stage)
             if customer_id: q = q.filter(Deal.customer_id == customer_id)
-            return [d.to_dict() for d in q.order_by(Deal.created_at.desc()).limit(limit).all()]
+            total = q.count() if with_total else None
+            rows = [d.to_dict() for d in
+                    q.order_by(Deal.created_at.desc(), Deal.id.desc()).limit(limit).all()]
+            return (rows, total) if with_total else rows
 
     def deal_stats(self):
         """成交统计：各阶段数量"""
