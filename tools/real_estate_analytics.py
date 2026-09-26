@@ -4,7 +4,15 @@ Coco 房产工具 - 数据分析
 """
 import json
 from datetime import datetime, timedelta
+
+from agent.real_estate_period import norm_period, period_window
 from tools.registry import registry
+
+# 业绩看板的四个档（口径与经营报告同一处：`agent/real_estate_period.py` 的滚动窗口）
+_DASH_PERIOD_ALLOWED = ("week", "month", "quarter", "year")
+_DASH_PERIOD_NAMES = {"week": "本周", "month": "本月", "quarter": "本季度", "year": "今年"}
+_DASH_PERIOD_HINT = "周期只认「本周」「本月」「本季度」「今年」（也可以说 近 7 天 / 近 30 天 / 近 90 天 / 近 365 天）"
+OVERDUE_SHOW = 5        # 看板里最多列 5 位逾期客户，超出要说清共几位
 
 
 def _get_db():
@@ -16,24 +24,54 @@ def performance_dashboard(
     period: str = "month",
     task_id: str = None,
 ) -> str:
+    """业绩看板：客户/房源的时点数据 + 本期（近 N 天）进展 + 逾期跟进
+
+    2026-09-26 改（F346–F349）：`period` 此前**只被原样回显**、数字全是累计值（传 week 与传 year
+    的结果一模一样），经纪人传「本季度」会以为拿到季度业绩 → 现在四个档**真的统计**
+    （滚动窗口：近 7 / 30 / 90 / 365 天，口径在 `agent/real_estate_period.py` 一处），
+    并在 `本周期` 里写明区间；逾期客户给**客户名与等级**、只列最急的 5 位并说清共几位；
+    空库给空态说法；补一句中文 `message`（键名沿用中文，见 HANDOFF 第 35 条「能中文就中文」）。
     """
-    业绩看板
-    
-    参数:
-        period: 统计周期 (week/month/quarter/year)
-    """
+    key, hint = norm_period(period, allowed=_DASH_PERIOD_ALLOWED, hint=_DASH_PERIOD_HINT)
+    if hint:
+        return json.dumps({"success": False, "error": hint}, ensure_ascii=False)
+    period_name = _DASH_PERIOD_NAMES[key]
+    start, range_text, span_label = period_window(key)
+
     db = _get_db()
     stats = db.get_stats()
-    
+
     # 获取各等级客户数
     tier_counts = stats.get('tier_counts', {})
-    
-    # 获取逾期跟进
+
+    # 获取逾期跟进（每客户只看最新一条人为跟进是否过期；本工具只读，不降级）
     overdue = db.get_overdue()
-    
+    labels = db.get_customer_labels([f.get('customer_id') for f in overdue])
+
+    warnings = []
+    try:
+        period_stats = db.period_stats(start)
+    except Exception as exc:
+        period_stats = {}
+        warnings.append(f"本期数据这次没取到（{type(exc).__name__}）")
+
+    total_customers = stats.get('total_customers', 0)
+    closed_customers = stats.get('closed_customers', 0)
+    no_customers = total_customers + closed_customers == 0
+
+    shown = overdue[:OVERDUE_SHOW]
+    overdue_rows = []
+    for f in shown:
+        cid = f.get('customer_id')
+        label = labels.get(cid) or {}
+        who = label.get('name') or f"已删除客户（id={cid}）"
+        tier = f"{label.get('tier')}级" if label.get('tier') else ''
+        overdue_rows.append(f"{who}（{tier}）" if tier else who)
+
     result = {
-        "统计周期": period,
-        "客户总数": stats.get('total_customers', 0),
+        "统计周期": period_name,
+        "本周期": f"{span_label}（{range_text}）",
+        "客户总数": total_customers,
         "各等级客户": {
             "S级（高意向）": tier_counts.get('S', 0),
             "A级（有需求）": tier_counts.get('A', 0),
@@ -42,21 +80,58 @@ def performance_dashboard(
         },
         "在售房源": stats.get('available_properties', 0),
         "逾期跟进": len(overdue),
-        "逾期客户": [f"客户ID:{f['customer_id']}" for f in overdue[:5]],
+        "逾期客户": overdue_rows,
     }
-    
-    return json.dumps({"success": True, "dashboard": result}, ensure_ascii=False)
+    if period_stats:
+        result["本期新增客户"] = period_stats.get('new_customers', 0)
+        result["本期新增房源"] = period_stats.get('new_properties', 0)
+        result["本期完成带看"] = period_stats.get('viewings_done', 0)
+        result["本期新开成交单"] = period_stats.get('new_deals', 0)
+
+    # 给经纪人看的那句话：全中文，替他把口径与"这里只列了几位"说清
+    if no_customers:
+        result["说明"] = "库里还没有客户，先登记客户再看数据"
+        message = "库里还没有客户，先登记客户再看数据"
+    else:
+        parts = [f"{period_name}（{span_label}：{range_text}）",
+                 f"在跟客户 {total_customers} 位（S级 {tier_counts.get('S', 0)} / "
+                 f"A级 {tier_counts.get('A', 0)} / B级 {tier_counts.get('B', 0)} / "
+                 f"C级 {tier_counts.get('C', 0)}），在售房源 {stats.get('available_properties', 0)} 套"]
+        if period_stats:
+            parts.append(f"本期新增客户 {period_stats.get('new_customers', 0)} 位、"
+                         f"新增房源 {period_stats.get('new_properties', 0)} 套、"
+                         f"完成带看 {period_stats.get('viewings_done', 0)} 次、"
+                         f"新开成交单 {period_stats.get('new_deals', 0)} 单")
+        if not overdue:
+            result["逾期客户说明"] = "暂无逾期跟进"
+            parts.append("暂无逾期跟进")
+        elif len(overdue) > OVERDUE_SHOW:
+            result["逾期客户说明"] = f"这里列逾期最久的 {OVERDUE_SHOW} 位，共 {len(overdue)} 位"
+            parts.append(f"逾期跟进 {len(overdue)} 位（这里列逾期最久的 {OVERDUE_SHOW} 位）")
+        else:
+            result["逾期客户说明"] = f"共 {len(overdue)} 位逾期，已全部列出"
+            parts.append(f"逾期跟进 {len(overdue)} 位")
+        message = "；".join(parts) + "。"
+
+    out = {"success": True, "dashboard": result, "message": message}
+    if warnings:
+        out["warnings"] = warnings
+        out["message"] = message + "（本期数据这次没取到，稍后我可以再试一次）"
+    return json.dumps(out, ensure_ascii=False)
 
 
 registry.register(
     name="performance_dashboard",
     toolset="real_estate",
-    schema={"name": "performance_dashboard", "description": "业绩看板（客户统计、房源统计）", "parameters": {
-        "type": "object",
-        "properties": {
-            "period": {"type": "string", "enum": ["week", "month", "quarter", "year"], "description": "统计周期"},
-        },
-    }},
+    schema={"name": "performance_dashboard",
+            "description": "业绩看板：客户与房源的时点数据（在跟客户、各等级、在售房源）+ 本期（近 N 天）新增客户/新增房源/完成带看/新开成交单 + 逾期跟进数与最急的几条",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "enum": ["week", "month", "quarter", "year"],
+                               "description": "统计周期：本周（近 7 天）/本月（近 30 天）/本季度（近 90 天）/今年（近 365 天），默认本月"},
+                },
+            }},
     handler=lambda args, **kw: performance_dashboard(**args),
 )
 
