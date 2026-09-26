@@ -3731,6 +3731,26 @@ class RealEstateDB:
                         'created_at': sc.created_at.isoformat() if sc.created_at else None}
             return None
 
+    def update_script(self, sid, name=None, content=None, scenario=None):
+        """改一条话术（只改给进来的字段）→ 更新后的 dict；找不到返回 None
+
+        覆盖同名话术走这里，**编号不变**（删了重建会换编号，别的引用就断了）。
+        """
+        with self.get_session() as s:
+            sc = s.query(Script).get(sid)
+            if not sc:
+                return None
+            if name is not None:
+                sc.name = name
+            if content is not None:
+                sc.content = content
+            if scenario is not None:
+                sc.scenario = scenario
+            s.commit(); s.refresh(sc)
+            return {'id': sc.id, 'name': sc.name, 'scenario': sc.scenario,
+                    'content': sc.content,
+                    'created_at': sc.created_at.isoformat() if sc.created_at else None}
+
     def delete_script(self, sid):
         with self.get_session() as s:
             sc = s.query(Script).get(sid)
