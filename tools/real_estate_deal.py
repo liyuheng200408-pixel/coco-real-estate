@@ -400,11 +400,25 @@ def list_deals(stage: str = None, customer_id: int = None, limit: int = _LIST_LI
 
 
 def deal_stats(task_id: str = None) -> str:
-    """成交统计：各阶段数量、总成交数"""
+    """成交统计：按当前阶段数各有多少单（含还在推进中的单）
+
+    字段键不变（`total_deals`/`stages`/`finalized`/`stage_labels`，经营报告在读），只是补一句
+    把口径说清的话：`total_deals` 是**登记在册**的成交单总数（含还在推进中的），不是"已交房完成"的套数
+    （那看 `finalized`）。空库与有数据分开说。
+    """
     db = _get_db()
     stats = db.deal_stats()
     stats['stage_labels'] = STAGE_LABELS
-    return json.dumps({"success": True, "stats": stats}, ensure_ascii=False)
+    payload = {"success": True, "stats": stats}
+    stages = stats.get('stages') or {}
+    if not stats.get('total_deals'):
+        payload["message"] = "库里还没有成交单，开单后这里就能看到"
+    else:
+        parts = '、'.join(f'{STAGE_LABELS[s]} {stages.get(s, 0)}' for s in STAGES)
+        payload["message"] = (f"当前共 {stats['total_deals']} 单登记在册（{parts}）；"
+                              f"其中已交房完成 {stats.get('finalized', 0)} 单。"
+                              f"这里的「成交总数」指登记在册的成交单，含还在推进中的。")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 registry.register(
@@ -485,7 +499,10 @@ registry.register(
 registry.register(
     name="deal_stats",
     toolset="real_estate",
-    schema={"name": "deal_stats", "description": "成交统计：各阶段数量、总成交数", "parameters": {
+    schema={"name": "deal_stats", "description": (
+        "成交统计：按当前阶段数各有多少单（意向金/定金 → 签约 → 贷款审批 → 过户 → 交房完成）。"
+        "total_deals 是登记在册的成交单总数（含还在推进中的，不等于已结单数），「已交房完成」看 finalized；"
+        "阶段中文名在 stage_labels 里。想看具体单子用成交列表。"), "parameters": {
         "type": "object",
         "properties": {},
     }},
