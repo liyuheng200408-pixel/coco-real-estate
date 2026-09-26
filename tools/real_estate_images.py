@@ -13,6 +13,7 @@ import os
 
 from tools.registry import registry
 from agent.real_estate_input import as_comma_text, norm_id
+from agent.real_estate_media import archive_images
 from tools.real_estate_property import _STATUS_LABELS, unavailable_property_note
 
 
@@ -47,6 +48,11 @@ def add_property_images(property_id: int, images: str, task_id: str = None) -> s
         return json.dumps({"success": False, "error": (
             "没说要加哪些图：把图片路径或链接给我（多个用逗号分隔；一串路径直接发给我也行）")},
             ensure_ascii=False)
+    # 「本机没找到」按**归档前**的原始路径判断（归档会换路径，之后的路径一定存在，会漏掉这条提示）
+    missing = [i for i in incoming if '://' not in i and not os.path.exists(i)]
+    # 照片先归档再入库：网关缓存目录里的文件 24 小时后会被自动清理（见 agent/real_estate_media.py）
+    incoming, _archive = archive_images(','.join(incoming))
+    incoming = _split_images(incoming)
     db = _get_db()
     p = db.get_property(property_id)          # 已售/已租也要能加（资料补录）
     if p is None:
@@ -63,7 +69,6 @@ def add_property_images(property_id: int, images: str, task_id: str = None) -> s
     result = db.update_property(property_id, images=','.join(merged)) if added else p
 
     warnings = _status_warning(p)
-    missing = [i for i in added if '://' not in i and not os.path.exists(i)]
     if missing:
         shown = '、'.join(missing[:3]) + ('…' if len(missing) > 3 else '')
         warnings.append(f"这些本地文件我在本机没找到：{shown}（图片链接不受影响；"

@@ -44,6 +44,16 @@ def _img(name):
     return os.path.join(PHOTO_DIR, name)
 
 
+def _archived(name):
+    """入库存的是**归档后**的路径：照片进库前会被复制进归档目录（网关缓存目录 24 小时后会自动清理，
+    见 agent/real_estate_media.py）—— 按原文件主体名找回回归档副本，断言口径仍是「读写同源的这张照片」"""
+    from agent.real_estate_media import images_archive_dir
+
+    hits = sorted(images_archive_dir().glob(f"{os.path.splitext(name)[0]}_*"))
+    assert hits, f"归档目录里没有 {name} 对应的照片：{images_archive_dir()}"
+    return str(hits[0])
+
+
 def _mk(db, **kw):
     data = dict(title="图片小区 1号楼101", community="图片小区", district="朝阳区",
                 price=1_000_000, area=80.0, status="available", property_type="second_hand")
@@ -57,7 +67,7 @@ def test_lists_images_with_count_and_message(wired):
     _add(pid, f"{_img('a.jpg')},{_img('b.jpg')}")
     out = _list(pid)
     assert out["success"] is True, out
-    assert out["images"] == [_img("a.jpg"), _img("b.jpg")], out
+    assert out["images"] == [_archived("a.jpg"), _archived("b.jpg")], out
     assert out["count"] == 2, out
     assert "有 2 张图片" in out["message"], out
     assert "MEDIA" in out["message"], out
@@ -124,7 +134,7 @@ def test_write_then_read_roundtrip(wired):
     _add(pid, [_img("a.jpg"), _img("b.jpg")])
     _add(pid, _img("c.jpg"))
     out = _list(pid)
-    assert out["images"] == [_img("a.jpg"), _img("b.jpg"), _img("c.jpg")], out
+    assert out["images"] == [_archived("a.jpg"), _archived("b.jpg"), _archived("c.jpg")], out
     detail = wired.get_property(pid)
     assert detail["images"] == ",".join(out["images"]), (detail["images"], out["images"])
 

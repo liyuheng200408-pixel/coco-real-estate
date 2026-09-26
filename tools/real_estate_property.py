@@ -10,6 +10,7 @@ from agent.real_estate_money import (fmt_budget, fmt_delta, fmt_price, fmt_unit_
                                      fmt_wan)
 from agent.real_estate_input import (as_comma_text, clamp_limit, cn_number, norm_customer_type,
                                      norm_date, norm_id, norm_money)
+from agent.real_estate_media import archive_images
 from tools.registry import registry
 
 
@@ -95,7 +96,8 @@ def add_property(
     for src in (images, image_paths):
         if src:
             img_list.extend([x.strip() for x in src.split(',') if x.strip()])
-    merged_images = ','.join(img_list) if img_list else None
+    # 照片先归档再入库：网关缓存目录里的文件 24 小时后会被自动清理（见 agent/real_estate_media.py）
+    merged_images, image_archive = archive_images(','.join(img_list) if img_list else None)
     inferred = {}
     if floor is None:
         guess, why = infer_floor(title, address)
@@ -176,6 +178,9 @@ def add_property(
     if normalized:
         response["normalized"] = normalized
         response["note_normalized"] = "上面这些值是我按经纪人的说法换算/归一的，请如实转述并请他核对"
+    # 归档明细只在「有照片没归档成功」时给：缺文件/复制失败都要让上层能如实说明，不静默
+    if image_archive["missing"] or image_archive["failed"]:
+        response["image_archive"] = image_archive
     if owner_warning:
         response["warning_owner"] = owner_warning
     if match_warning:

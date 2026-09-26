@@ -41,6 +41,16 @@ def _img(name):
     return os.path.join(PHOTO_DIR, name)
 
 
+def _archived(name):
+    """入库的是**归档后**的路径：照片进库前会被复制进归档目录（网关缓存目录 24 小时后会自动清理，见
+    agent/real_estate_media.py）—— 这里按原文件主体名找回归档副本，断言口径仍是「存的是这张照片」"""
+    from agent.real_estate_media import images_archive_dir
+
+    hits = sorted(images_archive_dir().glob(f"{os.path.splitext(name)[0]}_*"))
+    assert hits, f"归档目录里没有 {name} 对应的照片：{images_archive_dir()}"
+    return str(hits[0])
+
+
 def _mk(db, **kw):
     data = dict(title="图片小区 1号楼101", community="图片小区", district="朝阳区",
                 price=1_000_000, area=80.0, status="available", property_type="second_hand")
@@ -89,14 +99,14 @@ def test_images_accepts_array(wired):
     pid = _mk(wired)
     out = _add(property_id=pid, images=[_img("a.jpg"), _img("b.jpg")])
     assert out["success"] is True and out["added_count"] == 2, out
-    assert out["property"]["images"] == f"{_img('a.jpg')},{_img('b.jpg')}", out["property"]["images"]
+    assert out["property"]["images"] == f"{_archived('a.jpg')},{_archived('b.jpg')}", out["property"]["images"]
 
 
 def test_images_array_elements_trimmed_and_empties_dropped(wired):
     pid = _mk(wired)
     out = _add(property_id=pid, images=[f" {_img('a.jpg')} ", "", "   "])
     assert out["added_count"] == 1, out
-    assert out["property"]["images"] == _img("a.jpg"), out["property"]["images"]
+    assert out["property"]["images"] == _archived("a.jpg"), out["property"]["images"]
 
 
 # ---------- ④ 已售/已租也能加 ----------
@@ -139,7 +149,7 @@ def test_only_target_row_changes(wired):
     _add(property_id=pid, images=_img("a.jpg"))
     after = wired.get_property(other)["images"]
     assert before == after, (before, after)
-    assert wired.get_property(pid)["images"] == _img("a.jpg")
+    assert wired.get_property(pid)["images"] == _archived("a.jpg")
 
 
 def test_description_and_params_are_documented():

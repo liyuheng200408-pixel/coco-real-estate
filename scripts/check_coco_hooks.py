@@ -465,6 +465,7 @@ PATH_CHECKS = [
     ("A25", "卸载脚本", "scripts/uninstall.sh", "file", 1, "卸载脚本丢失（正式版实例没有卸载通道，只能重装系统）"),
     ("A26", "PATH 兜底脚本", "scripts/path_guard.sh", "file", 1, "PATH 兜底脚本丢失（coco 入口装到 ~/.local/bin 时用户会敲不到命令）"),
     ("A27", "定时任务脚本", "scripts/coco_cron_*.py", "glob", 5, "定时任务脚本丢失（逾期哨兵/机会提醒/早报/收工小结/周报的数据收集都在这里）"),
+    ("A28", "照片归档共用件", "agent/real_estate_media.py", "file", 1, "照片归档共用件丢失（房源照片会留在会被 24 小时清理的缓存目录里，一天后消失）"),
                     ]
 
 
